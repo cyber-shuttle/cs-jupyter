@@ -1,5 +1,6 @@
 import { PageConfig } from "@jupyterlab/coreutils";
 import { assertSecureOrLoopback, isPlainObject } from "./Common";
+import { element } from "./dom";
 
 const MAX_BROKER_BODY = 64 * 1024;
 const BROKER_REQUEST_TIMEOUT_MS = 15 * 1000;
@@ -54,6 +55,10 @@ interface TokenResult extends OAuthCredentials {
 }
 
 const SESSION_KEY = "cybershuttle.oauth.v1";
+
+const COPY_GLYPH = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.2"><rect x="5.6" y="5.6" width="8" height="8" rx="1.4" /><path d="M10.9 5.6V3.9a1.4 1.4 0 0 0-1.4-1.4H3.9a1.4 1.4 0 0 0-1.4 1.4v5.6a1.4 1.4 0 0 0 1.4 1.4h1.7" /></g></svg>`;
+const CHECK_GLYPH = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m3.4 8.4 3 3 6.2-6.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
+const CLOSE_GLYPH = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /></svg>`;
 
 // The header names who is signed in. The claim is read for display only; the
 // control plane still validates the token it is carved from, so nothing here
@@ -551,42 +556,78 @@ function showDeviceCodeModal(
   code.className = "csDeviceCode";
   code.textContent = authorization.userCode;
   code.setAttribute("aria-label", `Device code ${authorization.userCode}`);
-  const status = document.createElement("span");
-  status.className = "csDeviceCodeStatus";
-  status.setAttribute("role", "status");
-  status.setAttribute("aria-live", "polite");
+
+  // The copy control answers in place: a checkmark where the icon was says the
+  // code is on the clipboard without a line of prose that outlives its moment.
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.className = "csDeviceCodeCopy";
+  copy.title = "Copy code";
+  copy.setAttribute("aria-label", "Copy code");
+  copy.innerHTML = COPY_GLYPH;
+  // The label and the tooltip say the same thing, so a failed attempt cannot
+  // leave a stale explanation behind a later success.
+  const describeCopy = (text: string): void => {
+    copy.title = text;
+    copy.setAttribute("aria-label", text);
+  };
+  let copyReset: ReturnType<typeof setTimeout> | undefined;
+  copy.onclick = async () => {
+    clearTimeout(copyReset);
+    try {
+      await navigator.clipboard.writeText(authorization.userCode);
+      copy.innerHTML = CHECK_GLYPH;
+      copy.classList.add("csDeviceCodeCopied");
+      describeCopy("Code copied");
+      copyReset = setTimeout(() => {
+        copy.innerHTML = COPY_GLYPH;
+        copy.classList.remove("csDeviceCodeCopied");
+        describeCopy("Copy code");
+      }, 2000);
+    } catch {
+      copy.innerHTML = COPY_GLYPH;
+      copy.classList.remove("csDeviceCodeCopied");
+      describeCopy("Could not copy the code");
+    }
+  };
+  const codeRow = document.createElement("div");
+  codeRow.className = "csDeviceCodeRow";
+  codeRow.append(code, copy);
+
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "csDeviceCodeClose";
+  close.title = "Close";
+  close.setAttribute("aria-label", "Close");
+  close.innerHTML = CLOSE_GLYPH;
+  close.onclick = cancel;
+
   const actions = document.createElement("div");
   actions.className = "csDeviceCodeActions";
   const open = document.createElement("a");
-  open.className = "jp-mod-accept jp-Button";
+  open.className = "csPrimaryButton csDeviceCodeOpen";
   open.href = authorization.verificationUri;
   open.target = "_blank";
   open.rel = "noopener noreferrer";
   open.referrerPolicy = "no-referrer";
   open.textContent = "Open sign-in page";
-  const copy = document.createElement("button");
-  copy.type = "button";
-  copy.className = "jp-Button";
-  copy.textContent = "Copy code";
-  copy.onclick = async () => {
-    try {
-      await navigator.clipboard.writeText(authorization.userCode);
-      status.textContent = "Code copied.";
-    } catch {
-      status.textContent = "Could not copy the code.";
-    }
+  // Once the page is open the answer arrives on the other device, so the button
+  // stops inviting a second click and reports what it is now doing.
+  open.onclick = () => {
+    open.classList.add("csDeviceCodeWaiting");
+    open.textContent = "";
+    open.append(
+      element("span", "", "csSpinner"),
+      document.createTextNode("Waiting…"),
+    );
   };
-  const cancelButton = document.createElement("button");
-  cancelButton.type = "button";
-  cancelButton.className = "jp-Button";
-  cancelButton.textContent = "Cancel";
-  cancelButton.onclick = cancel;
-  actions.append(open, copy, cancelButton);
-  dialog.append(title, instructions, code, status, actions);
+  actions.appendChild(open);
+
+  dialog.append(close, title, instructions, codeRow, actions);
   overlay.appendChild(dialog);
   document.body.appendChild(overlay);
 
-  const focusable = [open, copy, cancelButton];
+  const focusable = [open, copy, close];
   const onKeyDown = (event: KeyboardEvent): void => {
     if (event.key === "Escape") {
       event.preventDefault();

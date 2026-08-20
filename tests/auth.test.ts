@@ -178,15 +178,26 @@ describe("AuthClient device-code broker flow", () => {
     expect(open.rel).toContain("noopener");
     expect(document.activeElement).toBe(open);
 
-    const copy = [...dialog.querySelectorAll("button")].find(
-      (button) => button.textContent === "Copy code",
-    )!;
+    // Opening the page moves the answer to the other device, so the button
+    // reports waiting instead of inviting a second click.
+    open.click();
+    expect(open.textContent).toContain("Waiting");
+    expect(open.querySelector(".csSpinner")).not.toBeNull();
+
+    const copy = dialog.querySelector<HTMLButtonElement>(".csDeviceCodeCopy")!;
+    expect(copy.getAttribute("aria-label")).toBe("Copy code");
     copy.click();
     await vi.waitFor(() => expect(clipboard).toHaveBeenCalledWith("ABCD-EFGH"));
-    const cancel = [...dialog.querySelectorAll("button")].find(
-      (button) => button.textContent === "Cancel",
-    )!;
-    cancel.click();
+    await vi.waitFor(() =>
+      expect(copy.getAttribute("aria-label")).toBe("Code copied"),
+    );
+    expect(copy.classList.contains("csDeviceCodeCopied")).toBe(true);
+    expect(dialog.textContent).not.toContain("Code copied.");
+
+    const close =
+      dialog.querySelector<HTMLButtonElement>(".csDeviceCodeClose")!;
+    expect(close.getAttribute("aria-label")).toBe("Close");
+    close.click();
     await expect(login).rejects.toBeInstanceOf(AuthInteractionCancelledError);
     expect(observedSignal?.aborted).toBe(true);
     expect(document.querySelector('[role="dialog"]')).toBeNull();

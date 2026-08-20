@@ -14,6 +14,7 @@
 }
 
 .csDeviceCodeDialog {
+  position: relative;
   box-sizing: border-box;
   width: min(100%, 480px);
   padding: 24px;
@@ -31,18 +32,66 @@
 }
 
 .csDeviceCode {
-  display: block;
-  margin: 20px 0;
   font-size: 1.5rem;
   font-weight: 700;
   letter-spacing: 0.12em;
-  text-align: center;
 }
 
-.csDeviceCodeStatus {
-  display: block;
-  min-height: 1.4em;
+/* The code and the control that copies it are one thing, so they sit together
+   rather than the code centring alone above a button. */
+.csDeviceCodeRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  margin: 20px 0;
+}
+
+.csDeviceCodeCopy,
+.csDeviceCodeClose {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
   color: var(--jp-ui-font-color2);
+  cursor: pointer;
+}
+
+.csDeviceCodeCopy svg,
+.csDeviceCodeClose svg {
+  width: 18px;
+  height: 18px;
+}
+
+.csDeviceCodeCopy:hover,
+.csDeviceCodeCopy:focus-visible,
+.csDeviceCodeClose:hover,
+.csDeviceCodeClose:focus-visible {
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+}
+
+.csDeviceCodeCopied,
+.csDeviceCodeCopied:hover {
+  color: var(--jp-success-color1);
+}
+
+.csDeviceCodeClose {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+}
+
+.csDeviceCodeOpen {
+  gap: 8px;
+}
+
+.csDeviceCodeWaiting {
+  pointer-events: none;
+  opacity: 0.75;
 }
 
 .csDeviceCodeActions {
@@ -186,12 +235,14 @@
   text-align: center;
 }
 
+/* Matches the box and contrast JupyterLab gives its own section icons. */
 .csRuntimeSectionRack {
   flex: 0 0 auto;
-  width: 20px;
-  height: 20px;
-  margin-right: 8px;
-  color: var(--jp-ui-font-color3);
+  box-sizing: border-box;
+  width: 32px;
+  height: 32px;
+  margin-right: 12px;
+  color: var(--jp-ui-font-color1);
 }
 
 .csRuntimeSectionRack svg {
@@ -215,10 +266,13 @@
 .csRuntimeCardIdentity {
   display: flex;
   flex-direction: column;
+  line-height: 1.2;
 }
 
 .csRuntimeCardAccount {
   overflow: hidden;
+  margin: 0;
+  line-height: 1.2;
   color: var(--jp-ui-font-color3);
   font-size: var(--jp-ui-font-size0);
   text-overflow: ellipsis;
@@ -323,9 +377,9 @@
    this div replaces. */
 .csRuntimeSectionIcon {
   flex: 0 0 auto;
-  width: 20px;
-  height: 20px;
-  margin-right: 8px;
+  width: 32px;
+  height: 32px;
+  margin-right: 12px;
   background-image: url("images/csbridge.png");
   background-repeat: no-repeat;
   background-position: center;
