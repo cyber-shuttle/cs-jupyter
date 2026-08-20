@@ -62,6 +62,7 @@ export interface ITokenProvider {
 
 export interface IControlAuth extends ITokenProvider {
   interactiveLogin(): Promise<OAuthCredentials>;
+  readonly account?: string | undefined;
 }
 
 export class ControlError extends Error {
@@ -145,6 +146,14 @@ export class ControlClient {
   // resumable session from one that needs the device-code round trip.
   async resumeSession(): Promise<void> {
     await this._auth.acquireToken();
+  }
+
+  get account(): string | undefined {
+    return this._auth.account;
+  }
+
+  signOut(): void {
+    this._auth.invalidateToken?.();
   }
 
   async listSshHosts(): Promise<ISshHost[]> {

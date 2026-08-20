@@ -131,8 +131,72 @@
   width: 100%;
 }
 
-.csRuntimeLauncherHeader .csTextButton {
+.csRuntimeLauncherHeader .csIdentity,
+.jp-Launcher-sectionHeader .csSshHostsButton {
   margin-left: auto;
+}
+
+/* The account menu hangs off the header, so the holder is its positioning
+   context rather than the launcher body. */
+.csIdentity {
+  position: relative;
+}
+
+.csAccountButton {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.csAccountMenu {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 160px;
+  padding: 4px;
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 6px;
+  background: var(--jp-layout-color1);
+  box-shadow: var(--jp-elevation-z4);
+}
+
+.csAccountMenuItem {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--jp-ui-font-color1);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.csAccountMenuItem:hover,
+.csAccountMenuItem:focus-visible {
+  background: var(--jp-layout-color2);
+}
+
+.csSignedOutNotice {
+  padding: 32px 12px;
+  color: var(--jp-ui-font-color2);
+  text-align: center;
+}
+
+.csRuntimeSectionRack {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin-right: 8px;
+  color: var(--jp-ui-font-color3);
+}
+
+.csRuntimeSectionRack svg {
+  width: 100%;
+  height: 100%;
 }
 
 .csRuntimeCard,

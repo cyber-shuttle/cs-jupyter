@@ -38,6 +38,7 @@ export interface IRuntimeUiState {
   readonly signedIn: boolean;
   readonly signingIn: boolean;
   readonly authRequired: boolean;
+  readonly account: string | undefined;
 }
 
 interface IJupyterOperation {
@@ -95,6 +96,7 @@ export class CyberShuttlePanel extends StackedPanel {
     this._list.createRequested.connect(() => void this.openCreate());
     this._list.sshHostsRequested.connect(() => void this.openSshHosts());
     this._list.signInRequested.connect(() => void this.signIn());
+    this._list.signOutRequested.connect(() => this.signOut());
     this._emitState();
     void this.resume();
   }
@@ -129,6 +131,7 @@ export class CyberShuttlePanel extends StackedPanel {
       signedIn: this._signedIn,
       signingIn: this._signingIn,
       authRequired: this._authRequired,
+      account: this._signedIn ? this._api.account : undefined,
     };
   }
 
@@ -361,6 +364,28 @@ export class CyberShuttlePanel extends StackedPanel {
         else this._setError(errorMessage(error));
       }
     }
+  }
+
+  // Signing out has to take the cached Jupyter credentials with it: they grant
+  // code execution on the allocation and would otherwise outlive the session
+  // that authorised them.
+  signOut(): void {
+    for (const runtime of this._runtimes) {
+      clearRuntimeAccess(runtime.id);
+    }
+    this._api.signOut();
+    this._stopPolling();
+    this._signedIn = false;
+    this._authRequired = false;
+    this._controlInitialized = false;
+    this._polled = false;
+    this._runtimes = [];
+    this._hosts = undefined;
+    this._logs = new Map();
+    this._jupyterReady = new Set();
+    this._updatesStatus = "";
+    this._error = "";
+    this._emitState();
   }
 
   private async _activateSession(): Promise<void> {

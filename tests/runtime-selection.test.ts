@@ -194,7 +194,7 @@ describe("serialized runtime selection", () => {
       [...panel.node.querySelectorAll("h2")].map((heading) =>
         heading.textContent?.trim(),
       ),
-    ).toEqual(["Cybershuttle", "Cybershuttle Runtimes"]);
+    ).toEqual(["Cybershuttle", "Runtimes"]);
     expect(
       panel.node.querySelector(
         ".jp-Launcher-body > .jp-Launcher-content > .jp-Launcher-section > .jp-Launcher-cardContainer",
@@ -484,5 +484,63 @@ describe("runtime card contract", () => {
     expect(card.textContent).not.toContain("Jupyter:");
     expect(card.querySelector(".csRuntimeCardIcon svg")).not.toBeNull();
     expect(list.node.querySelector(".csRuntimeSectionIcon")).not.toBeNull();
+  });
+});
+
+describe("identity control", () => {
+  it("offers sign in when signed out and hides the runtime cards behind a reason", () => {
+    const list = new RuntimeList();
+    const signIn = vi.fn();
+    list.signInRequested.connect(signIn);
+    list.setControllerState({
+      ...uiState({ runtimes: [first] }),
+      signedIn: false,
+    });
+    expect(list.node.textContent).toContain(
+      "Sign in to see your runtimes and SSH hosts.",
+    );
+    expect(list.node.querySelector(".csRuntimeAddCard")).toBeNull();
+    expect(list.node.querySelector(".csRuntimeCard")).toBeNull();
+    expect(list.node.querySelector(".csAccountButton")).toBeNull();
+    list.node.querySelector<HTMLButtonElement>(".csSignInButton")!.click();
+    expect(signIn).toHaveBeenCalledTimes(1);
+  });
+
+  it("names the account and keeps sign out behind its menu", () => {
+    const list = new RuntimeList();
+    const signOut = vi.fn();
+    list.signOutRequested.connect(signOut);
+    setRuntimes(list, [first]);
+    list.setControllerState({
+      ...uiState({ runtimes: [first] }),
+      signedIn: true,
+      account: "someone@gatech.edu",
+    });
+    const trigger =
+      list.node.querySelector<HTMLButtonElement>(".csAccountButton")!;
+    expect(trigger.textContent).toBe("someone@gatech.edu");
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(list.node.querySelector(".csAccountMenuItem")).toBeNull();
+
+    trigger.click();
+    const item =
+      list.node.querySelector<HTMLButtonElement>(".csAccountMenuItem")!;
+    expect(item.textContent).toBe("Sign out");
+    expect(
+      list.node
+        .querySelector(".csAccountButton")
+        ?.getAttribute("aria-expanded"),
+    ).toBe("true");
+    item.click();
+    expect(signOut).toHaveBeenCalledTimes(1);
+  });
+
+  it("puts SSH Hosts on the runtimes row, not the title row", () => {
+    const list = new RuntimeList();
+    setRuntimes(list, [first]);
+    const sshHosts = list.node.querySelector(".csSshHostsButton")!;
+    expect(sshHosts.closest("header")?.querySelector("h2")?.textContent).toBe(
+      "Runtimes",
+    );
   });
 });

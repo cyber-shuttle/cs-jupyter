@@ -18,6 +18,7 @@ export const emptyState = (): IRuntimeUiState => ({
   signedIn: false,
   signingIn: false,
   authRequired: false,
+  account: undefined,
 });
 
 export class RuntimeList extends Widget {
@@ -25,11 +26,13 @@ export class RuntimeList extends Widget {
   readonly createRequested = new Signal<this, void>(this);
   readonly sshHostsRequested = new Signal<this, void>(this);
   readonly signInRequested = new Signal<this, void>(this);
+  readonly signOutRequested = new Signal<this, void>(this);
 
   private _state = emptyState();
   private _currentRuntimeId: string | undefined;
   private _canCreate = false;
   private _createUnavailableReason = "";
+  private _accountMenuOpen = false;
 
   constructor() {
     super();
@@ -76,26 +79,11 @@ export class RuntimeList extends Widget {
     const title = document.createElement("h2");
     title.className = "jp-Launcher-sectionTitle";
     title.textContent = "Cybershuttle";
-    const actions = document.createElement("div");
-    const signIn = button(
-      this._state.signingIn
-        ? "Signing in…"
-        : this._state.authRequired
-          ? "Sign in"
-          : this._state.signedIn
-            ? "Signed in"
-            : "Sign in",
-      "csTextButton csSignInButton",
+    header.append(
+      element("div", "", "csRuntimeSectionIcon"),
+      title,
+      this._identityControl(),
     );
-    signIn.disabled =
-      this._state.signingIn ||
-      (this._state.signedIn && !this._state.authRequired);
-    signIn.onclick = () => this.signInRequested.emit(undefined);
-    const sshHosts = button("SSH Hosts", "csTextButton csSshHostsButton");
-    sshHosts.disabled = !this._state.signedIn || this._state.authRequired;
-    sshHosts.onclick = () => this.sshHostsRequested.emit(undefined);
-    actions.append(signIn, sshHosts);
-    header.append(title, actions);
     launcher.appendChild(header);
 
     const body = document.createElement("div");
@@ -108,10 +96,15 @@ export class RuntimeList extends Widget {
     sectionHeader.className = "jp-Launcher-sectionHeader";
     const sectionTitle = document.createElement("h2");
     sectionTitle.className = "jp-Launcher-sectionTitle";
-    sectionTitle.textContent = "Cybershuttle Runtimes";
+    sectionTitle.textContent = "Runtimes";
+    const sshHosts = button("SSH Hosts", "csTextButton csSshHostsButton");
+    sshHosts.dataset.runtimeAction = "ssh-hosts";
+    sshHosts.disabled = !this._state.signedIn || this._state.authRequired;
+    sshHosts.onclick = () => this.sshHostsRequested.emit(undefined);
     sectionHeader.append(
-      element("div", "", "jp-Launcher-sectionIcon csRuntimeSectionIcon"),
+      serverRackIcon("jp-Launcher-sectionIcon csRuntimeSectionRack"),
       sectionTitle,
+      sshHosts,
     );
     section.appendChild(sectionHeader);
 
@@ -133,6 +126,20 @@ export class RuntimeList extends Widget {
       status.className = "csStatus";
       status.textContent = "Loading runtimes…";
       section.appendChild(status);
+    }
+
+    if (!this._state.signedIn) {
+      section.appendChild(
+        element(
+          "div",
+          "Sign in to see your runtimes and SSH hosts.",
+          "csSignedOutNotice",
+        ),
+      );
+      content.appendChild(section);
+      body.appendChild(content);
+      launcher.appendChild(body);
+      return launcher;
     }
 
     const cards = document.createElement("div");
@@ -160,6 +167,49 @@ export class RuntimeList extends Widget {
     body.appendChild(content);
     launcher.appendChild(body);
     return launcher;
+  }
+
+  // Signed out this is one button; signed in it names the account and hides
+  // sign-out behind a menu, so leaving is deliberate rather than one stray click.
+  private _identityControl(): HTMLElement {
+    const holder = element("div", "", "csIdentity");
+    if (!this._state.signedIn) {
+      const signIn = button(
+        this._state.signingIn ? "Signing in…" : "Sign in",
+        "csTextButton csSignInButton",
+      );
+      signIn.dataset.runtimeAction = "sign-in";
+      signIn.disabled = this._state.signingIn;
+      signIn.onclick = () => this.signInRequested.emit(undefined);
+      holder.appendChild(signIn);
+      return holder;
+    }
+    const trigger = button(
+      this._state.account ?? "Account",
+      "csTextButton csAccountButton",
+    );
+    trigger.dataset.runtimeAction = "account";
+    trigger.setAttribute("aria-haspopup", "menu");
+    trigger.setAttribute("aria-expanded", String(this._accountMenuOpen));
+    trigger.onclick = () => {
+      this._accountMenuOpen = !this._accountMenuOpen;
+      this._render();
+    };
+    holder.appendChild(trigger);
+    if (this._accountMenuOpen) {
+      const menu = element("div", "", "csAccountMenu");
+      menu.setAttribute("role", "menu");
+      const signOut = button("Sign out", "csAccountMenuItem");
+      signOut.dataset.runtimeAction = "sign-out";
+      signOut.setAttribute("role", "menuitem");
+      signOut.onclick = () => {
+        this._accountMenuOpen = false;
+        this.signOutRequested.emit(undefined);
+      };
+      menu.appendChild(signOut);
+      holder.appendChild(menu);
+    }
+    return holder;
   }
 
   private _runtimeCard(runtime: IRuntime): HTMLButtonElement {
@@ -236,8 +286,10 @@ function runtimeResourceRow(runtime: IRuntime): HTMLElement {
 // JupyterLab ships no rack icon, so this is the smallest one that still reads
 // as a machine. Hairline strokes keep it as light as the glyphs beside it, and
 // currentColor keeps it correct in either theme.
-function serverRackIcon(): HTMLElement {
-  const icon = element("div", "", "jp-LauncherCard-icon csRuntimeCardIcon");
+function serverRackIcon(
+  className = "jp-LauncherCard-icon csRuntimeCardIcon",
+): HTMLElement {
+  const icon = element("div", "", className);
   icon.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
   <g fill="none" stroke="currentColor" stroke-width="1.1">
     <rect x="4.25" y="4.5" width="15.5" height="4.4" rx="1.2" />

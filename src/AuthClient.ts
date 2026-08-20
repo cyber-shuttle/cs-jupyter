@@ -55,6 +55,34 @@ interface TokenResult extends OAuthCredentials {
 
 const SESSION_KEY = "cybershuttle.oauth.v1";
 
+// The header names who is signed in. The claim is read for display only; the
+// control plane still validates the token it is carved from, so nothing here
+// depends on this being trustworthy.
+function accountFromIdToken(idToken: string): string | undefined {
+  const payload = idToken.split(".")[1];
+  if (!payload) {
+    return undefined;
+  }
+  try {
+    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const claims: unknown = JSON.parse(
+      atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, "=")),
+    );
+    if (!isPlainObject(claims)) {
+      return undefined;
+    }
+    for (const claim of ["preferred_username", "email", "upn"]) {
+      const value = claims[claim];
+      if (typeof value === "string" && value) {
+        return value;
+      }
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
 // Tokens survive a reload in per-tab session storage, never a URL and never a
 // log. Opening a runtime navigates the page, so a memory-only credential would
 // force a device-code round trip on every navigation.
@@ -121,6 +149,10 @@ export class AuthClient {
       this._credentials = stored.credentials;
       this._expiresAt = stored.expiresAt;
     }
+  }
+
+  get account(): string | undefined {
+    return this._credentials && accountFromIdToken(this._credentials.idToken);
   }
 
   async acquireToken(): Promise<OAuthCredentials> {
