@@ -196,11 +196,18 @@
 }
 
 .csRuntimeHeaderWidget {
+  /* The same ground the side rails stand on, so the row reads as chrome rather
+     than as the first thing in the scrolling content. */
+  background: var(--jp-layout-color2);
   overflow: visible;
 }
 
 .csRuntimeHeaderWidget .csRuntimeLauncherHeader {
-  /* The mark and the account sit the same distance from their own edges. */
+  /* The mark and the account sit the same distance from their own edges, and
+     each sits the same distance from the words beside it. One value, so the
+     two pairs cannot drift apart. */
+  --cs-mark-gap: 6px;
+
   padding: 0 12px;
   margin: 0;
 }
@@ -218,7 +225,7 @@
 
 .csIdentityButton {
   display: inline-flex;
-  gap: 6px;
+  gap: var(--cs-mark-gap, 6px);
   align-items: center;
 }
 
@@ -425,7 +432,7 @@
   box-sizing: border-box;
   width: 22px;
   height: 22px;
-  margin-right: 10px;
+  margin-right: var(--cs-mark-gap, 6px);
   background-image: url("images/csbridge.png");
   background-repeat: no-repeat;
   background-position: center;
