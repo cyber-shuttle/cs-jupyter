@@ -183,7 +183,7 @@ describe("runtime detail modal body", () => {
       [...detail.node.querySelectorAll("button")].map(
         (button) => button.textContent,
       ),
-    ).toEqual(["Stop", "Connect"]);
+    ).toEqual(["Stop", "Connect", "Delete"]);
     const output = detail.node.querySelector<HTMLElement>("[role=log]")!;
     expect(output.ariaLabel).toBe("Startup output for projects/logs");
     expect(
@@ -219,13 +219,15 @@ describe("runtime detail modal body", () => {
   });
 
   it.each([
-    ["SUBMITTING", ["Stop"]],
-    ["QUEUED", ["Stop"]],
-    ["STARTING", ["Stop"]],
-    ["READY", ["Stop", "Connect"]],
-    ["STOPPING", []],
-    ["STOPPED", ["Create like this"]],
-    ["FAILED", ["Create like this"]],
+    // Delete is offered in every state: a stuck allocation is exactly the one an
+    // owner most needs to remove.
+    ["SUBMITTING", ["Stop", "Delete"]],
+    ["QUEUED", ["Stop", "Delete"]],
+    ["STARTING", ["Stop", "Delete"]],
+    ["READY", ["Stop", "Connect", "Delete"]],
+    ["STOPPING", ["Delete"]],
+    ["STOPPED", ["Run again", "Delete"]],
+    ["FAILED", ["Run again", "Delete"]],
   ] as const)("gates %s actions", (state, expected) => {
     const { detail } = runtimeDetail(runtimeInState(state));
     expect(

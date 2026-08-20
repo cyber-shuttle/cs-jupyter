@@ -1,4 +1,4 @@
-import { Dialog } from "@jupyterlab/apputils";
+import { Dialog, showDialog } from "@jupyterlab/apputils";
 import { Signal } from "@lumino/signaling";
 import { StackedPanel, Widget } from "@lumino/widgets";
 import { AuthInteractionRequiredError } from "./AuthClient";
@@ -559,6 +559,44 @@ export class CyberShuttlePanel extends StackedPanel {
     this._setBusy(runtime.id, true);
     try {
       await this._api.stopRuntime(runtime.id);
+    } catch (error) {
+      this._setError(errorMessage(error));
+    } finally {
+      this._setBusy(runtime.id, false);
+    }
+  }
+
+  // Deleting a live allocation cancels its job, so the confirmation names what
+  // is actually lost rather than asking a generic "are you sure".
+  async remove(runtimeId: string): Promise<void> {
+    const runtime = this._selectedRuntime(runtimeId);
+    if (!runtime) {
+      return;
+    }
+    const live = !isTerminal(runtime.state);
+    // JupyterLab shows one dialog at a time, so a confirmation raised from the
+    // open detail modal would queue behind it and never reach the owner.
+    this._detailDialog?.resolve(0);
+    const confirmed = await showDialog({
+      title: "Delete runtime",
+      body: live
+        ? `${runtime.rootFolder} on ${runtime.sshHost} is ${runtime.state.toLowerCase()}. Deleting it cancels the Slurm job and removes the card.`
+        : `Remove ${runtime.rootFolder} on ${runtime.sshHost} from this list? Its allocation has already ended.`,
+      buttons: [
+        Dialog.cancelButton({ label: "Cancel" }),
+        Dialog.warnButton({ label: "Delete" }),
+      ],
+    });
+    if (!confirmed.button.accept || this.isDisposed) {
+      return;
+    }
+    this._setError("");
+    this._releaseRuntime(runtime.id);
+    this._setBusy(runtime.id, true);
+    try {
+      await this._api.deleteRuntime(runtime.id);
+      this._runtimes = this._runtimes.filter((each) => each.id !== runtime.id);
+      this._emitState();
     } catch (error) {
       this._setError(errorMessage(error));
     } finally {

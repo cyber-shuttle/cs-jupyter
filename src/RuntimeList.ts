@@ -164,9 +164,12 @@ export class RuntimeList extends Widget {
   }
 
   private _runtimeCard(runtime: IRuntime): HTMLButtonElement {
-    const card = button("", "jp-LauncherCard csRuntimeCard");
     const current = runtime.id === this._currentRuntimeId;
-    card.ariaLabel = `${runtime.rootFolder}, ${runtime.state}${current ? ", connected" : ""}`;
+    const card = button(
+      "",
+      `jp-LauncherCard csRuntimeCard${current ? " csRuntimeCardCurrent" : ""}`,
+    );
+    card.ariaLabel = `${runtime.rootFolder}, ${runtime.state}${current ? ", current session" : ""}`;
     card.title = card.ariaLabel;
     card.dataset.category = "Cybershuttle Runtimes";
     card.dataset.runtimeAction = runtime.id;
@@ -185,6 +188,7 @@ export class RuntimeList extends Widget {
         runtime.state,
         `csRuntimeState csRuntimeState-${runtime.state.toLowerCase()}`,
       ),
+      ...(current ? [element("span", "Current", "csCurrentPill")] : []),
       element(
         "span",
         `Jupyter: ${this._state.jupyterReady?.has(runtime.id) ? "ready" : "pending"}`,
@@ -192,11 +196,7 @@ export class RuntimeList extends Widget {
       ),
     );
     card.append(
-      element(
-        "div",
-        runtime.rootFolder.slice(0, 1).toUpperCase() || "R",
-        "jp-LauncherCard-icon csRuntimeCardIcon",
-      ),
+      element("div", "", "jp-LauncherCard-icon csRuntimeCardIcon"),
       label,
     );
     return card;

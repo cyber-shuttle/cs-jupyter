@@ -420,3 +420,22 @@ describe("serialized runtime selection", () => {
     panel.dispose();
   });
 });
+
+describe("current session pill", () => {
+  it("marks only the runtime this page is attached to", () => {
+    const list = new RuntimeList();
+    const other = { ...first, id: "rt-999999999999" };
+    list.setCurrentRuntimeId(first.id);
+    setRuntimes(list, [first, other]);
+    const cards = [
+      ...list.node.querySelectorAll<HTMLElement>(".csRuntimeCard"),
+    ];
+    expect(cards[0].querySelector(".csCurrentPill")?.textContent).toBe(
+      "Current",
+    );
+    expect(cards[0].classList).toContain("csRuntimeCardCurrent");
+    expect(cards[0].getAttribute("aria-label")).toContain("current session");
+    expect(cards[1].querySelector(".csCurrentPill")).toBeNull();
+    expect(cards[1].classList).not.toContain("csRuntimeCardCurrent");
+  });
+});

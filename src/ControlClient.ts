@@ -239,6 +239,30 @@ export class ControlClient {
     return runtime;
   }
 
+  // Delete stops a live allocation first, so it can take as long as a stop.
+  async deleteRuntime(id: string): Promise<IRuntime> {
+    const runtimeId = validRuntimeId(id);
+    const invalid = "cs-control returned an invalid deleted runtime.";
+    let runtime: IRuntime;
+    try {
+      runtime = validateRuntime(
+        await this._request(`runtimes/${encodeURIComponent(runtimeId)}`, {
+          method: "DELETE",
+        }),
+      );
+    } catch (error) {
+      if (error instanceof ControlError) {
+        throw error;
+      }
+      throw new Error(invalid);
+    }
+    if (runtime.id !== runtimeId) {
+      throw new Error(invalid);
+    }
+    clearRuntimeSession(runtimeId);
+    return runtime;
+  }
+
   async getRuntimeAccess(id: string): Promise<IRuntimeAccess> {
     const runtimeId = validRuntimeId(id);
     const access = validateRuntimeAccess(
@@ -290,6 +314,31 @@ export class ControlClient {
 
 // Jupyter Server owns its own auth, so ServerConnection's built-in token handling is the whole
 // integration: the Authorization header on REST and ?token= on WebSocket URLs.
+// A kernel spec reports its logos as paths on the runtime, but an <img> cannot
+// carry the identity token: unauthenticated the runtime answers with its login
+// page, and its static handler refuses the cross-origin preflight that an
+// Authorization header forces. Putting the token in the URL is the one thing
+// that would work and the one thing that must never happen, so drop the
+// resources and let the launcher fall back to its built-in kernel icon rather
+// than render a broken image.
+async function withoutUnreachableKernelSpecLogos(
+  response: Response,
+): Promise<Response> {
+  const payload: unknown = await response.json();
+  if (isPlainObject(payload) && isPlainObject(payload.kernelspecs)) {
+    for (const spec of Object.values(payload.kernelspecs)) {
+      if (isPlainObject(spec)) {
+        spec.resources = {};
+      }
+    }
+  }
+  return new Response(JSON.stringify(payload), {
+    status: response.status,
+    statusText: response.statusText,
+    headers: { "content-type": "application/json" },
+  });
+}
+
 export function createRuntimeServerSettings(
   descriptor: IRuntimeAccess,
   options: { fetch?: typeof globalThis.fetch } = {},
@@ -302,6 +351,16 @@ export function createRuntimeServerSettings(
     const response = await browserFetch(input, init);
     if (response.status === 401 || response.status === 403) {
       clearRuntimeAccess(access.runtimeId);
+      return response;
+    }
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+    if (response.ok && url.includes("/api/kernelspecs")) {
+      return withoutUnreachableKernelSpecLogos(response);
     }
     return response;
   };

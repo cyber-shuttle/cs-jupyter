@@ -190,8 +190,39 @@
   color: var(--jp-warn-color1);
 }
 
+/* The current session is the one this page is attached to, so it reads as an
+   identity rather than a scheduler state. */
+.csCurrentPill {
+  align-self: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--jp-brand-color1);
+  color: var(--jp-ui-inverse-font-color1);
+  font-size: var(--jp-ui-font-size0);
+  font-weight: 700;
+}
+
+.csRuntimeCardCurrent {
+  border-color: var(--jp-brand-color1);
+  box-shadow: inset 0 0 0 1px var(--jp-brand-color1);
+}
+
 .csRuntimeAddCard {
   border-style: dashed;
+}
+
+/* The runtime cards carry the CyberShuttle mark; the letter placeholder read as
+   a missing icon rather than an identity. */
+.csRuntimeCardIcon {
+  /* Inset the mark so it carries the same optical weight as the JupyterLab
+     icons beside it; content-box keeps the padding out of the image. */
+  padding: 7px;
+  background-image: url("images/csbridge.png");
+  background-clip: content-box;
+  background-origin: content-box;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
 }
 
 .csRuntimeAddIcon {
@@ -373,7 +404,8 @@
 
 .csTextButton,
 .csPrimaryButton,
-.csSecondaryButton {
+.csSecondaryButton,
+.csDangerButton {
   padding: 7px 11px;
   border-radius: 4px;
   font: inherit;
@@ -397,6 +429,17 @@
   border: 1px solid var(--jp-border-color2);
   background: var(--jp-layout-color1);
   color: var(--jp-ui-font-color1);
+}
+
+.csDangerButton {
+  border: 1px solid var(--jp-error-color1);
+  background: var(--jp-layout-color1);
+  color: var(--jp-error-color1);
+}
+
+.csDangerButton:hover:not(:disabled),
+.csDangerButton:focus-visible:not(:disabled) {
+  background: var(--jp-error-color3);
 }
 
 .csIconButton {
@@ -429,6 +472,7 @@
 .csTextButton:disabled,
 .csPrimaryButton:disabled,
 .csSecondaryButton:disabled,
+.csDangerButton:disabled,
 .csIconButton:disabled {
   cursor: default;
   opacity: 0.55;

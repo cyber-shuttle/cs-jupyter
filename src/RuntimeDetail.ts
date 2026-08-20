@@ -117,9 +117,12 @@ export class RuntimeDetail extends Widget {
     actions.className = "csRuntimeDetailActions";
     const busy = this._state.busyRuntimeIds.has(runtime.id);
     if (isTerminal(runtime.state)) {
+      // A terminal allocation cannot resume: its job, tunnel, and generation are
+      // gone. Running it again means submitting a fresh one from the same form,
+      // which is also where its settings are edited.
       actions.appendChild(
         this._button(
-          "Create like this",
+          "Run again",
           "csPrimaryButton",
           busy,
           () => void this._controller.createLike(runtime.id),
@@ -153,6 +156,14 @@ export class RuntimeDetail extends Widget {
         );
       }
     }
+    actions.appendChild(
+      this._button(
+        "Delete",
+        "csDangerButton",
+        busy,
+        () => void this._controller.remove(runtime.id),
+      ),
+    );
     if (busy || this._state.connectingRuntimeId === runtime.id) {
       actions.appendChild(element("span", "", "csSpinner"));
     }
