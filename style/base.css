@@ -200,6 +200,8 @@
 }
 
 .csRuntimeHeaderWidget .csRuntimeLauncherHeader {
+  /* The mark and the account sit the same distance from their own edges. */
+  padding: 0 12px;
   margin: 0;
 }
 
@@ -415,10 +417,15 @@
    size is explicit because the launcher sizes its own icons through the SVG
    this div replaces. */
 .csRuntimeSectionIcon {
+  /* The launcher's own section icons draw about three quarters of their 32px
+     box. The mark is a bitmap that fills whatever box it is given, so the box
+     is the ink instead: same drawn size, and no inset to throw the row's
+     left spacing out against its right. */
   flex: 0 0 auto;
-  width: 32px;
-  height: 32px;
-  margin-right: 12px;
+  box-sizing: border-box;
+  width: 22px;
+  height: 22px;
+  margin-right: 10px;
   background-image: url("images/csbridge.png");
   background-repeat: no-repeat;
   background-position: center;
