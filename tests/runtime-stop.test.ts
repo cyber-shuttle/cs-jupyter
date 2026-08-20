@@ -72,7 +72,7 @@ describe("runtime stop action", () => {
       { currentRuntimeId: undefined, select: vi.fn() } as any,
     );
     await loaded(panel);
-    expect(card(panel).textContent).toContain("projects/restart");
+    expect(card(panel).textContent).toContain("delta");
     expect(card(panel).textContent).not.toContain("Start");
     expect((api as any).startRuntime).toBeUndefined();
     panel.dispose();

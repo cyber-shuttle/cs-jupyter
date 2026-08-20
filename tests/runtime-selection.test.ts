@@ -183,8 +183,8 @@ describe("serialized runtime selection", () => {
     expect([
       cards.length,
       [...cards].slice(0, 2).every((card) => card.tagName === "BUTTON"),
-      cards[0].ariaLabel?.includes("projects/one, READY"),
-      cards[0].textContent?.includes("delta · 1 CPU · 1024 MB"),
+      cards[0].ariaLabel?.includes("delta, READY"),
+      cards[0].textContent?.includes("CPUs: 1, GPUs: 0, MEM: 1024 MB"),
       cards[1].ariaLabel?.includes("FAILED"),
       cards[0].querySelector(".csRuntimeState-ready")?.textContent,
       cards[2].classList.contains("csRuntimeAddCard"),
@@ -220,7 +220,7 @@ describe("serialized runtime selection", () => {
     list.node.querySelector<HTMLButtonElement>(".csRuntimeCard")!.focus();
     setRuntimes(list, [{ ...first }]);
     expect(document.activeElement?.getAttribute("aria-label")).toContain(
-      "projects/one",
+      "delta",
     );
 
     list.node.querySelector<HTMLButtonElement>(".csRuntimeCard")!.click();
@@ -437,5 +437,29 @@ describe("current session pill", () => {
     expect(cards[0].getAttribute("aria-label")).toContain("current session");
     expect(cards[1].querySelector(".csCurrentPill")).toBeNull();
     expect(cards[1].classList).not.toContain("csRuntimeCardCurrent");
+  });
+});
+
+describe("runtime card contract", () => {
+  it("shows host, resources, and state only, leaving the rest to the dialog", () => {
+    const list = new RuntimeList();
+    const gpu = {
+      ...first,
+      resources: { ...first.resources, cores: 8, memoryMb: 32768, gpuCount: 2 },
+    };
+    setRuntimes(list, [gpu]);
+    const card = list.node.querySelector<HTMLElement>(".csRuntimeCard")!;
+    expect(card.querySelector(".csRuntimeCardTitle")?.textContent).toBe(
+      gpu.sshHost,
+    );
+    expect(card.querySelector(".csRuntimeCardMeta")?.textContent).toBe(
+      "CPUs: 8, GPUs: 2, MEM: 32768 MB",
+    );
+    expect(card.querySelector(".csRuntimeState")?.textContent).toBe(gpu.state);
+    // The working directory and Jupyter readiness live in the detail dialog.
+    expect(card.textContent).not.toContain(gpu.rootFolder);
+    expect(card.textContent).not.toContain("Jupyter:");
+    expect(card.querySelector(".csRuntimeCardIcon svg")).not.toBeNull();
+    expect(list.node.querySelector(".csRuntimeSectionIcon")).not.toBeNull();
   });
 });

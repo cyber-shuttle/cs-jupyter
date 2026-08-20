@@ -155,11 +155,12 @@
 }
 
 .csRuntimeCardMeta {
-  overflow: hidden;
+  /* The allocation is the reason to pick one card over another, so it wraps
+     rather than truncating to an ellipsis. */
   color: var(--jp-ui-font-color2);
   font-size: var(--jp-ui-font-size0);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.35;
+  text-wrap: balance;
 }
 
 .csRuntimeState {
@@ -213,16 +214,31 @@
 
 /* The runtime cards carry the CyberShuttle mark; the letter placeholder read as
    a missing icon rather than an identity. */
-.csRuntimeCardIcon {
-  /* Inset the mark so it carries the same optical weight as the JupyterLab
-     icons beside it; content-box keeps the padding out of the image. */
-  padding: 7px;
+/* The CyberShuttle mark identifies the section; a card is one machine. The
+   size is explicit because the launcher sizes its own icons through the SVG
+   this div replaces. */
+.csRuntimeSectionIcon {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin-right: 8px;
   background-image: url("images/csbridge.png");
-  background-clip: content-box;
-  background-origin: content-box;
   background-repeat: no-repeat;
   background-position: center;
   background-size: contain;
+}
+
+.csRuntimeCardIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--jp-ui-font-color2);
+}
+
+.csRuntimeCardIcon svg {
+  width: 100%;
+  height: 100%;
+  padding: 7px;
 }
 
 .csRuntimeAddIcon {

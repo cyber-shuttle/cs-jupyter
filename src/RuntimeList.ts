@@ -1,4 +1,3 @@
-import { runningIcon } from "@jupyterlab/ui-components";
 import { Signal } from "@lumino/signaling";
 import { Widget } from "@lumino/widgets";
 import type { IRuntime } from "./Common";
@@ -111,7 +110,7 @@ export class RuntimeList extends Widget {
     sectionTitle.className = "jp-Launcher-sectionTitle";
     sectionTitle.textContent = "Cybershuttle Runtimes";
     sectionHeader.append(
-      runningIcon.element({ stylesheet: "launcherSection" }),
+      element("div", "", "jp-Launcher-sectionIcon csRuntimeSectionIcon"),
       sectionTitle,
     );
     section.appendChild(sectionHeader);
@@ -169,36 +168,54 @@ export class RuntimeList extends Widget {
       "",
       `jp-LauncherCard csRuntimeCard${current ? " csRuntimeCardCurrent" : ""}`,
     );
-    card.ariaLabel = `${runtime.rootFolder}, ${runtime.state}${current ? ", current session" : ""}`;
+    card.ariaLabel = `${runtime.sshHost}, ${runtime.state}${current ? ", current session" : ""}`;
     card.title = card.ariaLabel;
     card.dataset.category = "Cybershuttle Runtimes";
     card.dataset.runtimeAction = runtime.id;
     card.onclick = () => this.runtimeRequested.emit(runtime.id);
     const label = document.createElement("div");
     label.className = "jp-LauncherCard-label csRuntimeCardLabel";
+    // The card identifies the runtime and what it costs; everything else about
+    // it, including the working directory, belongs to the detail dialog a click
+    // away.
     label.append(
-      element("p", runtime.rootFolder, "csRuntimeCardTitle"),
-      element(
-        "span",
-        `${runtime.sshHost} · ${runtime.resources.cores} CPU · ${runtime.resources.memoryMb} MB`,
-        "csRuntimeCardMeta",
-      ),
+      element("p", runtime.sshHost, "csRuntimeCardTitle"),
+      element("span", runtimeResourceSummary(runtime), "csRuntimeCardMeta"),
       element(
         "span",
         runtime.state,
         `csRuntimeState csRuntimeState-${runtime.state.toLowerCase()}`,
       ),
       ...(current ? [element("span", "Current", "csCurrentPill")] : []),
-      element(
-        "span",
-        `Jupyter: ${this._state.jupyterReady?.has(runtime.id) ? "ready" : "pending"}`,
-        "csMeta",
-      ),
     );
-    card.append(
-      element("div", "", "jp-LauncherCard-icon csRuntimeCardIcon"),
-      label,
-    );
+    card.append(serverRackIcon(), label);
     return card;
   }
+}
+
+function runtimeResourceSummary(runtime: IRuntime): string {
+  const { cores, gpuCount = 0, memoryMb } = runtime.resources;
+  return `CPUs: ${cores}, GPUs: ${gpuCount}, MEM: ${memoryMb} MB`;
+}
+
+// JupyterLab ships no rack icon, so this is the smallest one that reads as a
+// machine at 52px. currentColor keeps it correct in either theme.
+function serverRackIcon(): HTMLElement {
+  const icon = element("div", "", "jp-LauncherCard-icon csRuntimeCardIcon");
+  icon.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+  <g fill="none" stroke="currentColor" stroke-width="1.5">
+    <rect x="3.75" y="3.25" width="16.5" height="5" rx="1.4" />
+    <rect x="3.75" y="9.5" width="16.5" height="5" rx="1.4" />
+    <rect x="3.75" y="15.75" width="16.5" height="5" rx="1.4" />
+  </g>
+  <g fill="currentColor">
+    <circle cx="7" cy="5.75" r="1" />
+    <circle cx="7" cy="12" r="1" />
+    <circle cx="7" cy="18.25" r="1" />
+    <rect x="12.5" y="5.25" width="5" height="1" rx="0.5" />
+    <rect x="12.5" y="11.5" width="5" height="1" rx="0.5" />
+    <rect x="12.5" y="17.75" width="5" height="1" rx="0.5" />
+  </g>
+</svg>`;
+  return icon;
 }
