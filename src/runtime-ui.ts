@@ -10,8 +10,7 @@ import {
 } from "./RuntimeController.js";
 import { getActiveRuntimeId } from "./runtime-state.js";
 
-export const SELECT_RUNTIME_COMMAND =
-  "@cybershuttle/jupyterlite:select-runtime";
+export const SELECT_RUNTIME_COMMAND = "@cybershuttle/jupyter:select-runtime";
 
 export function resolveRuntimeId(
   search = window.location.search,
@@ -53,7 +52,7 @@ class LiteRuntimeController extends RuntimeController {
 }
 
 export const runtimeUiPlugin: JupyterFrontEndPlugin<void> = {
-  id: "@cybershuttle/jupyterlite:runtime-ui",
+  id: "@cybershuttle/jupyter:runtime-ui",
   autoStart: true,
   optional: [ICommandPalette],
   activate: async (app, palette) => {

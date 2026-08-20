@@ -11,7 +11,7 @@ const extensionNames = (config.federated_extensions ?? []).map(
   ({ name }) => name,
 );
 assert.ok(
-  extensionNames.includes("@cybershuttle/jupyterlite"),
+  extensionNames.includes("@cybershuttle/jupyter"),
   "remote adapter is missing from the distribution",
 );
 assert.equal(

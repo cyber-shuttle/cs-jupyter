@@ -1,5 +1,5 @@
 {
-  "name": "@cybershuttle/jupyterlite",
+  "name": "@cybershuttle/jupyter",
   "version": "0.1.0",
   "description": "Remote-only JupyterLite distribution for CyberShuttle runtimes",
   "license": "Apache-2.0",

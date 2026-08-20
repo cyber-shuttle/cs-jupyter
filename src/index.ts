@@ -39,7 +39,7 @@ import { setActiveRuntimeId } from "./runtime-state.js";
 import { resolveRuntimeId, runtimeUiPlugin } from "./runtime-ui.js";
 
 export const IRemoteServerSettings = new Token<ServerConnection.ISettings>(
-  "@cybershuttle/jupyterlite:IRemoteServerSettings",
+  "@cybershuttle/jupyter:IRemoteServerSettings",
   "Server settings for the selected READY CyberShuttle runtime.",
 );
 
@@ -109,7 +109,7 @@ function jsonResponse(value: unknown, status = 200): Response {
 const remoteServerSettingsPlugin: ServiceManagerPlugin<
   ServiceManagerType.IManager["serverSettings"]
 > = {
-  id: "@cybershuttle/jupyterlite:remote-server-settings",
+  id: "@cybershuttle/jupyter:remote-server-settings",
   description:
     "Provide a READY cs-control runtime or the fail-closed controller bootstrap to compute managers.",
   autoStart: true,
@@ -148,7 +148,7 @@ const remoteServerSettingsPlugin: ServiceManagerPlugin<
 };
 
 const defaultDrivePlugin: ServiceManagerPlugin<Contents.IDrive> = {
-  id: "@cybershuttle/jupyterlite:default-drive",
+  id: "@cybershuttle/jupyter:default-drive",
   description: "Use the selected runtime's Jupyter Contents REST API.",
   autoStart: true,
   provides: IDefaultDrive,
@@ -157,7 +157,7 @@ const defaultDrivePlugin: ServiceManagerPlugin<Contents.IDrive> = {
 };
 
 const contentsManagerPlugin: ServiceManagerPlugin<Contents.IManager> = {
-  id: "@cybershuttle/jupyterlite:contents-manager",
+  id: "@cybershuttle/jupyter:contents-manager",
   description: "Use the selected runtime's Jupyter Contents REST API manager.",
   autoStart: true,
   provides: IContentsManager,
@@ -167,7 +167,7 @@ const contentsManagerPlugin: ServiceManagerPlugin<Contents.IManager> = {
 };
 
 const kernelManagerPlugin: ServiceManagerPlugin<Kernel.IManager> = {
-  id: "@cybershuttle/jupyterlite:kernel-manager",
+  id: "@cybershuttle/jupyter:kernel-manager",
   description: "Use the selected runtime's Kernels REST and WebSocket APIs.",
   autoStart: true,
   provides: IKernelManager,
@@ -176,7 +176,7 @@ const kernelManagerPlugin: ServiceManagerPlugin<Kernel.IManager> = {
 };
 
 const kernelSpecManagerPlugin: ServiceManagerPlugin<KernelSpec.IManager> = {
-  id: "@cybershuttle/jupyterlite:kernel-spec-manager",
+  id: "@cybershuttle/jupyter:kernel-spec-manager",
   description: "Populate kernel specifications from the selected runtime.",
   autoStart: true,
   provides: IKernelSpecManager,
@@ -185,7 +185,7 @@ const kernelSpecManagerPlugin: ServiceManagerPlugin<KernelSpec.IManager> = {
 };
 
 const sessionManagerPlugin: ServiceManagerPlugin<Session.IManager> = {
-  id: "@cybershuttle/jupyterlite:session-manager",
+  id: "@cybershuttle/jupyter:session-manager",
   description: "Use the selected runtime's Jupyter Sessions REST API.",
   autoStart: true,
   provides: ISessionManager,
@@ -197,7 +197,7 @@ const sessionManagerPlugin: ServiceManagerPlugin<Session.IManager> = {
 const terminalManagerPlugin: ServiceManagerPlugin<
   ServiceManagerType.IManager["terminals"]
 > = {
-  id: "@cybershuttle/jupyterlite:terminal-manager",
+  id: "@cybershuttle/jupyter:terminal-manager",
   description: "Use terminals only on a selected READY remote runtime.",
   autoStart: true,
   provides: ITerminalManager,
@@ -209,7 +209,7 @@ const terminalManagerPlugin: ServiceManagerPlugin<
 };
 
 const remoteTerminalUiPlugin: JupyterFrontEndPlugin<void> = {
-  id: "@cybershuttle/jupyterlite:remote-terminal-ui",
+  id: "@cybershuttle/jupyter:remote-terminal-ui",
   description: "Activate JupyterLab terminals only for a READY remote runtime.",
   autoStart: true,
   requires: [IServiceManager],
@@ -222,7 +222,7 @@ const remoteTerminalUiPlugin: JupyterFrontEndPlugin<void> = {
 
 const serviceManagerPlugin: ServiceManagerPlugin<ServiceManagerType.IManager> =
   {
-    id: "@cybershuttle/jupyterlite:service-manager",
+    id: "@cybershuttle/jupyter:service-manager",
     description:
       "Compose remote managers or fail-closed controller-only managers.",
     autoStart: true,

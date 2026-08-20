@@ -146,7 +146,7 @@ export function isRuntimeGuardedCommand(
 export function installRuntimeCommandGuard(
   app: JupyterFrontEnd,
   controller: RuntimeController,
-  chooserCommand = "@cybershuttle/jupyterlite:select-runtime",
+  chooserCommand = "@cybershuttle/jupyter:select-runtime",
 ): void {
   const execute = app.commands.execute.bind(app.commands);
   app.commands.execute = ((command: string, args?: any) => {

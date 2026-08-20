@@ -1,4 +1,4 @@
-# CyberShuttle JupyterLite
+# CyberShuttle Jupyter
 
 CyberShuttle's static, remote-only JupyterLite distribution and native
 federated extension. It owns the OAuth control client, Launcher allocation and
