@@ -21,18 +21,105 @@ export const emptyState = (): IRuntimeUiState => ({
   account: undefined,
 });
 
+// The title row is the one part of this UI that stays put, so it is its own
+// widget and the launcher hosts it in the fixed header above its scrolling
+// content.
+export class CyberShuttleHeader extends Widget {
+  readonly signInRequested = new Signal<this, void>(this);
+  readonly signOutRequested = new Signal<this, void>(this);
+
+  private _state = emptyState();
+  private _accountMenuOpen = false;
+
+  constructor() {
+    super();
+    this.addClass("csRuntimeHeaderWidget");
+    this._render();
+  }
+
+  setControllerState(state: IRuntimeUiState): void {
+    this._state = state;
+    this._render();
+  }
+
+  private _render(): void {
+    const focused = this.node.contains(document.activeElement)
+      ? (document.activeElement as HTMLElement).dataset.runtimeAction
+      : undefined;
+    this.node.textContent = "";
+    const header = document.createElement("header");
+    header.className = "jp-Launcher-sectionHeader csRuntimeLauncherHeader";
+    const title = document.createElement("h2");
+    title.className = "jp-Launcher-sectionTitle";
+    title.textContent = "Cybershuttle";
+    header.append(
+      element("div", "", "csRuntimeSectionIcon"),
+      title,
+      this._identityControl(),
+    );
+    this.node.appendChild(header);
+    for (const node of Array.from(
+      this.node.querySelectorAll<HTMLElement>("[data-runtime-action]"),
+    )) {
+      if (node.dataset.runtimeAction === focused) node.focus();
+    }
+  }
+
+  // Signed out this is one button; signed in it names the account and hides
+  // sign-out behind a menu, so leaving is deliberate rather than one stray click.
+  private _identityControl(): HTMLElement {
+    const holder = element("div", "", "csIdentity");
+    if (!this._state.signedIn) {
+      const signIn = button("", "csTextButton csIdentityButton csSignInButton");
+      signIn.append(
+        userGlyph(),
+        element("span", this._state.signingIn ? "Signing in…" : "Sign in"),
+      );
+      signIn.dataset.runtimeAction = "sign-in";
+      signIn.disabled = this._state.signingIn;
+      signIn.onclick = () => this.signInRequested.emit(undefined);
+      holder.appendChild(signIn);
+      return holder;
+    }
+    const trigger = button("", "csTextButton csIdentityButton csAccountButton");
+    trigger.append(
+      userGlyph(),
+      element("span", this._state.account ?? "Account"),
+    );
+    trigger.dataset.runtimeAction = "account";
+    trigger.setAttribute("aria-haspopup", "menu");
+    trigger.setAttribute("aria-expanded", String(this._accountMenuOpen));
+    trigger.onclick = () => {
+      this._accountMenuOpen = !this._accountMenuOpen;
+      this._render();
+    };
+    holder.appendChild(trigger);
+    if (this._accountMenuOpen) {
+      const menu = element("div", "", "csAccountMenu");
+      menu.setAttribute("role", "menu");
+      const signOut = button("Sign out", "csAccountMenuItem");
+      signOut.dataset.runtimeAction = "sign-out";
+      signOut.setAttribute("role", "menuitem");
+      signOut.onclick = () => {
+        this._accountMenuOpen = false;
+        this.signOutRequested.emit(undefined);
+      };
+      menu.appendChild(signOut);
+      holder.appendChild(menu);
+    }
+    return holder;
+  }
+}
+
 export class RuntimeList extends Widget {
   readonly runtimeRequested = new Signal<this, string>(this);
   readonly createRequested = new Signal<this, void>(this);
   readonly sshHostsRequested = new Signal<this, void>(this);
-  readonly signInRequested = new Signal<this, void>(this);
-  readonly signOutRequested = new Signal<this, void>(this);
 
   private _state = emptyState();
   private _currentRuntimeId: string | undefined;
   private _canCreate = false;
   private _createUnavailableReason = "";
-  private _accountMenuOpen = false;
 
   constructor() {
     super();
@@ -73,18 +160,6 @@ export class RuntimeList extends Widget {
   private _build(): HTMLElement {
     const launcher = document.createElement("div");
     launcher.className = "csRuntimeLauncher";
-
-    const header = document.createElement("header");
-    header.className = "jp-Launcher-sectionHeader csRuntimeLauncherHeader";
-    const title = document.createElement("h2");
-    title.className = "jp-Launcher-sectionTitle";
-    title.textContent = "Cybershuttle";
-    header.append(
-      element("div", "", "csRuntimeSectionIcon"),
-      title,
-      this._identityControl(),
-    );
-    launcher.appendChild(header);
 
     const section = document.createElement("section");
     section.className = "jp-Launcher-section csRuntimeSection";
@@ -159,51 +234,6 @@ export class RuntimeList extends Widget {
     section.appendChild(cards);
     launcher.appendChild(section);
     return launcher;
-  }
-
-  // Signed out this is one button; signed in it names the account and hides
-  // sign-out behind a menu, so leaving is deliberate rather than one stray click.
-  private _identityControl(): HTMLElement {
-    const holder = element("div", "", "csIdentity");
-    if (!this._state.signedIn) {
-      const signIn = button("", "csTextButton csIdentityButton csSignInButton");
-      signIn.append(
-        userGlyph(),
-        element("span", this._state.signingIn ? "Signing in…" : "Sign in"),
-      );
-      signIn.dataset.runtimeAction = "sign-in";
-      signIn.disabled = this._state.signingIn;
-      signIn.onclick = () => this.signInRequested.emit(undefined);
-      holder.appendChild(signIn);
-      return holder;
-    }
-    const trigger = button("", "csTextButton csIdentityButton csAccountButton");
-    trigger.append(
-      userGlyph(),
-      element("span", this._state.account ?? "Account"),
-    );
-    trigger.dataset.runtimeAction = "account";
-    trigger.setAttribute("aria-haspopup", "menu");
-    trigger.setAttribute("aria-expanded", String(this._accountMenuOpen));
-    trigger.onclick = () => {
-      this._accountMenuOpen = !this._accountMenuOpen;
-      this._render();
-    };
-    holder.appendChild(trigger);
-    if (this._accountMenuOpen) {
-      const menu = element("div", "", "csAccountMenu");
-      menu.setAttribute("role", "menu");
-      const signOut = button("Sign out", "csAccountMenuItem");
-      signOut.dataset.runtimeAction = "sign-out";
-      signOut.setAttribute("role", "menuitem");
-      signOut.onclick = () => {
-        this._accountMenuOpen = false;
-        this.signOutRequested.emit(undefined);
-      };
-      menu.appendChild(signOut);
-      holder.appendChild(menu);
-    }
-    return holder;
   }
 
   private _runtimeCard(runtime: IRuntime): HTMLButtonElement {

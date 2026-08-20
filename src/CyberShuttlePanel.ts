@@ -17,7 +17,7 @@ import {
   clearRuntimeAccess,
   loadRuntimeAccess,
 } from "./runtime-access";
-import { RuntimeList } from "./RuntimeList";
+import { CyberShuttleHeader, RuntimeList } from "./RuntimeList";
 import { SshHosts } from "./SshHosts";
 
 /** How often the workspace re-reads cs-control. It caps its own SSH work at
@@ -52,6 +52,7 @@ interface IJupyterOperation {
 export class CyberShuttlePanel extends StackedPanel {
   readonly stateChanged = new Signal<this, IRuntimeUiState>(this);
 
+  readonly header = new CyberShuttleHeader();
   private _list = new RuntimeList();
   private _pollTimer: ReturnType<typeof setInterval> | undefined;
   private _polling = false;
@@ -95,8 +96,8 @@ export class CyberShuttlePanel extends StackedPanel {
     );
     this._list.createRequested.connect(() => void this.openCreate());
     this._list.sshHostsRequested.connect(() => void this.openSshHosts());
-    this._list.signInRequested.connect(() => void this.signIn());
-    this._list.signOutRequested.connect(() => this.signOut());
+    this.header.signInRequested.connect(() => void this.signIn());
+    this.header.signOutRequested.connect(() => this.signOut());
     this._emitState();
     void this.resume();
   }
@@ -137,6 +138,7 @@ export class CyberShuttlePanel extends StackedPanel {
 
   private _emitState(): void {
     const state = this.state;
+    this.header.setControllerState(state);
     this._list.setControllerState(state);
     this.stateChanged.emit(state);
   }

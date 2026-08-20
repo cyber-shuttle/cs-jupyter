@@ -1,7 +1,7 @@
 import type { JupyterFrontEndPlugin } from "@jupyterlab/application";
 import { ICommandPalette } from "@jupyterlab/apputils";
 import { PageConfig } from "@jupyterlab/coreutils";
-import { Widget } from "@lumino/widgets";
+import { BoxPanel, Widget } from "@lumino/widgets";
 import { ControlClient, validRuntimeId } from "./ControlClient.js";
 import { CyberShuttlePanel } from "./CyberShuttlePanel.js";
 import {
@@ -41,7 +41,7 @@ export function runtimeLiteUrl(
   return url.toString();
 }
 
-type MainWidget = Widget & { content: Widget };
+type MainWidget = Widget & { content: Widget; contentHeader: BoxPanel };
 
 class LiteRuntimeController extends RuntimeController {
   activeRuntimeId: string | undefined;
@@ -50,6 +50,8 @@ class LiteRuntimeController extends RuntimeController {
     return this.activeRuntimeId;
   }
 }
+
+const launcherHeaderHeight = 46;
 
 export const runtimeUiPlugin: JupyterFrontEndPlugin<void> = {
   id: "@cybershuttle/jupyter:runtime-ui",
@@ -67,35 +69,45 @@ export const runtimeUiPlugin: JupyterFrontEndPlugin<void> = {
     );
     controller.activeRuntimeId = getActiveRuntimeId();
     let panel: CyberShuttlePanel | undefined;
-    let contentObserver: MutationObserver | undefined;
     const asLauncher = (widget: Widget | null): MainWidget | undefined =>
       (widget as MainWidget | null)?.content?.hasClass("jp-Launcher")
         ? (widget as MainWidget)
         : undefined;
-    // The runtimes belong in the launcher's own scrolling content, beside the
-    // sections it renders itself. Mounting them in the content header instead
-    // gave them a second scroll container, so a long list scrolled against the
-    // rest of the page rather than with it. The launcher re-renders that
-    // content, so the node is put back whenever React replaces it.
-    const mount = (launcher: MainWidget): void => {
-      const content = launcher.content.node.querySelector<HTMLElement>(
-        ".jp-Launcher-content",
-      );
-      if (!panel || !content || panel.node.parentElement === content) return;
-      content.insertBefore(panel.node, content.firstChild);
-      if (!panel.isAttached) Widget.attach(panel, content);
+    // The title row stays put, so it goes where a main-area widget keeps a
+    // fixed header. The runtimes scroll with the page, so they go into the
+    // launcher's own content beside the sections it renders itself; mounting
+    // them in the header too gave them a second scroll container and a long
+    // list scrolled against the rest of the page rather than with it.
+    // The launcher renders its content asynchronously, so the section waits for
+    // that content to exist rather than watching the DOM for it.
+    const mountSection = async (launcher: MainWidget): Promise<void> => {
+      for (let frame = 0; panel && frame < 60; frame += 1) {
+        const content = launcher.content.node.querySelector<HTMLElement>(
+          ".jp-Launcher-content",
+        );
+        if (content) {
+          if (panel.node.parentElement !== content) {
+            content.insertBefore(panel.node, content.firstChild);
+            if (!panel.isAttached) Widget.attach(panel, content);
+          }
+          return;
+        }
+        await new Promise(requestAnimationFrame);
+      }
     };
+
     const attachLauncher = (launcher: MainWidget): void => {
       if (!panel || panel.isDisposed) {
         panel = new CyberShuttlePanel(api, controller);
       }
-      contentObserver?.disconnect();
-      mount(launcher);
-      contentObserver = new MutationObserver(() => mount(launcher));
-      contentObserver.observe(launcher.content.node, {
-        childList: true,
-        subtree: true,
-      });
+      if (panel.header.parent !== launcher.contentHeader) {
+        launcher.contentHeader.addWidget(panel.header);
+        // The header region carries no size of its own, so both it and the
+        // widget inside it are given the row's height.
+        BoxPanel.setSizeBasis(panel.header, launcherHeaderHeight);
+        BoxPanel.setSizeBasis(launcher.contentHeader, launcherHeaderHeight);
+      }
+      void mountSection(launcher);
       const lockTitle = () => (launcher.title.closable = false);
       launcher.title.changed.connect(lockTitle, panel);
       lockTitle();

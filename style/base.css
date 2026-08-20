@@ -195,6 +195,14 @@
   width: 100%;
 }
 
+.csRuntimeHeaderWidget {
+  overflow: visible;
+}
+
+.csRuntimeHeaderWidget .csRuntimeLauncherHeader {
+  margin: 0;
+}
+
 .csRuntimeLauncherHeader .csIdentity,
 .jp-Launcher-sectionHeader .csSshHostsButton {
   margin-left: auto;

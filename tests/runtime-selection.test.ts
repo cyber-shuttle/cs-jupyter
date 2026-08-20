@@ -10,7 +10,7 @@ import {
   clearRuntimeAccess,
   loadRuntimeAccess,
 } from "../src/runtime-access";
-import { RuntimeList } from "../src/RuntimeList";
+import { CyberShuttleHeader, RuntimeList } from "../src/RuntimeList";
 import {
   pollPanel,
   runtimeFixture,
@@ -194,7 +194,12 @@ describe("serialized runtime selection", () => {
       [...panel.node.querySelectorAll("h2")].map((heading) =>
         heading.textContent?.trim(),
       ),
-    ).toEqual(["Cybershuttle", "Runtimes"]);
+    ).toEqual(["Runtimes"]);
+    expect(
+      [...panel.header.node.querySelectorAll("h2")].map((h) =>
+        h.textContent?.trim(),
+      ),
+    ).toEqual(["Cybershuttle"]);
     expect(
       // The runtimes render as a section the launcher can host directly, so
       // they share its scrolling content instead of bringing their own.
@@ -485,39 +490,39 @@ describe("runtime card contract", () => {
     expect(card.textContent).not.toContain(gpu.rootFolder);
     expect(card.textContent).not.toContain("Jupyter:");
     expect(card.querySelector(".csRuntimeCardIcon svg")).not.toBeNull();
-    expect(list.node.querySelector(".csRuntimeSectionIcon")).not.toBeNull();
+    expect(list.node.querySelector(".csRuntimeSectionRack")).not.toBeNull();
   });
 });
 
 describe("identity control", () => {
   it("offers sign in when signed out and hides the runtime cards behind a reason", () => {
     const list = new RuntimeList();
+    const header = new CyberShuttleHeader();
     const signIn = vi.fn();
-    list.signInRequested.connect(signIn);
-    list.setControllerState({
-      ...uiState({ runtimes: [first] }),
-      signedIn: false,
-    });
+    header.signInRequested.connect(signIn);
+    const state = { ...uiState({ runtimes: [first] }), signedIn: false };
+    list.setControllerState(state);
+    header.setControllerState(state);
     expect(list.node.textContent).toContain(
       "Sign in to see your runtimes and SSH hosts.",
     );
     expect(list.node.querySelector(".csRuntimeAddCard")).toBeNull();
     expect(list.node.querySelector(".csRuntimeCard")).toBeNull();
-    expect(list.node.querySelector(".csAccountButton")).toBeNull();
-    list.node.querySelector<HTMLButtonElement>(".csSignInButton")!.click();
+    expect(header.node.querySelector(".csAccountButton")).toBeNull();
+    header.node.querySelector<HTMLButtonElement>(".csSignInButton")!.click();
     expect(signIn).toHaveBeenCalledTimes(1);
   });
 
   it("names the account and keeps sign out behind its menu", () => {
-    const list = new RuntimeList();
+    const header = new CyberShuttleHeader();
     const signOut = vi.fn();
-    list.signOutRequested.connect(signOut);
-    setRuntimes(list, [first]);
-    list.setControllerState({
+    header.signOutRequested.connect(signOut);
+    header.setControllerState({
       ...uiState({ runtimes: [first] }),
       signedIn: true,
       account: "someone@gatech.edu",
     });
+    const list = header;
     const trigger =
       list.node.querySelector<HTMLButtonElement>(".csAccountButton")!;
     expect(trigger.textContent).toBe("someone@gatech.edu");

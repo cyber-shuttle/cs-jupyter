@@ -48,7 +48,9 @@ describe("runtime polling", () => {
     expect(api.listRuntimes).not.toHaveBeenCalled();
     expect(api.listSshHosts).not.toHaveBeenCalled();
 
-    panel.node.querySelector<HTMLButtonElement>(".csSignInButton")!.click();
+    panel.header.node
+      .querySelector<HTMLButtonElement>(".csSignInButton")!
+      .click();
     const second = panel.signIn();
     expect(api.signIn).toHaveBeenCalledOnce();
     expect(panel.state.signingIn).toBe(true);
