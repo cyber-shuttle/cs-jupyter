@@ -1,0 +1,9 @@
+{
+  "LiteBuildConfig": {
+    "apps": ["lab"],
+    "base_url": "",
+    "federated_extensions": ["labextension"],
+    "ignore_sys_prefix": ["federated_extensions"],
+    "output_dir": "dist"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "jupyter-config-data": {
+    "appName": "CyberShuttle Notebooks",
+    "cybershuttleControlApiUrl": "",
+    "deferredExtensions": ["@jupyterlab/terminal-extension:plugin"],
+    "disabledExtensions": [
+      "@jupyterlab/services-extension:default-drive",
+      "@jupyterlab/services-extension:contents-manager",
+      "@jupyterlab/services-extension:kernel-manager",
+      "@jupyterlab/services-extension:kernel-spec-manager",
+      "@jupyterlab/services-extension:session-manager",
+      "@jupyterlab/services-extension:service-manager",
+      "@jupyterlab/services-extension:event-manager",
+      "@jupyterlab/terminal-extension:open-folder-in-terminal",
+      "@jupyterlite/application-extension:service-worker-manager",
+      "@jupyterlite/services-extension:default-drive",
+      "@jupyterlite/services-extension:kernel-client",
+      "@jupyterlite/services-extension:kernel-manager",
+      "@jupyterlite/services-extension:kernel-spec-client",
+      "@jupyterlite/services-extension:kernel-spec-manager",
+      "@jupyterlite/services-extension:kernel-specs",
+      "@jupyterlite/services-extension:session-manager"
+    ]
+  }
+}

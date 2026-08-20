@@ -1,0 +1,632 @@
+import { Dialog } from "@jupyterlab/apputils";
+import { Signal } from "@lumino/signaling";
+import { StackedPanel, Widget } from "@lumino/widgets";
+import { AuthInteractionRequiredError } from "./AuthClient";
+import { CreateRuntimeForm } from "./CreateRuntimeForm";
+import {
+  IRuntime,
+  IRuntimeCreateRequest,
+  ISshHost,
+  isTerminal,
+} from "./Common";
+import { ControlClient, errorMessage, IRuntimeLogTail } from "./ControlClient";
+import { RuntimeController } from "./RuntimeController";
+import { RuntimeDetail } from "./RuntimeDetail";
+import {
+  cacheRuntimeAccess,
+  clearRuntimeAccess,
+  loadRuntimeAccess,
+} from "./runtime-access";
+import { RuntimeList } from "./RuntimeList";
+import { SshHosts } from "./SshHosts";
+
+/** How often the workspace re-reads cs-control. It caps its own SSH work at
+ * the same rate, so polling faster would only add HTTP round trips. */
+const RUNTIME_POLL_INTERVAL_MS = 1000;
+
+export interface IRuntimeUiState {
+  readonly runtimes: readonly IRuntime[];
+  readonly logs: ReadonlyMap<string, IRuntimeLogTail>;
+  readonly hosts: readonly ISshHost[] | undefined;
+  readonly loading: boolean;
+  readonly refreshing: boolean;
+  readonly updatesStatus: string;
+  readonly error: string;
+  readonly busyRuntimeIds: ReadonlySet<string>;
+  readonly connectingRuntimeId: string | undefined;
+  readonly jupyterReady: ReadonlySet<string>;
+  readonly signedIn: boolean;
+  readonly signingIn: boolean;
+  readonly authRequired: boolean;
+}
+
+interface IJupyterOperation {
+  runtimeId: string;
+  generation: string;
+  epoch: number;
+  selection: number;
+  controller: AbortController;
+}
+
+export class CyberShuttlePanel extends StackedPanel {
+  readonly stateChanged = new Signal<this, IRuntimeUiState>(this);
+
+  private _list = new RuntimeList();
+  private _pollTimer: ReturnType<typeof setInterval> | undefined;
+  private _polling = false;
+  private _polled = false;
+  private _refreshing = false;
+  private _selection = 0;
+  private _runtimes: IRuntime[] = [];
+  private _logs = new Map<string, IRuntimeLogTail>();
+  private _busyRuntimeIds = new Set<string>();
+  private _connectingRuntimeId: string | undefined;
+  private _jupyterReady = new Set<string>();
+  private _jupyterOperations = new Map<string, IJupyterOperation>();
+  private _jupyterEpoch = 0;
+  private _loading = false;
+  private _updatesStatus = "";
+  private _error = "";
+  private _hosts: ISshHost[] | undefined;
+  private _signedIn = false;
+  private _signingIn = false;
+  private _signInPromise: Promise<void> | undefined;
+  private _authRequired = false;
+  private _controlInitialized = false;
+  private _createForm = (): CreateRuntimeForm =>
+    new CreateRuntimeForm(this._api);
+  private _detailDialog: Dialog<unknown> | undefined;
+  private _sshHostsWidget = (): SshHosts => new SshHosts(this._api);
+
+  constructor(
+    private _api: ControlClient,
+    private _controller: RuntimeController,
+  ) {
+    super();
+    this.id = "cybershuttle-runtime-panel";
+    this.title.label = "Remote Runtimes";
+    this.title.closable = false;
+    this.addClass("csShell");
+    this._list.setCurrentRuntimeId(_controller.currentRuntimeId);
+    this.addWidget(this._list);
+    this._list.runtimeRequested.connect(
+      (_sender, id) => void this.openRuntime(id),
+    );
+    this._list.createRequested.connect(() => void this.openCreate());
+    this._list.sshHostsRequested.connect(() => void this.openSshHosts());
+    this._list.signInRequested.connect(() => void this.signIn());
+    this._emitState();
+  }
+
+  get currentRuntimeId(): string | undefined {
+    return this._controller.currentRuntimeId;
+  }
+
+  get state(): IRuntimeUiState {
+    return {
+      runtimes: this._runtimes.map((runtime) => ({
+        ...runtime,
+        resources: { ...runtime.resources },
+      })),
+      logs: new Map(
+        [...this._logs].map(([id, tail]) => [
+          id,
+          { ...tail, lines: tail.lines.map((line) => ({ ...line })) },
+        ]),
+      ),
+      hosts: this._hosts?.map((host) => ({
+        ...host,
+        extraDirectives: [...host.extraDirectives],
+      })),
+      loading: this._loading,
+      refreshing: this._refreshing,
+      updatesStatus: this._updatesStatus,
+      error: this._error,
+      busyRuntimeIds: new Set(this._busyRuntimeIds),
+      connectingRuntimeId: this._connectingRuntimeId,
+      jupyterReady: new Set(this._jupyterReady),
+      signedIn: this._signedIn,
+      signingIn: this._signingIn,
+      authRequired: this._authRequired,
+    };
+  }
+
+  private _emitState(): void {
+    const state = this.state;
+    this._list.setControllerState(state);
+    this.stateChanged.emit(state);
+  }
+
+  private _setRuntimes(runtimes: IRuntime[]): void {
+    const next = new Map(runtimes.map((runtime) => [runtime.id, runtime]));
+    for (const previous of this._runtimes) {
+      const runtime = next.get(previous.id);
+      if (
+        !runtime ||
+        runtime.generation !== previous.generation ||
+        this._runtimeIsTerminal(runtime)
+      ) {
+        this._releaseRuntime(previous.id);
+      } else if (runtime.state !== "READY") {
+        this._releaseJupyter(previous.id);
+      }
+    }
+    for (const runtime of runtimes) {
+      if (this._runtimeIsTerminal(runtime)) {
+        this._releaseRuntime(runtime.id);
+      }
+    }
+    this._runtimes = runtimes;
+    this._error = "";
+    this._emitState();
+  }
+
+  // The poll carries every tail the caller owns, so the map is replaced rather
+  // than merged and a runtime that has gone away takes its tail with it.
+  private _setRuntimeLogs(tails: readonly IRuntimeLogTail[]): void {
+    this._logs = new Map(tails.map((tail) => [tail.runtimeId, tail]));
+    this._emitState();
+  }
+
+  private _setLoading(loading: boolean): void {
+    this._loading = loading;
+    this._emitState();
+  }
+
+  private _setError(message: string): void {
+    this._error = message;
+    this._emitState();
+  }
+
+  private _setStreamStatus(message: string): void {
+    this._updatesStatus = message;
+    this._emitState();
+  }
+
+  private _setBusy(id: string, busy: boolean): void {
+    busy ? this._busyRuntimeIds.add(id) : this._busyRuntimeIds.delete(id);
+    this._emitState();
+  }
+
+  private _setConnecting(id: string | undefined): void {
+    this._connectingRuntimeId = id;
+    this._emitState();
+  }
+
+  private _runtime(id: string): IRuntime | undefined {
+    return this._runtimes.find((runtime) => runtime.id === id);
+  }
+
+  private _releaseJupyter(id: string): void {
+    this._abortJupyter(id);
+    this._jupyterReady.delete(id);
+  }
+
+  private _releaseRuntime(id: string): void {
+    this._cancelSelection(id);
+    this._releaseJupyter(id);
+    clearRuntimeAccess(id);
+  }
+
+  private _selectedRuntime(id: string): IRuntime | undefined {
+    const runtime = this._runtime(id);
+    if (!runtime) {
+      this._setError("Runtime is no longer available.");
+    }
+    return runtime;
+  }
+
+  private _runtimeIsTerminal(runtime: IRuntime): boolean {
+    return isTerminal(runtime.state);
+  }
+
+  private _beginJupyter(runtime: IRuntime): IJupyterOperation {
+    this._abortJupyter(runtime.id);
+    const operation = {
+      runtimeId: runtime.id,
+      generation: runtime.generation,
+      epoch: ++this._jupyterEpoch,
+      selection: this._selection,
+      controller: new AbortController(),
+    };
+    this._jupyterOperations.set(runtime.id, operation);
+    return operation;
+  }
+
+  private _jupyterOperationCurrent(operation: IJupyterOperation): boolean {
+    const runtime = this._runtime(operation.runtimeId);
+    return (
+      !this.isDisposed &&
+      this._jupyterOperations.get(operation.runtimeId) === operation &&
+      operation.selection === this._selection &&
+      !operation.controller.signal.aborted &&
+      runtime?.generation === operation.generation &&
+      runtime.state === "READY" &&
+      !this._runtimeIsTerminal(runtime)
+    );
+  }
+
+  private _cancelSelection(runtimeId: string): void {
+    if (
+      this._connectingRuntimeId === runtimeId ||
+      this.currentRuntimeId === runtimeId
+    ) {
+      this._selection++;
+      this._connectingRuntimeId = undefined;
+    }
+  }
+
+  private _abortJupyter(runtimeId: string): void {
+    const operation = this._jupyterOperations.get(runtimeId);
+    operation?.controller.abort();
+    if (operation) this._jupyterOperations.delete(runtimeId);
+    this._busyRuntimeIds.delete(runtimeId);
+  }
+
+  private _abortJupyterOperations(): void {
+    for (const runtimeId of [...this._jupyterOperations.keys()]) {
+      this._abortJupyter(runtimeId);
+    }
+  }
+
+  private _finishJupyter(operation: IJupyterOperation): void {
+    if (this._jupyterOperations.get(operation.runtimeId) === operation) {
+      this._jupyterOperations.delete(operation.runtimeId);
+    }
+  }
+
+  private _startPolling(): void {
+    if (this._pollTimer !== undefined) {
+      return;
+    }
+    void this._poll();
+    this._pollTimer = setInterval(
+      () => void this._poll(),
+      RUNTIME_POLL_INTERVAL_MS,
+    );
+  }
+
+  private _stopPolling(): void {
+    if (this._pollTimer !== undefined) {
+      clearInterval(this._pollTimer);
+      this._pollTimer = undefined;
+    }
+  }
+
+  // cs-control answers from its own state and starts a reconciliation for the
+  // next poll, so this never waits on SSH.
+  private async _poll(): Promise<void> {
+    if (this._polling || this.isDisposed) {
+      return;
+    }
+    this._polling = true;
+    try {
+      const list = await this._api.listRuntimes();
+      if (this.isDisposed) {
+        return;
+      }
+      this._polled = true;
+      this._refreshing = list.refreshing;
+      this._setRuntimes(list.runtimes);
+      this._setRuntimeLogs(list.logs);
+      for (const runtime of list.runtimes) {
+        if (
+          runtime.state === "READY" &&
+          !this._jupyterReady.has(runtime.id) &&
+          !this._jupyterOperations.has(runtime.id)
+        ) {
+          void this.refreshJupyter(runtime.id);
+        }
+      }
+      this._updateRefreshing();
+      this._setStreamStatus("");
+    } catch (error) {
+      if (this.isDisposed) {
+        return;
+      }
+      if (error instanceof AuthInteractionRequiredError) {
+        this._requireAuthentication();
+        return;
+      }
+      this._setStreamStatus("Runtime updates unavailable.");
+    } finally {
+      this._polling = false;
+    }
+  }
+
+  signIn(): Promise<void> {
+    if (!this._signInPromise) {
+      this._signingIn = true;
+      this._setError("");
+      this._emitState();
+      this._signInPromise = this._signIn().finally(() => {
+        this._signingIn = false;
+        this._signInPromise = undefined;
+        if (!this.isDisposed) this._emitState();
+      });
+    }
+    return this._signInPromise;
+  }
+
+  private async _signIn(): Promise<void> {
+    try {
+      await this._api.signIn();
+      if (this.isDisposed) return;
+      this._signedIn = true;
+      this._authRequired = false;
+      this._setStreamStatus("");
+      this._startPolling();
+      if (!this._controlInitialized) {
+        this._controlInitialized = true;
+        await this._initialize();
+      }
+    } catch (error) {
+      if (!this.isDisposed) {
+        if (error instanceof AuthInteractionRequiredError)
+          this._requireAuthentication();
+        else this._setError(errorMessage(error));
+      }
+    }
+  }
+
+  private _requireAuthentication(): void {
+    if (this.isDisposed) return;
+    this._authRequired = true;
+    this._stopPolling();
+    this._setStreamStatus("Sign in again to resume runtime updates.");
+  }
+
+  private async _initialize(): Promise<void> {
+    this._setLoading(true);
+    try {
+      const [list] = await Promise.all([
+        this._api.listRuntimes(),
+        this._refreshHosts(),
+      ]);
+      if (!this._polled && !this.isDisposed) {
+        this._setRuntimes(list.runtimes);
+        this._setRuntimeLogs(list.logs);
+      }
+    } catch (error) {
+      this._setError(errorMessage(error));
+    } finally {
+      this._setLoading(false);
+    }
+  }
+
+  dispose(): void {
+    this._selection++;
+    this._abortJupyterOperations();
+    this._setConnecting(undefined);
+    this._stopPolling();
+    super.dispose();
+  }
+
+  private _updateRefreshing(): void {
+    this._emitState();
+  }
+
+  private async _refreshHosts(): Promise<void> {
+    try {
+      const hosts = await this._api.listSshHosts();
+      this._hosts = hosts;
+      this._emitState();
+      this._list.setCanCreate(
+        hosts.length > 0,
+        hosts.length ? "" : "Add an SSH host before creating a runtime.",
+      );
+    } catch (error) {
+      if (this._hosts === undefined) {
+        this._list.setCanCreate(
+          false,
+          "SSH hosts are temporarily unavailable.",
+        );
+      }
+      this._setError(errorMessage(error));
+    }
+  }
+
+  async openRuntime(runtimeId: string): Promise<void> {
+    const body = new RuntimeDetail(this, runtimeId);
+    body.addClass("csWorkspaceModal");
+    const dialog = new Dialog({
+      title: "CyberShuttle Runtime",
+      body,
+      buttons: [Dialog.cancelButton({ label: "Close" })],
+    });
+    this._detailDialog = dialog;
+    try {
+      await dialog.launch().catch(() => undefined);
+    } finally {
+      this._detailDialog = undefined;
+    }
+  }
+
+  // A READY runtime already runs Jupyter, so "refresh" only means fetching the owner-scoped
+  // access cs-control issues for it.
+  async refreshJupyter(runtimeId: string): Promise<boolean> {
+    const runtime = this._runtime(runtimeId);
+    if (!runtime || runtime.state !== "READY") {
+      return false;
+    }
+    const operation = this._beginJupyter(runtime);
+    try {
+      await this._ensureAccess(runtime, operation);
+      return this._jupyterReady.has(runtime.id);
+    } catch (error) {
+      if (!this._jupyterOperationCurrent(operation)) return false;
+      if (!isAbortError(error)) this._setError(errorMessage(error));
+      return false;
+    } finally {
+      this._finishJupyter(operation);
+    }
+  }
+
+  private async _ensureAccess(
+    runtime: IRuntime,
+    operation: IJupyterOperation,
+  ): Promise<void> {
+    if (!loadRuntimeAccess(runtime.id, runtime.generation)) {
+      const access = await this._api.getRuntimeAccess(runtime.id);
+      if (!this._jupyterOperationCurrent(operation)) return;
+      if (access.generation !== operation.generation) {
+        throw new Error("Runtime access generation changed.");
+      }
+      cacheRuntimeAccess(access);
+    }
+    if (!this._jupyterOperationCurrent(operation)) return;
+    this._jupyterReady.add(runtime.id);
+    this._emitState();
+  }
+
+  private async _ensureJupyter(runtime: IRuntime): Promise<void> {
+    const operation = this._beginJupyter(runtime);
+    this._setBusy(runtime.id, true);
+    try {
+      await this._ensureAccess(runtime, operation);
+    } catch (error) {
+      if (!this._jupyterOperationCurrent(operation)) return;
+      clearRuntimeAccess(runtime.id);
+      if (!isAbortError(error)) throw error;
+    } finally {
+      if (this._jupyterOperations.get(runtime.id) === operation) {
+        this._finishJupyter(operation);
+        this._setBusy(runtime.id, false);
+      }
+    }
+  }
+
+  async connect(runtimeId: string): Promise<void> {
+    const runtime = this._selectedRuntime(runtimeId);
+    if (!runtime) {
+      return;
+    }
+    const selection = ++this._selection;
+    this._abortJupyterOperations();
+    const current = (): boolean =>
+      selection === this._selection && !this.isDisposed;
+    this._setError("");
+    this._setConnecting(runtime.id);
+    try {
+      await this._ensureJupyter(runtime);
+      if (current()) await this._controller.select(runtime.id, current);
+    } catch (error) {
+      if (current()) {
+        this._setError(errorMessage(error));
+      }
+    } finally {
+      if (current()) {
+        this._setConnecting(undefined);
+      }
+    }
+  }
+
+  // A finished Slurm allocation cannot be restarted, so running one again means
+  // creating another like it.
+  async createLike(runtimeId: string): Promise<void> {
+    const runtime = this._selectedRuntime(runtimeId);
+    if (!runtime) {
+      return;
+    }
+    this._detailDialog?.resolve(0);
+    await this.openCreate(false, false, runtime);
+  }
+
+  async stop(runtimeId: string): Promise<void> {
+    const runtime = this._selectedRuntime(runtimeId);
+    if (!runtime) {
+      return;
+    }
+    this._setError("");
+    this._releaseRuntime(runtime.id);
+    this._setBusy(runtime.id, true);
+    try {
+      await this._api.stopRuntime(runtime.id);
+    } catch (error) {
+      this._setError(errorMessage(error));
+    } finally {
+      this._setBusy(runtime.id, false);
+    }
+  }
+
+  async openCreate(
+    showHosts = false,
+    closeFromHosts = false,
+    like?: IRuntime,
+  ): Promise<void> {
+    const body = new StackedPanel();
+    body.addClass("csWorkspaceModal");
+    const form = this._createForm();
+    const hosts = this._sshHostsWidget();
+    body.addWidget(form);
+    body.addWidget(hosts);
+    form.setHosts(this._hosts ?? []);
+    if (like) {
+      form.prefill(like);
+    }
+    const dialog = new Dialog({
+      title: closeFromHosts
+        ? "CyberShuttle SSH Hosts"
+        : "Add CyberShuttle Runtime",
+      body,
+      buttons: [Dialog.cancelButton({ label: "Close" })],
+    });
+    const show = (widget: Widget): void => {
+      for (const child of body.widgets) {
+        child === widget ? child.show() : child.hide();
+      }
+      widget.activate();
+    };
+    const showForm = (): void => show(form);
+    const showHostsView = (): void => {
+      show(hosts);
+      void hosts.refresh();
+    };
+    form.backRequested.connect(() => dialog.resolve(0));
+    form.sshHostsRequested.connect(showHostsView);
+    hosts.backRequested.connect(() =>
+      closeFromHosts ? dialog.resolve(0) : showForm(),
+    );
+    form.createRequested.connect((_sender, intent) => {
+      void this._createInModal(intent, form, body, show);
+    });
+    showHosts ? showHostsView() : showForm();
+    await dialog.launch().catch(() => undefined);
+  }
+
+  openSshHosts(): Promise<void> {
+    return this.openCreate(true, true);
+  }
+
+  private async _createInModal(
+    allocation: IRuntimeCreateRequest,
+    form: CreateRuntimeForm,
+    body: StackedPanel,
+    show: (widget: Widget) => void,
+  ): Promise<void> {
+    form.setError("");
+    form.setBusy(true);
+    try {
+      const runtime = await this._api.createRuntime(allocation);
+      if (body.isDisposed || form.isDisposed) {
+        return;
+      }
+      form.resetRequestIdentity();
+      const detail = new RuntimeDetail(this, runtime.id);
+      body.addWidget(detail);
+      show(detail);
+    } catch (error) {
+      if (!form.isDisposed) {
+        form.setError(errorMessage(error));
+      }
+    } finally {
+      if (!form.isDisposed) {
+        form.setBusy(false);
+      }
+    }
+  }
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}

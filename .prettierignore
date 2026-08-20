@@ -1,0 +1,7 @@
+dist/
+labextension/
+lib/
+node_modules/
+bun.lock
+uv.lock
+.pi/

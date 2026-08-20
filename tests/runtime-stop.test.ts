@@ -1,0 +1,80 @@
+import { describe, expect, it, vi } from "vitest";
+import type { IRuntime } from "../src/Common";
+import { CyberShuttlePanel } from "../src/CyberShuttlePanel";
+import { runtimeFixture, runtimeListFixture } from "./fakes";
+
+const base = runtimeFixture({
+  id: "rt-111111111111",
+  state: "STOPPED",
+  account: "project-a",
+  rootFolder: "projects/restart",
+});
+
+function card(panel: CyberShuttlePanel): HTMLElement {
+  return panel.node.querySelector<HTMLElement>(".csRuntimeCard")!;
+}
+
+async function loaded(panel: CyberShuttlePanel): Promise<void> {
+  await panel.signIn();
+  await vi.waitFor(() => expect(card(panel)).not.toBeNull());
+}
+
+describe("runtime stop action", () => {
+  it("publishes busy and error state for controller actions", async () => {
+    const stopPending = Promise.withResolvers<IRuntime>();
+    const failing = Promise.withResolvers<IRuntime>();
+    const api = {
+      signIn: vi.fn(async () => undefined),
+      listRuntimes: vi.fn(async () =>
+        runtimeListFixture([{ ...base, state: "READY" as const }]),
+      ),
+      listSshHosts: vi.fn(async () => []),
+      stopRuntime: vi
+        .fn()
+        .mockReturnValueOnce(failing.promise)
+        .mockReturnValueOnce(stopPending.promise),
+    };
+    const panel = new CyberShuttlePanel(
+      api as any,
+      { currentRuntimeId: undefined, select: vi.fn() } as any,
+    );
+    await loaded(panel);
+
+    const failingStop = panel.stop(base.id);
+    await vi.waitFor(() =>
+      expect(api.stopRuntime).toHaveBeenCalledWith(base.id),
+    );
+    expect(panel.state.busyRuntimeIds.has(base.id)).toBe(true);
+    failing.reject(new Error("Slurm cancellation failed."));
+    await failingStop;
+    expect(panel.state.busyRuntimeIds.has(base.id)).toBe(false);
+    expect(panel.state.error).toBe("Slurm cancellation failed.");
+
+    const stopping = panel.stop(base.id);
+    await vi.waitFor(() => expect(api.stopRuntime).toHaveBeenCalledTimes(2));
+    expect(panel.state.busyRuntimeIds.has(base.id)).toBe(true);
+    stopPending.resolve({ ...base, state: "STOPPING" });
+    await stopping;
+    expect(panel.state.busyRuntimeIds.has(base.id)).toBe(false);
+    panel.dispose();
+  });
+
+  // A terminal allocation is gone, so the only way to run it again is to create
+  // another like it. The card must not offer to resume the dead one.
+  it("offers no resume action on a terminal runtime", async () => {
+    const api = {
+      signIn: vi.fn(async () => undefined),
+      listRuntimes: vi.fn(async () => runtimeListFixture([base])),
+      listSshHosts: vi.fn(async () => []),
+    };
+    const panel = new CyberShuttlePanel(
+      api as any,
+      { currentRuntimeId: undefined, select: vi.fn() } as any,
+    );
+    await loaded(panel);
+    expect(card(panel).textContent).toContain("projects/restart");
+    expect(card(panel).textContent).not.toContain("Start");
+    expect((api as any).startRuntime).toBeUndefined();
+    panel.dispose();
+  });
+});

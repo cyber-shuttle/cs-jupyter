@@ -1,0 +1,23 @@
+# JavaScript
+node_modules/
+lib/
+labextension/
+tsconfig.tsbuildinfo
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+
+# JupyterLite build output
+dist/
+.jupyterlite.doit.db
+
+# Editors and OS
+.DS_Store
+.vscode/
+.idea/
+
+# Local agent runtime
+.pi/
+.pi-subagents/
