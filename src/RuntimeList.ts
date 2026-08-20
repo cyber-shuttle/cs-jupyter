@@ -178,24 +178,59 @@ export class RuntimeList extends Widget {
     // The card identifies the runtime and what it costs; everything else about
     // it, including the working directory, belongs to the detail dialog a click
     // away.
+    // The host and the allocation it runs under are one identity, so they sit
+    // together without the gap that separates the rest of the card.
+    const identity = element("span", "", "csRuntimeCardIdentity");
+    identity.append(element("p", runtime.sshHost, "csRuntimeCardTitle"));
+    if (runtime.account) {
+      identity.append(element("span", runtime.account, "csRuntimeCardAccount"));
+    }
     label.append(
-      element("p", runtime.sshHost, "csRuntimeCardTitle"),
+      identity,
       element(
         "span",
         runtime.state,
         `csRuntimeState csRuntimeState-${runtime.state.toLowerCase()}`,
       ),
       ...(current ? [element("span", "Current", "csCurrentPill")] : []),
-      element("span", runtimeResourceSummary(runtime), "csRuntimeCardMeta"),
+      runtimeResourceRow(runtime),
     );
     card.append(serverRackIcon(), label);
     return card;
   }
 }
 
-function runtimeResourceSummary(runtime: IRuntime): string {
+const RESOURCE_GLYPHS = {
+  cpu: `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"><rect x="4.75" y="4.75" width="6.5" height="6.5" rx="1" /><path d="M6.5 2.6v2.15M9.5 2.6v2.15M6.5 11.25v2.15M9.5 11.25v2.15M2.6 6.5h2.15M2.6 9.5h2.15M11.25 6.5h2.15M11.25 9.5h2.15" /></g></svg>`,
+  gpu: `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"><rect x="1.9" y="4.6" width="12.2" height="7.4" rx="1.2" /><circle cx="6" cy="8.3" r="1.9" /><path d="M10.6 6.9v2.8" /></g></svg>`,
+  mem: `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"><rect x="1.9" y="5.1" width="12.2" height="6.4" rx="1" /><path d="M5.2 5.1v6.4M8 5.1v6.4M10.8 5.1v6.4" /></g></svg>`,
+};
+
+// Memory is always gigabytes so the three figures stay the same shape and the
+// row survives a narrow card.
+function gigabytes(memoryMb: number): string {
+  return `${Number((memoryMb / 1024).toFixed(1))}G`;
+}
+
+function runtimeResourceRow(runtime: IRuntime): HTMLElement {
   const { cores, gpuCount = 0, memoryMb } = runtime.resources;
-  return `CPUs: ${cores}, GPUs: ${gpuCount}, MEM: ${memoryMb} MB`;
+  const row = element("span", "", "csRuntimeCardMeta");
+  const measures: Array<[string, string, string]> = [
+    [RESOURCE_GLYPHS.cpu, String(cores), `${cores} CPU`],
+    [RESOURCE_GLYPHS.gpu, String(gpuCount), `${gpuCount} GPU`],
+    [RESOURCE_GLYPHS.mem, gigabytes(memoryMb), `${gigabytes(memoryMb)} memory`],
+  ];
+  measures.forEach(([glyph, value, label], index) => {
+    if (index > 0) {
+      row.appendChild(element("span", "·", "csResourceSeparator"));
+    }
+    const measure = element("span", "", "csResourceMeasure");
+    measure.title = label;
+    measure.innerHTML = glyph;
+    measure.appendChild(element("span", value, "csResourceValue"));
+    row.appendChild(measure);
+  });
+  return row;
 }
 
 // JupyterLab ships no rack icon, so this is the smallest one that still reads

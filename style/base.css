@@ -141,6 +141,26 @@
   font: inherit;
 }
 
+/* Wide enough that the largest allocation a scheduler will hand out, such as
+   128 CPUs and 512G, still reads on one line. */
+.jp-LauncherCard.csRuntimeCard,
+.jp-LauncherCard.csRuntimeAddCard {
+  width: 152px;
+}
+
+.csRuntimeCardIdentity {
+  display: flex;
+  flex-direction: column;
+}
+
+.csRuntimeCardAccount {
+  overflow: hidden;
+  color: var(--jp-ui-font-color3);
+  font-size: var(--jp-ui-font-size0);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .csRuntimeCardLabel {
   display: flex;
   flex-direction: column;
@@ -157,10 +177,30 @@
 .csRuntimeCardMeta {
   /* The allocation is the reason to pick one card over another, so it wraps
      rather than truncating to an ellipsis. */
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  align-items: center;
+  justify-content: center;
   color: var(--jp-ui-font-color2);
   font-size: var(--jp-ui-font-size0);
   line-height: 1.35;
-  text-wrap: balance;
+}
+
+.csResourceMeasure {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+}
+
+.csResourceMeasure svg {
+  width: 13px;
+  height: 13px;
+  color: var(--jp-ui-font-color3);
+}
+
+.csResourceSeparator {
+  color: var(--jp-ui-font-color3);
 }
 
 .csRuntimeState {

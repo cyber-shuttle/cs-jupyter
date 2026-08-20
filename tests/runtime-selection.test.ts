@@ -184,7 +184,7 @@ describe("serialized runtime selection", () => {
       cards.length,
       [...cards].slice(0, 2).every((card) => card.tagName === "BUTTON"),
       cards[0].ariaLabel?.includes("delta, READY"),
-      cards[0].textContent?.includes("CPUs: 1, GPUs: 0, MEM: 1024 MB"),
+      cards[0].textContent?.includes("1·0·1G"),
       cards[1].ariaLabel?.includes("FAILED"),
       cards[0].querySelector(".csRuntimeState-ready")?.textContent,
       cards[2].classList.contains("csRuntimeAddCard"),
@@ -452,16 +452,33 @@ describe("runtime card contract", () => {
     expect(card.querySelector(".csRuntimeCardTitle")?.textContent).toBe(
       gpu.sshHost,
     );
+    expect(
+      [...card.querySelectorAll(".csResourceMeasure")].map((measure) => [
+        measure.getAttribute("title"),
+        measure.querySelector(".csResourceValue")?.textContent,
+        !!measure.querySelector("svg"),
+      ]),
+    ).toEqual([
+      ["8 CPU", "8", true],
+      ["2 GPU", "2", true],
+      ["32G memory", "32G", true],
+    ]);
     expect(card.querySelector(".csRuntimeCardMeta")?.textContent).toBe(
-      "CPUs: 8, GPUs: 2, MEM: 32768 MB",
+      "8·2·32G",
     );
     expect(card.querySelector(".csRuntimeState")?.textContent).toBe(gpu.state);
-    // Name, then what state it is in, then what it costs.
+    // Identity, then what state it is in, then what it costs.
     expect(
       [...card.querySelectorAll(".csRuntimeCardLabel > *")].map(
         (node) => node.className.split(" ")[0],
       ),
-    ).toEqual(["csRuntimeCardTitle", "csRuntimeState", "csRuntimeCardMeta"]);
+    ).toEqual(["csRuntimeCardIdentity", "csRuntimeState", "csRuntimeCardMeta"]);
+    // The allocation sits with the host, not as another block.
+    expect(
+      [...card.querySelectorAll(".csRuntimeCardIdentity > *")].map(
+        (node) => node.textContent,
+      ),
+    ).toEqual([gpu.sshHost, gpu.account]);
     // The working directory and Jupyter readiness live in the detail dialog.
     expect(card.textContent).not.toContain(gpu.rootFolder);
     expect(card.textContent).not.toContain("Jupyter:");
