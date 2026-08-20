@@ -111,6 +111,18 @@
   text-decoration: none;
 }
 
+/* Inside the launcher's content the panel is laid out by the page, not by a
+   Lumino parent. The stacked layout stamps `position: absolute; contain: strict`
+   inline on its child, which collapses to nothing in flow, so both levels are
+   returned to normal flow and sized by what they render. */
+.jp-Launcher-content > .csShell,
+.jp-Launcher-content > .csShell > .csRuntimePanel {
+  position: relative !important;
+  width: auto !important;
+  height: auto !important;
+  contain: none !important;
+}
+
 .csRuntimePanel [hidden] {
   display: none !important;
 }

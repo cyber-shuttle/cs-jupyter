@@ -196,8 +196,10 @@ describe("serialized runtime selection", () => {
       ),
     ).toEqual(["Cybershuttle", "Runtimes"]);
     expect(
+      // The runtimes render as a section the launcher can host directly, so
+      // they share its scrolling content instead of bringing their own.
       panel.node.querySelector(
-        ".jp-Launcher-body > .jp-Launcher-content > .jp-Launcher-section > .jp-Launcher-cardContainer",
+        ".csRuntimeLauncher > .jp-Launcher-section > .jp-Launcher-cardContainer",
       ),
     ).not.toBeNull();
     cards[0].click();

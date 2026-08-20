@@ -1,7 +1,7 @@
 import type { JupyterFrontEndPlugin } from "@jupyterlab/application";
 import { ICommandPalette } from "@jupyterlab/apputils";
 import { PageConfig } from "@jupyterlab/coreutils";
-import { BoxPanel, type Widget } from "@lumino/widgets";
+import { Widget } from "@lumino/widgets";
 import { ControlClient, validRuntimeId } from "./ControlClient.js";
 import { CyberShuttlePanel } from "./CyberShuttlePanel.js";
 import {
@@ -41,7 +41,7 @@ export function runtimeLiteUrl(
   return url.toString();
 }
 
-type MainWidget = Widget & { content: Widget; contentHeader: BoxPanel };
+type MainWidget = Widget & { content: Widget };
 
 class LiteRuntimeController extends RuntimeController {
   activeRuntimeId: string | undefined;
@@ -67,39 +67,38 @@ export const runtimeUiPlugin: JupyterFrontEndPlugin<void> = {
     );
     controller.activeRuntimeId = getActiveRuntimeId();
     let panel: CyberShuttlePanel | undefined;
-    let panelObserver: ResizeObserver | undefined;
-    const sizeHeader = (): void => {
-      const section = panel?.node.querySelector(".csRuntimeLauncher");
-      const height = section?.scrollHeight;
-      if (panel?.parent && height) {
-        BoxPanel.setSizeBasis(panel, height);
-        BoxPanel.setSizeBasis(panel.parent, height);
-      }
-    };
-    const queueHeader = (): number =>
-      requestAnimationFrame(() => requestAnimationFrame(sizeHeader));
-    window.addEventListener("resize", sizeHeader);
+    let contentObserver: MutationObserver | undefined;
     const asLauncher = (widget: Widget | null): MainWidget | undefined =>
       (widget as MainWidget | null)?.content?.hasClass("jp-Launcher")
         ? (widget as MainWidget)
         : undefined;
+    // The runtimes belong in the launcher's own scrolling content, beside the
+    // sections it renders itself. Mounting them in the content header instead
+    // gave them a second scroll container, so a long list scrolled against the
+    // rest of the page rather than with it. The launcher re-renders that
+    // content, so the node is put back whenever React replaces it.
+    const mount = (launcher: MainWidget): void => {
+      const content = launcher.content.node.querySelector<HTMLElement>(
+        ".jp-Launcher-content",
+      );
+      if (!panel || !content || panel.node.parentElement === content) return;
+      content.insertBefore(panel.node, content.firstChild);
+      if (!panel.isAttached) Widget.attach(panel, content);
+    };
     const attachLauncher = (launcher: MainWidget): void => {
-      if (panel?.parent === launcher.contentHeader) return;
-      const previous = panel?.parent?.parent;
       if (!panel || panel.isDisposed) {
         panel = new CyberShuttlePanel(api, controller);
-        panel.stateChanged.connect(queueHeader);
       }
-      launcher.contentHeader.addWidget(panel);
-      panelObserver?.disconnect();
-      panelObserver = new ResizeObserver(sizeHeader);
-      const section = panel.node.querySelector(".csRuntimeLauncher");
-      if (section) panelObserver.observe(section);
-      queueHeader();
+      contentObserver?.disconnect();
+      mount(launcher);
+      contentObserver = new MutationObserver(() => mount(launcher));
+      contentObserver.observe(launcher.content.node, {
+        childList: true,
+        subtree: true,
+      });
       const lockTitle = () => (launcher.title.closable = false);
       launcher.title.changed.connect(lockTitle, panel);
       lockTitle();
-      if (previous && previous !== launcher) previous.dispose();
     };
     const openLauncher = async () => {
       const launcher =

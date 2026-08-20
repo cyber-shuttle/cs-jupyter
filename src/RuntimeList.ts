@@ -86,10 +86,6 @@ export class RuntimeList extends Widget {
     );
     launcher.appendChild(header);
 
-    const body = document.createElement("div");
-    body.className = "jp-Launcher-body";
-    const content = document.createElement("div");
-    content.className = "jp-Launcher-content";
     const section = document.createElement("section");
     section.className = "jp-Launcher-section csRuntimeSection";
     const sectionHeader = document.createElement("header");
@@ -136,9 +132,7 @@ export class RuntimeList extends Widget {
           "csSignedOutNotice",
         ),
       );
-      content.appendChild(section);
-      body.appendChild(content);
-      launcher.appendChild(body);
+      launcher.appendChild(section);
       return launcher;
     }
 
@@ -163,9 +157,7 @@ export class RuntimeList extends Widget {
     add.onclick = () => this.createRequested.emit(undefined);
     cards.appendChild(add);
     section.appendChild(cards);
-    content.appendChild(section);
-    body.appendChild(content);
-    launcher.appendChild(body);
+    launcher.appendChild(section);
     return launcher;
   }
 
