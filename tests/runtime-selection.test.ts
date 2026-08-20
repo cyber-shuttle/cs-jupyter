@@ -456,6 +456,12 @@ describe("runtime card contract", () => {
       "CPUs: 8, GPUs: 2, MEM: 32768 MB",
     );
     expect(card.querySelector(".csRuntimeState")?.textContent).toBe(gpu.state);
+    // Name, then what state it is in, then what it costs.
+    expect(
+      [...card.querySelectorAll(".csRuntimeCardLabel > *")].map(
+        (node) => node.className.split(" ")[0],
+      ),
+    ).toEqual(["csRuntimeCardTitle", "csRuntimeState", "csRuntimeCardMeta"]);
     // The working directory and Jupyter readiness live in the detail dialog.
     expect(card.textContent).not.toContain(gpu.rootFolder);
     expect(card.textContent).not.toContain("Jupyter:");

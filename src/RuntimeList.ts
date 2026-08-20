@@ -180,13 +180,13 @@ export class RuntimeList extends Widget {
     // away.
     label.append(
       element("p", runtime.sshHost, "csRuntimeCardTitle"),
-      element("span", runtimeResourceSummary(runtime), "csRuntimeCardMeta"),
       element(
         "span",
         runtime.state,
         `csRuntimeState csRuntimeState-${runtime.state.toLowerCase()}`,
       ),
       ...(current ? [element("span", "Current", "csCurrentPill")] : []),
+      element("span", runtimeResourceSummary(runtime), "csRuntimeCardMeta"),
     );
     card.append(serverRackIcon(), label);
     return card;
@@ -198,23 +198,21 @@ function runtimeResourceSummary(runtime: IRuntime): string {
   return `CPUs: ${cores}, GPUs: ${gpuCount}, MEM: ${memoryMb} MB`;
 }
 
-// JupyterLab ships no rack icon, so this is the smallest one that reads as a
-// machine at 52px. currentColor keeps it correct in either theme.
+// JupyterLab ships no rack icon, so this is the smallest one that still reads
+// as a machine. Hairline strokes keep it as light as the glyphs beside it, and
+// currentColor keeps it correct in either theme.
 function serverRackIcon(): HTMLElement {
   const icon = element("div", "", "jp-LauncherCard-icon csRuntimeCardIcon");
   icon.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-  <g fill="none" stroke="currentColor" stroke-width="1.5">
-    <rect x="3.75" y="3.25" width="16.5" height="5" rx="1.4" />
-    <rect x="3.75" y="9.5" width="16.5" height="5" rx="1.4" />
-    <rect x="3.75" y="15.75" width="16.5" height="5" rx="1.4" />
+  <g fill="none" stroke="currentColor" stroke-width="1.1">
+    <rect x="4.25" y="4.5" width="15.5" height="4.4" rx="1.2" />
+    <rect x="4.25" y="9.8" width="15.5" height="4.4" rx="1.2" />
+    <rect x="4.25" y="15.1" width="15.5" height="4.4" rx="1.2" />
   </g>
   <g fill="currentColor">
-    <circle cx="7" cy="5.75" r="1" />
-    <circle cx="7" cy="12" r="1" />
-    <circle cx="7" cy="18.25" r="1" />
-    <rect x="12.5" y="5.25" width="5" height="1" rx="0.5" />
-    <rect x="12.5" y="11.5" width="5" height="1" rx="0.5" />
-    <rect x="12.5" y="17.75" width="5" height="1" rx="0.5" />
+    <circle cx="7.4" cy="6.7" r="0.7" />
+    <circle cx="7.4" cy="12" r="0.7" />
+    <circle cx="7.4" cy="17.3" r="0.7" />
   </g>
 </svg>`;
   return icon;
