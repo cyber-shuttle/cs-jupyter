@@ -238,3 +238,35 @@ describe("runtime polling", () => {
     panel.dispose();
   });
 });
+
+describe("session resume", () => {
+  it("treats a restored credential as signed in without a device-code round trip", async () => {
+    const api = {
+      resumeSession: vi.fn(async () => undefined),
+      signIn: vi.fn(async () => undefined),
+      listRuntimes: vi.fn(async () => runtimeListFixture()),
+      listSshHosts: vi.fn(async () => []),
+    };
+    const panel = panelFor(api);
+    await vi.waitFor(() => expect(panel.state.signedIn).toBe(true));
+    expect(api.signIn).not.toHaveBeenCalled();
+    expect(api.listRuntimes).toHaveBeenCalled();
+    panel.dispose();
+  });
+
+  it("stays signed out when no credential survived the reload", async () => {
+    const api = {
+      resumeSession: vi.fn(async () => {
+        throw new AuthInteractionRequiredError();
+      }),
+      signIn: vi.fn(async () => undefined),
+      listRuntimes: vi.fn(async () => runtimeListFixture()),
+      listSshHosts: vi.fn(async () => []),
+    };
+    const panel = panelFor(api);
+    await vi.waitFor(() => expect(api.resumeSession).toHaveBeenCalled());
+    expect(panel.state.signedIn).toBe(false);
+    expect(api.listRuntimes).not.toHaveBeenCalled();
+    panel.dispose();
+  });
+});

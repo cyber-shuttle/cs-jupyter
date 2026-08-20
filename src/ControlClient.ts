@@ -141,6 +141,12 @@ export class ControlClient {
     await this._auth.interactiveLogin();
   }
 
+  // Succeeds only on a credential that is still valid, so callers can tell a
+  // resumable session from one that needs the device-code round trip.
+  async resumeSession(): Promise<void> {
+    await this._auth.acquireToken();
+  }
+
   async listSshHosts(): Promise<ISshHost[]> {
     const value = await this._request("ssh");
     if (!isPlainObject(value) || !Array.isArray(value.hosts)) {

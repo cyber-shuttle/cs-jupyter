@@ -471,7 +471,7 @@ describe("AuthClient device-code broker flow", () => {
     }
   });
 
-  it("does not persist, log, or place OAuth credentials in URLs", async () => {
+  it("keeps OAuth credentials out of local storage, URLs, and logs", async () => {
     const originalUrl = window.location.href;
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -492,8 +492,12 @@ describe("AuthClient device-code broker flow", () => {
       accessToken: "access-token",
       idToken: "id-token",
     });
+    // Credentials survive a reload in per-tab session storage only: local
+    // storage would outlive the tab, and a URL would leak them to history.
     expect(localStorage.length).toBe(0);
-    expect(sessionStorage.length).toBe(0);
+    expect(sessionStorage.getItem("cybershuttle.oauth.v1")).toContain(
+      "access-token",
+    );
     expect(window.location.href).toBe(originalUrl);
     expect(
       vi
@@ -507,5 +511,43 @@ describe("AuthClient device-code broker flow", () => {
     log.mockRestore();
     warn.mockRestore();
     error.mockRestore();
+  });
+});
+
+describe("AuthClient credential persistence", () => {
+  it("restores an unexpired credential into a fresh client and drops it on expiry or sign-out", async () => {
+    const dependencies = advancingDependencies([
+      { body: deviceAuthorization },
+      { body: tokens },
+    ]);
+    const signedIn = new AuthClient(options, dependencies);
+    await signedIn.interactiveLogin();
+
+    // Opening a runtime navigates the page, so the next client is a new object.
+    const reloaded = new AuthClient(options, {
+      fetch: fetchSequence([]),
+      now: dependencies.nowValue,
+    });
+    await expect(reloaded.acquireToken()).resolves.toEqual({
+      accessToken: "access-token",
+      idToken: "id-token",
+    });
+
+    const expired = new AuthClient(options, {
+      fetch: fetchSequence([]),
+      now: () => dependencies.nowValue() + 60_000,
+    });
+    await expect(expired.acquireToken()).rejects.toBeInstanceOf(
+      AuthInteractionRequiredError,
+    );
+
+    await signedIn.interactiveLogin().catch(() => undefined);
+    signedIn.invalidateToken();
+    await expect(
+      new AuthClient(options, {
+        fetch: fetchSequence([]),
+        now: dependencies.nowValue,
+      }).acquireToken(),
+    ).rejects.toBeInstanceOf(AuthInteractionRequiredError);
   });
 });

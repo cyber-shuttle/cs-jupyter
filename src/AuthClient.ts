@@ -37,6 +37,7 @@ export interface IAuthClientOptions {
 export interface IAuthClientDependencies {
   fetch?: typeof globalThis.fetch;
   now?: () => number;
+  storage?: Storage;
   sleep?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
 }
 
@@ -52,12 +53,45 @@ interface TokenResult extends OAuthCredentials {
   expiresInSeconds: number;
 }
 
-// Tokens live only in memory: never storage, never a URL, never a log.
+const SESSION_KEY = "cybershuttle.oauth.v1";
+
+// Tokens survive a reload in per-tab session storage, never a URL and never a
+// log. Opening a runtime navigates the page, so a memory-only credential would
+// force a device-code round trip on every navigation.
+function readStoredCredentials(
+  storage: Storage,
+  now: number,
+): { credentials: OAuthCredentials; expiresAt: number } | undefined {
+  const raw = storage.getItem(SESSION_KEY);
+  if (!raw) return undefined;
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (
+      !isPlainObject(value) ||
+      Object.keys(value).sort().join(",") !== "accessToken,expiresAt,idToken" ||
+      typeof value.accessToken !== "string" ||
+      typeof value.idToken !== "string" ||
+      typeof value.expiresAt !== "number" ||
+      !(value.expiresAt > now)
+    ) {
+      throw new Error("stored credentials are invalid or expired");
+    }
+    return {
+      credentials: { accessToken: value.accessToken, idToken: value.idToken },
+      expiresAt: value.expiresAt,
+    };
+  } catch {
+    storage.removeItem(SESSION_KEY);
+    return undefined;
+  }
+}
+
 export class AuthClient {
   private readonly _startEndpoint: string;
   private readonly _pollEndpoint: string;
   private readonly _fetch: typeof globalThis.fetch;
   private readonly _now: () => number;
+  private readonly _storage: Storage;
   private readonly _sleep: (
     milliseconds: number,
     signal: AbortSignal,
@@ -80,13 +114,18 @@ export class AuthClient {
     this._pollEndpoint = `${base}/oauth/device/poll/`;
     this._fetch = dependencies.fetch ?? globalThis.fetch.bind(globalThis);
     this._now = dependencies.now ?? Date.now;
+    this._storage = dependencies.storage ?? window.sessionStorage;
     this._sleep = dependencies.sleep ?? abortableSleep;
+    const stored = readStoredCredentials(this._storage, this._now());
+    if (stored) {
+      this._credentials = stored.credentials;
+      this._expiresAt = stored.expiresAt;
+    }
   }
 
   async acquireToken(): Promise<OAuthCredentials> {
     if (!this._credentials || this._now() >= this._expiresAt) {
-      this._credentials = undefined;
-      this._expiresAt = 0;
+      this.invalidateToken();
       throw new AuthInteractionRequiredError();
     }
     return { ...this._credentials };
@@ -95,6 +134,7 @@ export class AuthClient {
   invalidateToken(): void {
     this._credentials = undefined;
     this._expiresAt = 0;
+    this._storage.removeItem(SESSION_KEY);
   }
 
   interactiveLogin(): Promise<OAuthCredentials> {
@@ -130,6 +170,10 @@ export class AuthClient {
         };
         this._expiresAt =
           this._now() + secondsToMilliseconds(result.expiresInSeconds);
+        this._storage.setItem(
+          SESSION_KEY,
+          JSON.stringify({ ...this._credentials, expiresAt: this._expiresAt }),
+        );
         return { ...this._credentials };
       } finally {
         modal.close();

@@ -96,6 +96,7 @@ export class CyberShuttlePanel extends StackedPanel {
     this._list.sshHostsRequested.connect(() => void this.openSshHosts());
     this._list.signInRequested.connect(() => void this.signIn());
     this._emitState();
+    void this.resume();
   }
 
   get currentRuntimeId(): string | undefined {
@@ -352,14 +353,7 @@ export class CyberShuttlePanel extends StackedPanel {
     try {
       await this._api.signIn();
       if (this.isDisposed) return;
-      this._signedIn = true;
-      this._authRequired = false;
-      this._setStreamStatus("");
-      this._startPolling();
-      if (!this._controlInitialized) {
-        this._controlInitialized = true;
-        await this._initialize();
-      }
+      await this._activateSession();
     } catch (error) {
       if (!this.isDisposed) {
         if (error instanceof AuthInteractionRequiredError)
@@ -367,6 +361,29 @@ export class CyberShuttlePanel extends StackedPanel {
         else this._setError(errorMessage(error));
       }
     }
+  }
+
+  private async _activateSession(): Promise<void> {
+    this._signedIn = true;
+    this._authRequired = false;
+    this._setStreamStatus("");
+    this._startPolling();
+    if (!this._controlInitialized) {
+      this._controlInitialized = true;
+      await this._initialize();
+    }
+  }
+
+  // A credential restored from the previous page is already a live session:
+  // without this the header offers a sign-in the browser does not need and
+  // runtime polling never starts.
+  async resume(): Promise<void> {
+    try {
+      await this._api.resumeSession();
+    } catch {
+      return;
+    }
+    if (!this.isDisposed) await this._activateSession();
   }
 
   private _requireAuthentication(): void {
