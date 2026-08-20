@@ -174,9 +174,10 @@ export class RuntimeList extends Widget {
   private _identityControl(): HTMLElement {
     const holder = element("div", "", "csIdentity");
     if (!this._state.signedIn) {
-      const signIn = button(
-        this._state.signingIn ? "Signing in…" : "Sign in",
-        "csTextButton csSignInButton",
+      const signIn = button("", "csTextButton csIdentityButton csSignInButton");
+      signIn.append(
+        userGlyph(),
+        element("span", this._state.signingIn ? "Signing in…" : "Sign in"),
       );
       signIn.dataset.runtimeAction = "sign-in";
       signIn.disabled = this._state.signingIn;
@@ -184,9 +185,10 @@ export class RuntimeList extends Widget {
       holder.appendChild(signIn);
       return holder;
     }
-    const trigger = button(
-      this._state.account ?? "Account",
-      "csTextButton csAccountButton",
+    const trigger = button("", "csTextButton csIdentityButton csAccountButton");
+    trigger.append(
+      userGlyph(),
+      element("span", this._state.account ?? "Account"),
     );
     trigger.dataset.runtimeAction = "account";
     trigger.setAttribute("aria-haspopup", "menu");
@@ -303,4 +305,12 @@ function serverRackIcon(
   </g>
 </svg>`;
   return icon;
+}
+
+// The identity control shows who the session belongs to, so it carries a face
+// rather than only a name.
+function userGlyph(): SVGSVGElement {
+  const holder = element("div", "");
+  holder.innerHTML = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><circle cx="10" cy="10" r="8.6" /><circle cx="10" cy="8.2" r="2.6" /><path d="M5.3 16.5a5 5 0 0 1 9.4 0" /></g></svg>`;
+  return holder.firstElementChild as SVGSVGElement;
 }

@@ -32,6 +32,9 @@
 }
 
 .csDeviceCode {
+  /* The tracking adds a trailing gap after the last character; pulling it back
+     keeps the copy control beside the code rather than adrift from it. */
+  margin-right: -0.12em;
   font-size: 1.5rem;
   font-weight: 700;
   letter-spacing: 0.12em;
@@ -41,7 +44,7 @@
    rather than the code centring alone above a button. */
 .csDeviceCodeRow {
   display: flex;
-  gap: 10px;
+  gap: 2px;
   align-items: center;
   justify-content: center;
   margin: 20px 0;
@@ -191,6 +194,18 @@
   position: relative;
 }
 
+.csIdentityButton {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.csIdentityButton svg {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+}
+
 .csAccountButton {
   max-width: 260px;
   overflow: hidden;
@@ -285,7 +300,11 @@
   gap: 4px;
 }
 
-.csRuntimeCardTitle {
+/* Outranks the launcher's own `.jp-LauncherCard-label p`, which reserves two
+   lines under every card title so wrapped ones align. This title never wraps,
+   and that reserve is the gap that separated it from the allocation beneath. */
+.jp-LauncherCard-label p.csRuntimeCardTitle {
+  min-height: 0;
   margin: 0;
   overflow: hidden;
   text-overflow: ellipsis;
