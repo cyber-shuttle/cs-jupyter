@@ -71,6 +71,7 @@ export class CreateRuntimeForm extends Widget {
   private _draft = freshDraft();
   private _reviewRequest: IRuntimeCreateRequest | undefined;
   private _validation: IRuntimeValidation | undefined;
+  private _script = "";
   private _validationError = "";
   private _validating = false;
   private _validationGeneration = 0;
@@ -147,6 +148,29 @@ export class CreateRuntimeForm extends Widget {
     super.dispose();
   }
 
+  // The dialog claims Enter for a footer this form does not have, and it claims
+  // it from the document down, so the key is taken back before the dialog sees
+  // it. Propagation only: the browser's own form submission is the point.
+  protected onAfterAttach(): void {
+    document.addEventListener("keydown", this._keepEnter, true);
+  }
+
+  protected onBeforeDetach(): void {
+    document.removeEventListener("keydown", this._keepEnter, true);
+  }
+
+  private _keepEnter = (event: KeyboardEvent): void => {
+    const target = event.target;
+    if (
+      event.key === "Enter" &&
+      this.node.contains(target as Node) &&
+      (target instanceof HTMLInputElement ||
+        target instanceof HTMLSelectElement)
+    ) {
+      event.stopPropagation();
+    }
+  };
+
   private _selectHost(alias: string): void {
     this._stopOperation();
     this._leaveReview();
@@ -176,6 +200,7 @@ export class CreateRuntimeForm extends Widget {
     this._cancelReviewOperation();
     this._reviewRequest = undefined;
     this._validation = undefined;
+    this._script = "";
     this._validationError = "";
     this._reviewSubmit = undefined;
     this._reviewStatus = undefined;
@@ -273,18 +298,20 @@ export class CreateRuntimeForm extends Widget {
     const scriptHeader = element("div", "", "csScriptHeader");
     const scriptLabel = element("label", "Generated Slurm script", "csLabel");
     scriptLabel.htmlFor = "cybershuttle-slurm-script";
+    const shown = this._validation?.script || this._script;
     const copy = button("Copy script", "csSecondaryButton", () => {
-      if (this._validation) {
-        void navigator.clipboard?.writeText(this._validation.script);
+      if (shown) {
+        void navigator.clipboard?.writeText(shown);
       }
     });
-    copy.disabled = !this._validation;
+    copy.disabled = !shown;
     scriptHeader.append(scriptLabel, copy);
     const script = document.createElement("pre");
     script.id = "cybershuttle-slurm-script";
     script.className = "csSlurmScript";
     script.setAttribute("tabindex", "0");
-    script.textContent = this._validation?.script || "Validating script…";
+    script.textContent =
+      this._validation?.script || this._script || "Building the Slurm script…";
 
     const status = element("div", "", "csValidationStatus");
     status.setAttribute("role", "status");
@@ -351,10 +378,21 @@ export class CreateRuntimeForm extends Widget {
     const abort = new AbortController();
     this._reviewAbort = abort;
     this._validation = undefined;
+    this._script = "";
     this._validationError = "";
     this._validating = true;
     this._render();
     try {
+      // The script comes first and on its own, so what Slurm is being asked
+      // about is readable while it is being asked.
+      const script = await this._api.previewRuntimeScript(
+        cloneRequest(request),
+        abort.signal,
+      );
+      if (this._currentReview(request, generation)) {
+        this._script = script;
+        this._render();
+      }
       const validation = await this._api.validateRuntime(
         cloneRequest(request),
         abort.signal,

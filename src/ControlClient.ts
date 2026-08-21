@@ -233,6 +233,24 @@ export class ControlClient {
     };
   }
 
+  // The script alone, so a caller can read what Slurm is about to be asked
+  // about while it is being asked.
+  async previewRuntimeScript(
+    request: IRuntimeCreateRequest,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const value = await this._request("runtimes/script", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+      signal,
+    });
+    if (!isPlainObject(value) || typeof value.script !== "string") {
+      throw new Error("cs-control returned an invalid runtime script.");
+    }
+    return value.script;
+  }
+
   async validateRuntime(
     request: IRuntimeCreateRequest,
     signal?: AbortSignal,

@@ -199,9 +199,8 @@ describe("host refresh while the runtime wizard is active", () => {
       await vi.waitFor(() => expect(listHosts).toHaveBeenCalledTimes(2));
       const host = state.hostWidgets[0];
       await vi.waitFor(() => expect(Dialog.tracker.size).toBe(1));
-      [...document.querySelectorAll<HTMLButtonElement>("button")]
-        .find((button) => button.textContent === "Close")!
-        .click();
+      // The dialog's own control is the only close: no footer repeats it.
+      Dialog.tracker.currentWidget!.reject();
       await vi.waitFor(() => expect(host.isDisposed).toBe(true));
       state.hostRenders[0].mockClear();
       outcome === "resolve"

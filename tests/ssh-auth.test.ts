@@ -35,6 +35,9 @@ const mocks = vi.hoisted(() => {
     emitResize(cols: number, rows: number): void {
       this._resize({ cols, rows });
     }
+    input(value: string): void {
+      this._data(value);
+    }
   }
   const terminals: Terminal[] = [];
   return { Terminal, terminals };
@@ -150,6 +153,28 @@ describe("SSH operation console protocol", () => {
     expect(ready).toHaveBeenCalledOnce();
     expect(exit).not.toHaveBeenCalled();
     expect(JSON.stringify(session)).not.toContain("secret");
+    session.dispose();
+  });
+
+  it("delivers Enter that the hosting dialog would otherwise take", async () => {
+    const session = new SshOperationConsole();
+    document.body.appendChild(session.node);
+    session.start(connect("ws://localhost/ssh/delta/auth"), {
+      failed: vi.fn(),
+    });
+    await Promise.resolve();
+    const socket = sockets[0];
+    const dialog = vi.fn();
+    document.addEventListener("keydown", dialog);
+    session.node.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+    );
+    document.removeEventListener("keydown", dialog);
+    expect(Array.from(socket.sent[0] as Uint8Array)).toEqual(
+      Array.from(new TextEncoder().encode("\r")),
+    );
+    // The dialog above never sees the key it would have closed on.
+    expect(dialog).not.toHaveBeenCalled();
     session.dispose();
   });
 });

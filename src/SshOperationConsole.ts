@@ -86,6 +86,11 @@ export class SshOperationConsole implements ISshOperationConsole {
     this._terminal.onResize(({ cols, rows }) =>
       this._send({ type: "resize", cols, rows }),
     );
+    // The dialog that hosts this console claims Enter for its own buttons, and
+    // it claims it from the document down, so the terminal never sees the one
+    // key an OpenSSH prompt is waiting for. The console takes it back and
+    // delivers it itself.
+    document.addEventListener("keydown", this._enter, true);
     if (typeof ResizeObserver !== "undefined") {
       this._resizeObserver = new ResizeObserver(() => this._fitAndReport());
       this._resizeObserver.observe(this.node);
@@ -134,6 +139,7 @@ export class SshOperationConsole implements ISshOperationConsole {
     this._disposed = true;
     this._generation++;
     this._closeSocket();
+    document.removeEventListener("keydown", this._enter, true);
     this._resizeObserver?.disconnect();
     this._terminal.dispose();
     this.node.remove();
@@ -236,6 +242,18 @@ export class SshOperationConsole implements ISshOperationConsole {
         this._fail("cs-control returned an unknown SSH operation frame.");
     }
   }
+
+  private _enter = (event: KeyboardEvent): void => {
+    if (
+      event.key !== "Enter" ||
+      this._finished ||
+      !this.node.contains(event.target as Node)
+    ) {
+      return;
+    }
+    event.stopPropagation();
+    this._terminal.input("\r");
+  };
 
   private _fail(message: string): void {
     if (this._disposed || this._finished) {

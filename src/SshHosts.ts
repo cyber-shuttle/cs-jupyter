@@ -119,9 +119,10 @@ export class SshHosts extends Widget {
 
   private _render(): void {
     this.node.textContent = "";
-    const root = element("div", "", "csRoot");
+    const root = element("div", "", "csRoot csScrollRoot");
     // The dialog already names itself, so this opens with what the list means
-    // and a rule under it.
+    // and a rule under it. Both belong to the title: the list scrolls under
+    // them, never with them.
     root.append(
       element(
         "div",
@@ -130,10 +131,11 @@ export class SshHosts extends Widget {
       ),
       element("hr", "", "csModalRule"),
     );
+    const scroll = element("div", "", "csModalScroll");
     if (this._error) {
-      root.appendChild(element("div", this._error, "csError"));
+      scroll.appendChild(element("div", this._error, "csError"));
     }
-    root.appendChild(this._addSection());
+    scroll.appendChild(this._addSection());
     const card = element("div", "", "csCard");
     for (const host of this._hosts) {
       card.appendChild(this._hostEntry(host));
@@ -143,7 +145,8 @@ export class SshHosts extends Widget {
         element("div", "No SSH hosts are configured.", "csStatus"),
       );
     }
-    root.appendChild(card);
+    scroll.appendChild(card);
+    root.appendChild(scroll);
     this.node.appendChild(root);
   }
 

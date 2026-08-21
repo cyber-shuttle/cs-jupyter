@@ -1,6 +1,6 @@
 import { Dialog, showDialog } from "@jupyterlab/apputils";
 import { Signal } from "@lumino/signaling";
-import { StackedPanel, Widget } from "@lumino/widgets";
+import { Panel, StackedPanel, Widget } from "@lumino/widgets";
 import { AuthInteractionRequiredError } from "./AuthClient";
 import { CreateRuntimeForm } from "./CreateRuntimeForm";
 import {
@@ -631,9 +631,10 @@ export class CyberShuttlePanel extends StackedPanel {
     }
   }
 
-  // Each modal is one view titled after it, closed by the dialog's own control.
+  // Each modal is one view titled after it, closed by the dialog's own control:
+  // no footer repeats that, and the view's own action sits where a footer would.
   async openCreate(like?: IRuntime): Promise<void> {
-    const body = new StackedPanel();
+    const body = new Panel();
     body.addClass("csWorkspaceModal");
     const form = this._createForm();
     body.addWidget(form);
@@ -644,7 +645,7 @@ export class CyberShuttlePanel extends StackedPanel {
     const dialog = new Dialog({
       title: "Add Runtime",
       body,
-      buttons: [Dialog.cancelButton({ label: "Close" })],
+      buttons: [],
       hasClose: true,
     });
     const show = (widget: Widget): void => {
@@ -654,7 +655,7 @@ export class CyberShuttlePanel extends StackedPanel {
       widget.activate();
     };
     form.sshHostsRequested.connect(() => {
-      dialog.resolve(0);
+      dialog.reject();
       void this.openSshHosts();
     });
     form.createRequested.connect((_sender, intent) => {
@@ -671,7 +672,7 @@ export class CyberShuttlePanel extends StackedPanel {
     await new Dialog({
       title: "SSH Hosts",
       body: hosts,
-      buttons: [Dialog.cancelButton({ label: "Close" })],
+      buttons: [],
       hasClose: true,
     })
       .launch()
@@ -681,7 +682,7 @@ export class CyberShuttlePanel extends StackedPanel {
   private async _createInModal(
     allocation: IRuntimeCreateRequest,
     form: CreateRuntimeForm,
-    body: StackedPanel,
+    body: Panel,
     show: (widget: Widget) => void,
   ): Promise<void> {
     form.setError("");

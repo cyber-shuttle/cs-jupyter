@@ -191,34 +191,49 @@
 
 .csRoot {
   box-sizing: border-box;
-  height: 100%;
-  overflow: auto;
   background: var(--jp-layout-color1);
   color: var(--jp-ui-font-color1);
   font-family: var(--jp-ui-font-family);
   font-size: var(--jp-ui-font-size1);
 }
 
+/* The dialog is as tall as what it holds and no taller; only content longer
+   than the viewport scrolls, and then inside the body rather than the page. */
 .jp-Dialog-content:has(.csWorkspaceModal) {
   width: min(90vw, 1100px);
-  height: min(85vh, 850px);
   max-width: calc(100vw - 32px);
-  max-height: calc(100vh - 32px);
+  max-height: min(85vh, 850px);
 }
 
-.jp-Dialog-content:has(.csWorkspaceModal) .jp-Dialog-body,
+.jp-Dialog-content:has(.csWorkspaceModal) .jp-Dialog-body {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+}
+
 .csWorkspaceModal {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+}
+
+/* A view whose head stays put while its list moves. */
+.csScrollRoot {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
   min-height: 0;
   overflow: hidden;
 }
 
-.jp-Dialog-content:has(.csWorkspaceModal) .jp-Dialog-body {
-  flex: 1 1 auto;
-}
-
-.csWorkspaceModal {
-  width: 100%;
-  height: 100%;
+.csModalScroll {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: auto;
 }
 
 .csFormTop {

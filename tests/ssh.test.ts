@@ -147,6 +147,9 @@ function formHarness() {
         }),
     ),
     sshAuthWebSocket: vi.fn((_host: string) => vi.fn()),
+    previewRuntimeScript: vi.fn(
+      async () => "#!/bin/bash\n#SBATCH --partition=test\n",
+    ),
     validateRuntime: vi.fn(async () => ({
       runtimeId: "rt-012345abcdef",
       status: "PASSED",
