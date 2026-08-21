@@ -2,7 +2,7 @@ import { Widget } from "@lumino/widgets";
 import { isTerminal, type IRuntime, type RuntimeState } from "./Common";
 import type { CyberShuttlePanel, IRuntimeUiState } from "./CyberShuttlePanel";
 import type { IRuntimeLogTail } from "./ControlClient";
-import { button, element } from "./dom";
+import { button, element, statePill } from "./dom";
 
 const ACTIVE_STATES = new Set<RuntimeState>([
   "SUBMITTING",
@@ -112,11 +112,7 @@ export class RuntimeDetail extends Widget {
         runtime.account || "(no project)",
         "csRuntimeDetailAccount",
       ),
-      element(
-        "span",
-        runtime.state,
-        `csRuntimeState csRuntimeState-${runtime.state.toLowerCase()}`,
-      ),
+      statePill(runtime.state),
     );
     const actions = document.createElement("div");
     actions.className = "csRuntimeDetailActions";

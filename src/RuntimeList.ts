@@ -2,7 +2,7 @@ import { Signal } from "@lumino/signaling";
 import { Widget } from "@lumino/widgets";
 import type { IRuntime } from "./Common";
 import type { IRuntimeUiState } from "./CyberShuttlePanel";
-import { button, element } from "./dom";
+import { button, element, statePill } from "./dom";
 
 export const emptyState = (): IRuntimeUiState => ({
   runtimes: [],
@@ -261,11 +261,7 @@ export class RuntimeList extends Widget {
     }
     label.append(
       identity,
-      element(
-        "span",
-        runtime.state,
-        `csRuntimeState csRuntimeState-${runtime.state.toLowerCase()}`,
-      ),
+      statePill(runtime.state),
       ...(current ? [element("span", "Current", "csCurrentPill")] : []),
       runtimeResourceRow(runtime),
     );

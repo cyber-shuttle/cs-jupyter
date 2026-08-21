@@ -40,3 +40,13 @@ export function closeButton(
   value.innerHTML = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /></svg>`;
   return value;
 }
+
+// The one place a runtime's state becomes a pill, so the list and the detail
+// cannot drift apart on what a state looks like.
+export function statePill(state: string): HTMLElement {
+  return element(
+    "span",
+    state,
+    `csRuntimeState csRuntimeState-${state.toLowerCase()}`,
+  );
+}

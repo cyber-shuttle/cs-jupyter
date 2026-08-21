@@ -2,7 +2,6 @@ import { PageConfig, URLExt } from "@jupyterlab/coreutils";
 import { ServerConnection } from "@jupyterlab/services";
 import {
   AuthClient,
-  AuthInteractionRequiredError,
   validControlApiUrl,
   type OAuthCredentials,
 } from "./AuthClient";

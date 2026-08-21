@@ -2,7 +2,6 @@
 .csRuntimePanel {
   width: 100%;
 }
-
 .csDeviceCodeOverlay {
   position: fixed;
   z-index: 10000;
@@ -12,7 +11,6 @@
   padding: 16px;
   background: rgb(0 0 0 / 45%);
 }
-
 .csDeviceCodeDialog {
   position: relative;
   box-sizing: border-box;
@@ -25,12 +23,10 @@
   box-shadow: var(--jp-elevation-z6);
   font-family: var(--jp-ui-font-family);
 }
-
 .csDeviceCodeDialog h2 {
   margin: 0 0 12px;
   font-size: var(--jp-ui-font-size3);
 }
-
 .csDeviceCode {
   /* The tracking adds a trailing gap after the last character; pulling it back
      keeps the copy control beside the code rather than adrift from it. */
@@ -38,9 +34,8 @@
   font-size: 1.5rem;
   font-weight: 700;
   letter-spacing: 0.12em;
-}
-
-/* The code and the control that copies it are one thing, so they sit together
+} /* The code and the control that copies it are one thing,
+so they sit together
    rather than the code centring alone above a button. */
 .csDeviceCodeRow {
   display: flex;
@@ -49,7 +44,6 @@
   justify-content: center;
   margin: 20px 0;
 }
-
 .csDeviceCodeCopy,
 .csModalClose {
   display: inline-flex;
@@ -61,26 +55,21 @@
   background: transparent;
   color: var(--jp-ui-font-color2);
   cursor: pointer;
-}
-
-/* JupyterLab paints the dialog's title row; the close control belongs on it,
-   not on a row of its own inside the body. */
+} /* JupyterLab paints the dialog's title row; the close control belongs on it,
+not on a row of its own inside the body. */
 .jp-Dialog-content:has(.csModalClose) {
   position: relative;
 }
-
 .jp-Dialog-content .csModalClose {
   position: absolute;
   top: 12px;
   right: 12px;
 }
-
 .csDeviceCodeCopy svg,
 .csModalClose svg {
   width: 18px;
   height: 18px;
 }
-
 .csDeviceCodeCopy:hover,
 .csDeviceCodeCopy:focus-visible,
 .csModalClose:hover,
@@ -88,94 +77,83 @@
   background: var(--jp-layout-color2);
   color: var(--jp-ui-font-color1);
 }
-
 .csDeviceCodeCopied,
 .csDeviceCodeCopied:hover {
   color: var(--jp-success-color1);
 }
-
 .csModalClose {
   position: absolute;
   z-index: 1;
   top: 12px;
   right: 12px;
-}
-
-/* The subtitle says what the list is; the rule below it says the title is over
+} /* The subtitle says what the list is; the rule below it says the title is over
    and the content has begun. */
 .csModalSubtitle {
   padding-right: 32px;
   color: var(--jp-ui-font-color2);
   font-size: var(--jp-ui-font-size1);
-}
-
-/* Every row reads label on the left, control on the right. */
+} /* Every row reads label on the left,
+control on the right. */
 .csForm .csField {
   display: grid;
   grid-template-columns: 11rem minmax(0, 1fr);
   gap: 12px;
   align-items: center;
 }
-
 .csForm .csField .csFieldHelp {
   grid-column: 2;
 }
-
 .csForm .csResourceType {
   display: grid;
   grid-template-columns: 11rem minmax(0, 1fr);
   gap: 12px;
   align-items: center;
-}
-
-/* The query is one line: it turns, it says what it is doing, and it can be
+} /* The query is one line: it turns,
+it says what it is doing,
+and it can be
    stopped without leaving the form. */
 .csSshAuthHeader {
   display: flex;
   gap: 8px;
   align-items: center;
 }
-
 .csDiscoveryCancel {
   margin-left: auto;
 }
-
 .csModalRule {
   height: 0;
   border: 0;
   border-top: 1px solid var(--jp-border-color2);
   margin: 12px 0;
 }
-
 .csDeviceCodeOpen {
   gap: 8px;
 }
-
 .csDeviceCodeWaiting {
   pointer-events: none;
   opacity: 0.75;
 }
-
 .csDeviceCodeActions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 16px;
-}
-
-/* JupyterLab resets anchor colour with `.jp-ThemedContainer a`, which outranks
-   a single class, so the anchor form of the primary button restates it here. */
+} /* JupyterLab resets anchor colour with `.jp-ThemedContainer a`,
+which outranks
+   a single class,
+so the anchor form of the primary button restates it here. */
 .csDeviceCodeActions a.csPrimaryButton {
   display: inline-flex;
   align-items: center;
   color: #fff;
   text-decoration: none;
-}
-
-/* Inside the launcher's content the panel is laid out by the page, not by a
+} /* Inside the launcher's content the panel is laid out by the page,
+not by a
    Lumino parent. The stacked layout stamps `position: absolute; contain: strict`
-   inline on its child, which collapses to nothing in flow, so both levels are
+   inline on its child,
+which collapses to nothing in flow,
+so both levels are
    returned to normal flow and sized by what they render. */
 .jp-Launcher-content > .csShell,
 .jp-Launcher-content > .csShell > .csRuntimePanel {
@@ -184,33 +162,27 @@
   height: auto !important;
   contain: none !important;
 }
-
 .csRuntimePanel [hidden] {
   display: none !important;
 }
-
 .csRoot {
   box-sizing: border-box;
   background: var(--jp-layout-color1);
   color: var(--jp-ui-font-color1);
   font-family: var(--jp-ui-font-family);
   font-size: var(--jp-ui-font-size1);
-}
-
-/* The dialog is as tall as what it holds and no taller; only content longer
-   than the viewport scrolls, and then inside the body rather than the page. */
+} /* The dialog is as tall as what it holds and no taller; only content longer
+   than the viewport scrolls,
+and then inside the body rather than the page. */
 .jp-Dialog-content:has(.csWorkspaceModal) {
   width: min(90vw, 1100px);
   max-width: calc(100vw - 32px);
   max-height: min(85vh, 850px);
-}
-
-/* A view that carries its own action leaves no footer to reserve room for. */
+} /* A view that carries its own action leaves no footer to reserve room for. */
 .jp-Dialog-content:has(.csWorkspaceModal)
   .jp-Dialog-footer:has(.jp-Dialog-footerButtons:empty) {
   display: none;
 }
-
 .jp-Dialog-content:has(.csWorkspaceModal) .jp-Dialog-body {
   display: flex;
   flex: 0 1 auto;
@@ -218,16 +190,13 @@
   min-height: 0;
   overflow: auto;
 }
-
 .csWorkspaceModal {
   display: flex;
   flex: 0 1 auto;
   flex-direction: column;
   width: 100%;
   min-height: 0;
-}
-
-/* A view whose head stays put while its list moves. */
+} /* A view whose head stays put while its list moves. */
 .csScrollRoot {
   display: flex;
   flex: 0 1 auto;
@@ -235,66 +204,44 @@
   min-height: 0;
   overflow: hidden;
 }
-
 .csModalScroll {
   flex: 0 1 auto;
   min-height: 0;
   overflow: auto;
 }
-
-.csFormTop {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--jp-border-color2);
-  background: var(--jp-layout-color2);
-}
-
-.csFormTitle {
-  font-weight: 700;
-}
-
 .csStatus,
-.csError,
-.csCreateUnavailable {
+.csError {
   padding: 12px 14px;
 }
-
 .csStatus,
-.csMeta,
-.csCreateUnavailable {
+.csMeta {
   color: var(--jp-ui-font-color2);
 }
-
 .csError {
   color: var(--jp-error-color1);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-
 .csRuntimeLauncher {
   width: 100%;
 }
-
 .csRuntimeHeaderWidget {
   /* The same ground the side rails stand on, so the row reads as chrome rather
      than as the first thing in the scrolling content. */
   background: var(--jp-layout-color2);
-}
-
-/* The account menu hangs below the header row. Every Lumino level between it
-   and the page is stamped `contain: strict` inline, which paint-clips the menu
-   to the row, and the content region is a later absolutely positioned sibling,
-   which would paint over it. Both levels opt out, and the row is lifted. */
+} /* The account menu hangs below the header row. Every Lumino level between it
+   and the page is stamped `contain: strict` inline,
+which paint-clips the menu
+   to the row,
+and the content region is a later absolutely positioned sibling,
+which would paint over it. Both levels opt out,
+and the row is lifted. */
 .csRuntimeHeaderWidget,
 .lm-BoxPanel:has(> .csRuntimeHeaderWidget) {
   z-index: 1;
   overflow: visible !important;
   contain: none !important;
 }
-
 .csRuntimeHeaderWidget .csRuntimeLauncherHeader {
   /* The mark and the account sit the same distance from their own edges, and
      each sits the same distance from the words beside it. One value, so the
@@ -304,37 +251,31 @@
   padding: 0 12px;
   margin: 0;
 }
-
 .csRuntimeLauncherHeader .csIdentity,
 .jp-Launcher-sectionHeader .csSshHostsButton {
   margin-left: auto;
-}
-
-/* The account menu hangs off the header, so the holder is its positioning
+} /* The account menu hangs off the header,
+so the holder is its positioning
    context rather than the launcher body. */
 .csIdentity {
   position: relative;
 }
-
 .csIdentityButton {
   display: inline-flex;
   gap: var(--cs-mark-gap, 6px);
   align-items: center;
 }
-
 .csIdentityButton svg {
   flex: 0 0 auto;
   width: 18px;
   height: 18px;
 }
-
 .csAccountButton {
   max-width: 260px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
 .csAccountMenu {
   position: absolute;
   z-index: 10;
@@ -347,7 +288,6 @@
   background: var(--jp-layout-color1);
   box-shadow: var(--jp-elevation-z4);
 }
-
 .csAccountMenuItem {
   display: block;
   width: 100%;
@@ -360,19 +300,15 @@
   text-align: left;
   cursor: pointer;
 }
-
 .csAccountMenuItem:hover,
 .csAccountMenuItem:focus-visible {
   background: var(--jp-layout-color2);
 }
-
 .csSignedOutNotice {
   padding: 32px 12px;
   color: var(--jp-ui-font-color2);
   text-align: center;
-}
-
-/* Matches the box and contrast JupyterLab gives its own section icons. */
+} /* Matches the box and contrast JupyterLab gives its own section icons. */
 .csRuntimeSectionRack {
   flex: 0 0 auto;
   box-sizing: border-box;
@@ -381,31 +317,27 @@
   margin-right: 12px;
   color: var(--jp-ui-font-color1);
 }
-
 .csRuntimeSectionRack svg {
   width: 100%;
   height: 100%;
 }
-
 .csRuntimeCard,
 .csRuntimeAddCard {
   color: inherit;
   font: inherit;
-}
-
-/* Wide enough that the largest allocation a scheduler will hand out, such as
-   128 CPUs and 512G, still reads on one line. */
+} /* Wide enough that the largest allocation a scheduler will hand out,
+such as
+   128 CPUs and 512G,
+still reads on one line. */
 .jp-LauncherCard.csRuntimeCard,
 .jp-LauncherCard.csRuntimeAddCard {
   width: 152px;
 }
-
 .csRuntimeCardIdentity {
   display: flex;
   flex-direction: column;
   line-height: 1.2;
 }
-
 .csRuntimeCardAccount {
   overflow: hidden;
   margin: 0;
@@ -415,16 +347,14 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
 .csRuntimeCardLabel {
   display: flex;
   flex-direction: column;
   gap: 4px;
-}
-
-/* Outranks the launcher's own `.jp-LauncherCard-label p`, which reserves two
+} /* Outranks the launcher's own `.jp-LauncherCard-label p`,
+which reserves two
    lines under every card title so wrapped ones align. This title never wraps,
-   and that reserve is the gap that separated it from the allocation beneath. */
+and that reserve is the gap that separated it from the allocation beneath. */
 .jp-LauncherCard-label p.csRuntimeCardTitle {
   min-height: 0;
   margin: 0;
@@ -432,7 +362,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
 .csRuntimeCardMeta {
   /* The allocation is the reason to pick one card over another, so it wraps
      rather than truncating to an ellipsis. */
@@ -445,23 +374,19 @@
   font-size: var(--jp-ui-font-size0);
   line-height: 1.35;
 }
-
 .csResourceMeasure {
   display: inline-flex;
   gap: 2px;
   align-items: center;
 }
-
 .csResourceMeasure svg {
   width: 13px;
   height: 13px;
   color: var(--jp-ui-font-color3);
 }
-
 .csResourceSeparator {
   color: var(--jp-ui-font-color3);
 }
-
 .csRuntimeState {
   align-self: center;
   padding: 2px 7px;
@@ -471,26 +396,22 @@
   font-size: var(--jp-ui-font-size0);
   font-weight: 700;
 }
-
 .csRuntimeState-ready {
   background: var(--jp-success-color3);
   color: var(--jp-success-color1);
 }
-
 .csRuntimeState-failed {
   background: var(--jp-error-color3);
   color: var(--jp-error-color1);
 }
-
 .csRuntimeState-submitting,
 .csRuntimeState-queued,
 .csRuntimeState-starting,
 .csRuntimeState-stopping {
   background: var(--jp-warn-color3);
   color: var(--jp-warn-color1);
-}
-
-/* The current session is the one this page is attached to, so it reads as an
+} /* The current session is the one this page is attached to,
+so it reads as an
    identity rather than a scheduler state. */
 .csCurrentPill {
   align-self: center;
@@ -501,17 +422,13 @@
   font-size: var(--jp-ui-font-size0);
   font-weight: 700;
 }
-
 .csRuntimeCardCurrent {
   border-color: var(--jp-brand-color1);
   box-shadow: inset 0 0 0 1px var(--jp-brand-color1);
 }
-
 .csRuntimeAddCard {
   border-style: dashed;
-}
-
-/* The runtime cards carry the CyberShuttle mark; the letter placeholder read as
+} /* The runtime cards carry the CyberShuttle mark; the letter placeholder read as
    a missing icon rather than an identity. */
 /* The CyberShuttle mark identifies the section; a card is one machine. The
    size is explicit because the launcher sizes its own icons through the SVG
@@ -531,48 +448,40 @@
   background-position: center;
   background-size: contain;
 }
-
 .csRuntimeCardIcon {
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--jp-ui-font-color3);
 }
-
 .csRuntimeCardIcon svg {
   width: 100%;
   height: 100%;
   padding: 9px;
 }
-
 .csRuntimeAddIcon {
   font-size: 28px;
-}
-
-/* The allocation names the runtime with its host, so it sits between the two. */
+} /* The allocation names the runtime with its host,
+so it sits between the two. */
 .csRuntimeDetailAccount {
   margin-right: 8px;
   color: var(--jp-ui-font-color3);
   font-size: var(--jp-ui-font-size0);
 }
-
 .csRuntimeDetailHeader,
 .csRuntimeDetailActions {
   display: flex;
   gap: 8px;
   align-items: center;
 }
-
 .csRuntimeDetailHeader {
   justify-content: space-between;
   padding: 12px 14px;
   border-bottom: 1px solid var(--jp-border-color2);
 }
-
 .csRuntimeDetailTitle {
   margin: 0 0 6px;
 }
-
 .csRuntimeDetailGrid {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
@@ -580,18 +489,15 @@
   margin: 0;
   padding: 12px 14px;
 }
-
 .csRuntimeDetailLabel {
   color: var(--jp-ui-font-color2);
   font-weight: 600;
 }
-
 .csRuntimeDetailValue {
   min-width: 0;
   margin: 0;
   overflow-wrap: anywhere;
 }
-
 .csCard {
   margin: 12px 10px 16px;
   overflow: hidden;
@@ -599,22 +505,12 @@
   border-radius: 8px;
   background: var(--jp-layout-color1);
 }
-
-.csRuntimeBlock {
-  border-top: 1px solid var(--jp-border-color2);
-}
-
-.csRuntimeBlock:first-child {
-  border-top: 0;
-}
-
 .csRuntimeLog {
   margin: 0 10px 8px;
   border: 1px solid var(--jp-border-color2);
   border-radius: 4px;
   background: var(--jp-layout-color0);
 }
-
 .csRuntimeLogTitle {
   padding: 6px 8px;
   margin: 0;
@@ -622,7 +518,6 @@
   font-size: var(--jp-ui-font-size0);
   font-weight: 600;
 }
-
 .csRuntimeLogScroll {
   box-sizing: border-box;
   height: 160px;
@@ -634,15 +529,12 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-
 .csRuntimeLogLine {
   display: grid;
   grid-template-columns: 5.5rem minmax(0, 1fr);
   gap: 8px;
   min-height: 1.35em;
-}
-
-/* The first column dates the line. The stream stays legible as the colour of
+} /* The first column dates the line. The stream stays legible as the colour of
    the time rather than a word repeated down the whole column. */
 .csRuntimeLogTime {
   color: var(--jp-ui-font-color3);
@@ -651,38 +543,13 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-
 .csRuntimeLog-status .csRuntimeLogTime {
   color: var(--jp-brand-color1);
 }
-
 .csRuntimeLog-stderr .csRuntimeLogTime,
 .csRuntimeLog-stderr .csRuntimeLogText {
   color: var(--jp-error-color1);
 }
-
-.csTwoRowCard {
-  box-sizing: border-box;
-  display: grid;
-  grid-template-areas: "title actions" "meta meta";
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 4px 10px;
-  align-items: start;
-  min-width: 0;
-  padding: 8px 10px;
-  overflow-x: auto;
-}
-
-.csRuntimeDetails {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.csRuntimeName {
-  margin-bottom: 6px;
-  font-weight: 700;
-}
-
 .csCardTitle {
   grid-area: title;
   min-width: 0;
@@ -691,43 +558,10 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
-.csCardMeta {
-  display: flex;
-  grid-area: meta;
-  gap: 4px 12px;
-  align-items: baseline;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-.csCardMetaItem {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .csMeta {
   margin-top: 4px;
   font-size: var(--jp-ui-font-size0);
 }
-
-.csCardMeta .csMeta {
-  margin: 0;
-}
-
-.csCardActions {
-  display: flex;
-  grid-area: actions;
-  flex: 0 0 auto;
-  flex-direction: row;
-  flex-wrap: nowrap;
-  align-items: flex-start;
-  gap: 6px;
-  white-space: nowrap;
-}
-
 .csTextButton,
 .csPrimaryButton,
 .csSecondaryButton,
@@ -738,79 +572,43 @@
   font-weight: 600;
   cursor: pointer;
 }
-
 .csTextButton {
   border: 0;
   background: transparent;
   color: var(--jp-brand-color1);
-}
-
-/* The brand fill stays blue in both themes, so the text on it is white in both
+} /* The brand fill stays blue in both themes,
+so the text on it is white in both
    themes; the theme's inverse font colour follows the theme and goes black. */
 .csPrimaryButton {
   border: 1px solid var(--jp-brand-color1);
   background: var(--jp-brand-color1);
   color: #fff;
 }
-
 .csPrimaryButton .csSpinner {
   border-color: rgb(255 255 255 / 45%);
   border-top-color: #fff;
 }
-
 .csSecondaryButton {
   border: 1px solid var(--jp-border-color2);
   background: var(--jp-layout-color1);
   color: var(--jp-ui-font-color1);
 }
-
 .csDangerButton {
   border: 1px solid var(--jp-error-color1);
   background: var(--jp-layout-color1);
   color: var(--jp-error-color1);
 }
-
 .csDangerButton:hover:not(:disabled),
 .csDangerButton:focus-visible:not(:disabled) {
   background: var(--jp-error-color3);
 }
-
-.csIconButton {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 5px;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--jp-ui-font-color2);
-  cursor: pointer;
-}
-
-.csIconButton:hover,
-.csIconButton:focus-visible {
-  border-color: var(--jp-border-color2);
-  background: var(--jp-layout-color2);
-  color: var(--jp-ui-font-color1);
-}
-
-.csIconButton svg {
-  width: 20px;
-  height: 20px;
-  fill: currentcolor;
-}
-
 .csTextButton:disabled,
 .csPrimaryButton:disabled,
 .csSecondaryButton:disabled,
-.csDangerButton:disabled,
-.csIconButton:disabled {
+.csDangerButton:disabled {
   cursor: default;
   opacity: 0.55;
 }
-
 .csPill {
   display: inline-flex;
   padding: 4px 8px;
@@ -820,27 +618,22 @@
   font-size: var(--jp-ui-font-size0);
   font-weight: 700;
 }
-
 .csForm,
-.csHostPicker,
 .csRuntimeReview {
   padding: 14px;
 }
-
 .csRuntimeReview {
   display: flex;
   flex-direction: column;
   min-height: 0;
   gap: 12px;
 }
-
 .csScriptHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
-
 .csSlurmScript,
 .csValidationError {
   box-sizing: border-box;
@@ -856,117 +649,71 @@
   font-size: var(--jp-code-font-size);
   white-space: pre;
 }
-
 .csSlurmScript {
   flex: 1 1 320px;
   min-height: 240px;
   max-height: 55vh;
 }
-
 .csValidationStatus {
   padding: 10px 12px;
   border-left: 4px solid var(--jp-border-color1);
   background: var(--jp-layout-color2);
   font-weight: 700;
 }
-
 .csValidationStatusBusy {
   display: flex;
   align-items: center;
   gap: 8px;
 }
-
 .csValidationPassed {
   border-color: var(--jp-success-color1);
   color: var(--jp-success-color1);
 }
-
 .csValidationFailed {
   border-color: var(--jp-error-color1);
   color: var(--jp-error-color1);
 }
-
 .csValidationError {
   max-height: 180px;
   color: var(--jp-error-color1);
   white-space: pre-wrap;
-}
-
-/* A passing dry run still writes to stderr -- "Job N to start at ..." is what
-   Slurm says when it accepts a script it did not run. Read as detail, not as
+} /* A passing dry run still writes to stderr -- "Job N to start at ..." is what
+   Slurm says when it accepts a script it did not run. Read as detail,
+not as
    a failure. */
 .csValidationError.csValidationDetail {
   color: var(--jp-ui-font-color2);
 }
 
 @media (width <= 640px) {
-  .csTwoRowCard {
-    gap: 3px 6px;
-    padding: 6px 8px;
-  }
-
-  .csCardActions {
-    gap: 4px;
-  }
-
-  .csCardActions .csPrimaryButton,
-  .csCardActions .csSecondaryButton {
-    padding: 5px 7px;
-  }
-
   .csRuntimeReview {
     padding: 10px;
   }
-
   .csSlurmScript {
     min-height: 180px;
   }
 }
-
-.csStepHeading,
-.csHostPicker h2 {
+.csStepHeading {
   margin: 0 0 8px;
   font-size: var(--jp-ui-font-size3);
 }
-
-.csHostPickerList {
-  display: grid;
-  gap: 10px;
-  margin-top: 14px;
-}
-
-.csHostChoice {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 14px;
-  border: 1px solid var(--jp-border-color2);
-  border-radius: 6px;
-  background: var(--jp-layout-color1);
-}
-
 .csResourceType {
   padding: 0;
   margin: 0 0 14px;
   border: 0;
 }
-
 .csResourceTypeChoices {
   display: flex;
   gap: 8px;
 }
-
 .csResourceTypeOption {
   flex: 1;
   cursor: pointer;
 }
-
 .csResourceTypeOption input {
   position: absolute;
   opacity: 0;
 }
-
 .csResourceTypeOption span {
   display: block;
   padding: 10px 16px;
@@ -975,31 +722,26 @@
   text-align: center;
   font-weight: 700;
 }
-
 .csResourceTypeOption input:checked + span {
   border-color: var(--jp-brand-color1);
   background: var(--jp-brand-color1);
   color: var(--jp-ui-inverse-font-color1);
 }
-
 .csResourceTypeOption input:focus-visible + span {
   outline: 2px solid var(--jp-brand-color1);
   outline-offset: 2px;
 }
-
 .csField {
   display: block;
   margin-bottom: 14px;
 }
-
 .csLabel {
   display: block;
   margin-bottom: 6px;
   color: var(--jp-ui-font-color2);
   font-weight: 600;
-}
-
-/* An SSH host opens to exactly what ssh will use, and to the two things that
+} /* An SSH host opens to exactly what ssh will use,
+and to the two things that
    can be done about it. */
 .csSshAdd {
   display: flex;
@@ -1007,11 +749,9 @@
   gap: 10px;
   padding: 0 10px;
 }
-
 .csSshAddToggle {
   align-self: flex-start;
 }
-
 .csSshAddForm {
   display: flex;
   flex-direction: column;
@@ -1021,16 +761,13 @@
   border-radius: 8px;
   background: var(--jp-layout-color1);
 }
-
 .csSshHostEntry {
   border-top: 1px solid var(--jp-border-color2);
 }
-
 .csSshHostEntry:first-child {
   border-top: 0;
-}
-
-/* Name and target share one row wherever the two fit, and the target keeps to
+} /* Name and target share one row wherever the two fit,
+and the target keeps to
    the far end; a narrow viewport lets it drop to a line of its own. */
 .csSshHostSummary {
   display: flex;
@@ -1040,60 +777,49 @@
   padding: 10px 12px;
   cursor: pointer;
 }
-
 .csSshHostSummary .csSshHostTarget {
   margin-left: auto;
 }
-
 .csSshHostSummary:hover {
   background: var(--jp-layout-color2);
 }
-
 .csSshHostTarget {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
 .csSshHostBody {
   padding: 6px 12px 12px;
 }
-
 .csSshArgRow {
   display: grid;
   grid-template-columns: 12rem minmax(0, 1fr);
   gap: 8px;
   font-size: var(--jp-ui-font-size0);
 }
-
 .csSshArgKey {
   font-weight: 700;
 }
-
 .csSshArgValue {
   overflow-wrap: anywhere;
   color: var(--jp-ui-font-color1);
 }
-
 .csSshHostStatus {
   margin-top: 8px;
   font-size: var(--jp-ui-font-size0);
 }
-
 .csSshHostActions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 10px;
 }
-
 .csFieldHelp {
   margin-top: 6px;
   color: var(--jp-ui-font-color2);
   font-size: var(--jp-ui-font-size0);
   font-weight: 400;
 }
-
 .csInput,
 .csSelect {
   box-sizing: border-box;
@@ -1105,12 +831,6 @@
   color: var(--jp-ui-font-color1);
   font: inherit;
 }
-
-.csTextArea {
-  min-height: 90px;
-  resize: vertical;
-}
-
 .csSshAuth {
   margin-top: 12px;
   border: 1px solid var(--jp-border-color2);
@@ -1118,7 +838,6 @@
   overflow: hidden;
   background: var(--jp-layout-color1);
 }
-
 .csSshAuthHeader {
   display: flex;
   align-items: center;
@@ -1127,53 +846,35 @@
   padding: 9px 10px;
   background: var(--jp-layout-color2);
   color: var(--jp-ui-font-color1);
-}
-
-/* Only the login transcript carries the terminal's own ground. */
+} /* The transcript is the only thing on the terminal's own ground; everything
+   said about the operation is said above it,
+where the rest of the form is. */
 .csSshAuthSession {
   padding: 8px;
   background: #111827;
 }
-
-.csSshOperationDetails > summary {
-  margin-bottom: 8px;
-  color: #f3f4f6;
-  cursor: pointer;
-  font-weight: 600;
-}
-
 .csSshAuth > .csSecondaryButton {
   margin: 0 8px 8px;
 }
-
-.csSshAuthInstructions {
-  margin: 0 0 8px;
-  color: #f3f4f6;
-}
-
 .csSshAuthStatus {
   margin: 0;
   padding: 8px 10px;
   color: var(--jp-ui-font-color2);
 }
-
 .csSshAuthStatus:empty {
   display: none;
 }
-
 .csSshOperationTerminal {
   box-sizing: border-box;
   min-height: 280px;
   height: min(42vh, 390px);
 }
-
 .csFormFooter {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
   padding-top: 8px;
 }
-
 .csSpinner {
   width: 14px;
   height: 14px;
