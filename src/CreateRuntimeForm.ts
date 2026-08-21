@@ -226,7 +226,9 @@ export class CreateRuntimeForm extends Widget {
     }
     if (this._reviewStatus) {
       const state = this._validating
-        ? "Validating with Slurm…"
+        ? this._script
+          ? "Validating with Slurm…"
+          : "Building the Slurm script…"
         : this._validation?.status === "PASSED"
           ? `Validation passed. ${this._validation.message}`
           : this._validation?.status === "FAILED"
@@ -309,7 +311,9 @@ export class CreateRuntimeForm extends Widget {
     script.id = "cybershuttle-slurm-script";
     script.className = "csSlurmScript";
     script.setAttribute("tabindex", "0");
-    script.textContent = this._script || "Building the Slurm script…";
+    // The status line below says what is happening; the script area stays empty
+    // until there is a script to show rather than repeating it.
+    script.textContent = this._script;
 
     const status = element("div", "", "csValidationStatus");
     status.setAttribute("role", "status");

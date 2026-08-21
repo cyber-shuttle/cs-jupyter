@@ -757,6 +757,43 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
     ).toBe("projects/preserved-review");
   });
 
+  // The script has to exist before anything can validate it, and the review says
+  // which of the two is happening rather than one word for both.
+  it("says it is building the script until there is one to validate", async () => {
+    const { form, deliver, discoveries } = formHarness();
+    void discoveries;
+    choose(form, "alpha");
+    await deliver(0, discovery("alpha"));
+    const script = Promise.withResolvers<string>();
+    const validation = Promise.withResolvers<unknown>();
+    (form as any)._api.previewRuntimeScript = () => script.promise;
+    (form as any)._api.validateRuntime = () => validation.promise;
+    const workspace = form.node.querySelector<HTMLInputElement>(
+      'input[name="rootFolder"]',
+    )!;
+    workspace.value = "$HOME";
+    workspace.dispatchEvent(new Event("input"));
+    submitConfiguration(form);
+    await vi.waitFor(() =>
+      expect(form.node.textContent).toContain("Building the Slurm script"),
+    );
+    expect(form.node.textContent).not.toContain("Validating with Slurm");
+    script.resolve("#!/bin/bash\n#SBATCH --partition=test\n");
+    await vi.waitFor(() =>
+      expect(form.node.textContent).toContain("Validating with Slurm"),
+    );
+    expect(form.node.querySelector(".csSlurmScript")?.textContent).toContain(
+      "#!/bin/bash",
+    );
+    validation.resolve({
+      runtimeId: "rt-012345abcdef",
+      status: "PASSED",
+      script: "#!/bin/bash\n#SBATCH --partition=test\n",
+      message: "Slurm accepted the script.",
+    });
+    form.dispose();
+  });
+
   it("shows create errors on the review step without losing validation", async () => {
     const { form, operations, deliver, failDiscovery, discoveries } =
       formHarness();
