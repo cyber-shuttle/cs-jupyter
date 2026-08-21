@@ -34,7 +34,9 @@
   font-size: 1.5rem;
   font-weight: 700;
   letter-spacing: 0.12em;
-} /* The code and the control that copies it are one thing,
+}
+
+/* The code and the control that copies it are one thing,
 so they sit together
    rather than the code centring alone above a button. */
 .csDeviceCodeRow {
@@ -55,7 +57,9 @@ so they sit together
   background: transparent;
   color: var(--jp-ui-font-color2);
   cursor: pointer;
-} /* JupyterLab paints the dialog's title row; the close control belongs on it,
+}
+
+/* JupyterLab paints the dialog's title row; the close control belongs on it,
 not on a row of its own inside the body. */
 .jp-Dialog-content:has(.csModalClose) {
   position: relative;
@@ -86,13 +90,17 @@ not on a row of its own inside the body. */
   z-index: 1;
   top: 12px;
   right: 12px;
-} /* The subtitle says what the list is; the rule below it says the title is over
+}
+
+/* The subtitle says what the list is; the rule below it says the title is over
    and the content has begun. */
 .csModalSubtitle {
   padding-right: 32px;
   color: var(--jp-ui-font-color2);
   font-size: var(--jp-ui-font-size1);
-} /* Every row reads label on the left,
+}
+
+/* Every row reads label on the left,
 control on the right. */
 .csForm .csField {
   display: grid;
@@ -108,7 +116,9 @@ control on the right. */
   grid-template-columns: 11rem minmax(0, 1fr);
   gap: 12px;
   align-items: center;
-} /* The query is one line: it turns,
+}
+
+/* The query is one line: it turns,
 it says what it is doing,
 and it can be
    stopped without leaving the form. */
@@ -139,7 +149,9 @@ and it can be
   justify-content: flex-end;
   gap: 8px;
   margin-top: 16px;
-} /* JupyterLab resets anchor colour with `.jp-ThemedContainer a`,
+}
+
+/* JupyterLab resets anchor colour with `.jp-ThemedContainer a`,
 which outranks
    a single class,
 so the anchor form of the primary button restates it here. */
@@ -148,7 +160,9 @@ so the anchor form of the primary button restates it here. */
   align-items: center;
   color: #fff;
   text-decoration: none;
-} /* Inside the launcher's content the panel is laid out by the page,
+}
+
+/* Inside the launcher's content the panel is laid out by the page,
 not by a
    Lumino parent. The stacked layout stamps `position: absolute; contain: strict`
    inline on its child,
@@ -171,14 +185,18 @@ so both levels are
   color: var(--jp-ui-font-color1);
   font-family: var(--jp-ui-font-family);
   font-size: var(--jp-ui-font-size1);
-} /* The dialog is as tall as what it holds and no taller; only content longer
+}
+
+/* The dialog is as tall as what it holds and no taller; only content longer
    than the viewport scrolls,
 and then inside the body rather than the page. */
 .jp-Dialog-content:has(.csWorkspaceModal) {
   width: min(90vw, 1100px);
   max-width: calc(100vw - 32px);
   max-height: min(85vh, 850px);
-} /* A view that carries its own action leaves no footer to reserve room for. */
+}
+
+/* A view that carries its own action leaves no footer to reserve room for. */
 .jp-Dialog-content:has(.csWorkspaceModal)
   .jp-Dialog-footer:has(.jp-Dialog-footerButtons:empty) {
   display: none;
@@ -196,7 +214,9 @@ and then inside the body rather than the page. */
   flex-direction: column;
   width: 100%;
   min-height: 0;
-} /* A view whose head stays put while its list moves. */
+}
+
+/* A view whose head stays put while its list moves. */
 .csScrollRoot {
   display: flex;
   flex: 0 1 auto;
@@ -229,7 +249,9 @@ and then inside the body rather than the page. */
   /* The same ground the side rails stand on, so the row reads as chrome rather
      than as the first thing in the scrolling content. */
   background: var(--jp-layout-color2);
-} /* The account menu hangs below the header row. Every Lumino level between it
+}
+
+/* The account menu hangs below the header row. Every Lumino level between it
    and the page is stamped `contain: strict` inline,
 which paint-clips the menu
    to the row,
@@ -254,7 +276,9 @@ and the row is lifted. */
 .csRuntimeLauncherHeader .csIdentity,
 .jp-Launcher-sectionHeader .csSshHostsButton {
   margin-left: auto;
-} /* The account menu hangs off the header,
+}
+
+/* The account menu hangs off the header,
 so the holder is its positioning
    context rather than the launcher body. */
 .csIdentity {
@@ -308,7 +332,9 @@ so the holder is its positioning
   padding: 32px 12px;
   color: var(--jp-ui-font-color2);
   text-align: center;
-} /* Matches the box and contrast JupyterLab gives its own section icons. */
+}
+
+/* Matches the box and contrast JupyterLab gives its own section icons. */
 .csRuntimeSectionRack {
   flex: 0 0 auto;
   box-sizing: border-box;
@@ -325,7 +351,9 @@ so the holder is its positioning
 .csRuntimeAddCard {
   color: inherit;
   font: inherit;
-} /* Wide enough that the largest allocation a scheduler will hand out,
+}
+
+/* Wide enough that the largest allocation a scheduler will hand out,
 such as
    128 CPUs and 512G,
 still reads on one line. */
@@ -351,7 +379,9 @@ still reads on one line. */
   display: flex;
   flex-direction: column;
   gap: 4px;
-} /* Outranks the launcher's own `.jp-LauncherCard-label p`,
+}
+
+/* Outranks the launcher's own `.jp-LauncherCard-label p`,
 which reserves two
    lines under every card title so wrapped ones align. This title never wraps,
 and that reserve is the gap that separated it from the allocation beneath. */
@@ -410,7 +440,9 @@ and that reserve is the gap that separated it from the allocation beneath. */
 .csRuntimeState-stopping {
   background: var(--jp-warn-color3);
   color: var(--jp-warn-color1);
-} /* The current session is the one this page is attached to,
+}
+
+/* The current session is the one this page is attached to,
 so it reads as an
    identity rather than a scheduler state. */
 .csCurrentPill {
@@ -428,7 +460,9 @@ so it reads as an
 }
 .csRuntimeAddCard {
   border-style: dashed;
-} /* The runtime cards carry the CyberShuttle mark; the letter placeholder read as
+}
+
+/* The runtime cards carry the CyberShuttle mark; the letter placeholder read as
    a missing icon rather than an identity. */
 /* The CyberShuttle mark identifies the section; a card is one machine. The
    size is explicit because the launcher sizes its own icons through the SVG
@@ -461,7 +495,9 @@ so it reads as an
 }
 .csRuntimeAddIcon {
   font-size: 28px;
-} /* The allocation names the runtime with its host,
+}
+
+/* The allocation names the runtime with its host,
 so it sits between the two. */
 .csRuntimeDetailAccount {
   margin-right: 8px;
@@ -534,7 +570,9 @@ so it sits between the two. */
   grid-template-columns: 5.5rem minmax(0, 1fr);
   gap: 8px;
   min-height: 1.35em;
-} /* The first column dates the line. The stream stays legible as the colour of
+}
+
+/* The first column dates the line. The stream stays legible as the colour of
    the time rather than a word repeated down the whole column. */
 .csRuntimeLogTime {
   color: var(--jp-ui-font-color3);
@@ -576,9 +614,15 @@ so it sits between the two. */
   border: 0;
   background: transparent;
   color: var(--jp-brand-color1);
-} /* The brand fill stays blue in both themes,
+}
+
+/* The brand fill stays blue in both themes,
 so the text on it is white in both
    themes; the theme's inverse font colour follows the theme and goes black. */
+/* Element-qualified so an ancestor rule like `.jp-ThemedContainer a` -- which
+   already took this colour once -- cannot outrank it. */
+button.csPrimaryButton,
+a.csPrimaryButton,
 .csPrimaryButton {
   border: 1px solid var(--jp-brand-color1);
   background: var(--jp-brand-color1);
@@ -677,7 +721,9 @@ so the text on it is white in both
   max-height: 180px;
   color: var(--jp-error-color1);
   white-space: pre-wrap;
-} /* A passing dry run still writes to stderr -- "Job N to start at ..." is what
+}
+
+/* A passing dry run still writes to stderr -- "Job N to start at ..." is what
    Slurm says when it accepts a script it did not run. Read as detail,
 not as
    a failure. */
@@ -740,7 +786,9 @@ not as
   margin-bottom: 6px;
   color: var(--jp-ui-font-color2);
   font-weight: 600;
-} /* An SSH host opens to exactly what ssh will use,
+}
+
+/* An SSH host opens to exactly what ssh will use,
 and to the two things that
    can be done about it. */
 .csSshAdd {
@@ -766,7 +814,9 @@ and to the two things that
 }
 .csSshHostEntry:first-child {
   border-top: 0;
-} /* Name and target share one row wherever the two fit,
+}
+
+/* Name and target share one row wherever the two fit,
 and the target keeps to
    the far end; a narrow viewport lets it drop to a line of its own. */
 .csSshHostSummary {
@@ -846,7 +896,9 @@ and the target keeps to
   padding: 9px 10px;
   background: var(--jp-layout-color2);
   color: var(--jp-ui-font-color1);
-} /* The transcript is the only thing on the terminal's own ground; everything
+}
+
+/* The transcript is the only thing on the terminal's own ground; everything
    said about the operation is said above it,
 where the rest of the form is. */
 .csSshAuthSession {
