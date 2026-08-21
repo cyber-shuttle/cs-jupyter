@@ -249,10 +249,15 @@ export class CreateRuntimeForm extends Widget {
       }`;
     }
     if (this._reviewError) {
+      const failed =
+        !!this._error ||
+        !!this._validationError ||
+        this._validation?.status === "FAILED";
       const detail =
         this._error || this._validation?.stderr || this._validationError;
       this._reviewError.textContent = detail;
       this._reviewError.hidden = !detail;
+      this._reviewError.className = `csValidationError${failed ? "" : " csValidationDetail"}`;
     }
   }
 
@@ -280,14 +285,8 @@ export class CreateRuntimeForm extends Widget {
     if (!request) {
       throw new Error("Runtime review request is unavailable.");
     }
+    // One way back, beside the action it undoes.
     const container = element("div");
-    container.appendChild(
-      button("← Back to configuration", "csTextButton", () => {
-        this._leaveReview();
-        this._render();
-      }),
-    );
-
     const review = element("section", "", "csRuntimeReview");
     const heading = element("h2", "Review Slurm job", "csStepHeading");
     const description = element(

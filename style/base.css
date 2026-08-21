@@ -205,6 +205,12 @@
   max-height: min(85vh, 850px);
 }
 
+/* A view that carries its own action leaves no footer to reserve room for. */
+.jp-Dialog-content:has(.csWorkspaceModal)
+  .jp-Dialog-footer:has(.jp-Dialog-footerButtons:empty) {
+  display: none;
+}
+
 .jp-Dialog-content:has(.csWorkspaceModal) .jp-Dialog-body {
   display: flex;
   flex: 0 1 auto;
@@ -884,6 +890,13 @@
   max-height: 180px;
   color: var(--jp-error-color1);
   white-space: pre-wrap;
+}
+
+/* A passing dry run still writes to stderr -- "Job N to start at ..." is what
+   Slurm says when it accepts a script it did not run. Read as detail, not as
+   a failure. */
+.csValidationError.csValidationDetail {
+  color: var(--jp-ui-font-color2);
 }
 
 @media (width <= 640px) {
