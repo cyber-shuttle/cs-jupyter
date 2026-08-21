@@ -297,7 +297,7 @@ export class CreateRuntimeForm extends Widget {
     const scriptHeader = element("div", "", "csScriptHeader");
     const scriptLabel = element("label", "Generated Slurm script", "csLabel");
     scriptLabel.htmlFor = "cybershuttle-slurm-script";
-    const shown = this._validation?.script || this._script;
+    const shown = this._script;
     const copy = button("Copy script", "csSecondaryButton", () => {
       if (shown) {
         void navigator.clipboard?.writeText(shown);
@@ -309,8 +309,7 @@ export class CreateRuntimeForm extends Widget {
     script.id = "cybershuttle-slurm-script";
     script.className = "csSlurmScript";
     script.setAttribute("tabindex", "0");
-    script.textContent =
-      this._validation?.script || this._script || "Building the Slurm script…";
+    script.textContent = this._script || "Building the Slurm script…";
 
     const status = element("div", "", "csValidationStatus");
     status.setAttribute("role", "status");
@@ -397,7 +396,10 @@ export class CreateRuntimeForm extends Widget {
         abort.signal,
       );
       if (this._currentReview(request, generation)) {
+        // Validation returns the same text it was asked about; keeping one copy
+        // means the review cannot show one script and validate another.
         this._validation = validation;
+        this._script = validation.script;
       }
     } catch (error) {
       if (!abort.signal.aborted && this._currentReview(request, generation)) {
@@ -750,6 +752,11 @@ export class CreateRuntimeForm extends Widget {
             },
             failed: (message) =>
               current(generation, alias) && showFailure(message),
+            status: (message) => {
+              if (current(generation, alias)) {
+                operationStatus.textContent = message;
+              }
+            },
           });
           requestAnimationFrame(
             () => current(generation, alias) && operation.focus(),

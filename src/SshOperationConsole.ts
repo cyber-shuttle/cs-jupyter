@@ -7,12 +7,12 @@ import {
 
 const MAX_ANNOUNCEMENT_LENGTH = 512;
 
-const INSTRUCTIONS =
-  "Respond to OpenSSH prompts below. Passwords and verification codes are sent directly to SSH and are not stored.";
-
 export interface ISshOperationCallbacks {
   failed: (message: string) => void;
   ready?: () => void;
+  // The console owns the transcript and nothing else: what it is doing is said
+  // once, where the rest of the operation says it.
+  status?: (message: string) => void;
 }
 
 export interface ISshOperationConsole {
@@ -36,9 +36,6 @@ type ServerFrame =
 // Credential-blind: prompts and replies pass straight through to SSH.
 export class SshOperationConsole implements ISshOperationConsole {
   readonly node = document.createElement("section");
-  private _instructions = document.createElement("p");
-  private _status = document.createElement("div");
-  private _details = document.createElement("details");
   private _terminalHost = document.createElement("div");
   private _terminal = new Terminal({
     convertEol: true,
@@ -63,19 +60,9 @@ export class SshOperationConsole implements ISshOperationConsole {
     this.node.className = "csSshAuthSession";
     this.node.setAttribute("role", "region");
     this.node.setAttribute("aria-label", "SSH operation console");
-    this._instructions.className = "csSshAuthInstructions";
-    this._status.className = "csSshAuthStatus";
-    this._status.setAttribute("role", "status");
-    this._status.setAttribute("aria-live", "polite");
-    this._status.setAttribute("aria-atomic", "true");
-    const summary = document.createElement("summary");
-    summary.textContent = "Operation details";
-    this._details.className = "csSshOperationDetails";
-    this._details.open = true;
     this._terminalHost.className = "csSshOperationTerminal";
     this._terminalHost.setAttribute("aria-label", "SSH operation output");
-    this._details.append(summary, this._terminalHost);
-    this.node.append(this._instructions, this._status, this._details);
+    this.node.appendChild(this._terminalHost);
     this._terminal.loadAddon(this._fit);
     this._terminal.open(this._terminalHost);
     this._terminal.onData((data) => {
@@ -106,20 +93,16 @@ export class SshOperationConsole implements ISshOperationConsole {
     this._callbacks = callbacks;
     this._finished = false;
     this._terminal.options.disableStdin = false;
-    this._instructions.textContent = INSTRUCTIONS;
-    this._status.textContent = "Opening interactive SSH authentication…";
-    this._details.open = true;
+    this.node.hidden = false;
+    this._say("Opening interactive SSH authentication…");
     this._connect(connect);
   }
 
   complete(message: string, collapse = true): void {
     this._finished = true;
     this._generation++;
-    this._status.textContent = boundedAnnouncement(
-      message,
-      "Operation complete.",
-    );
-    this._details.open = !collapse;
+    this._say(boundedAnnouncement(message, "Operation complete."));
+    this.node.hidden = collapse;
     this._closeSocket();
   }
 
@@ -168,8 +151,9 @@ export class SshOperationConsole implements ISshOperationConsole {
             );
             return;
           }
-          this._status.textContent =
-            "SSH terminal connected. Respond to the prompt below.";
+          this._say(
+            "Respond to the prompts below. Passwords and verification codes go straight to SSH and are not stored.",
+          );
           this._fitAndReport();
           this.focus();
         };
@@ -227,7 +211,7 @@ export class SshOperationConsole implements ISshOperationConsole {
     switch (frame.type) {
       case "ready":
         this._finished = true;
-        this._status.textContent = "SSH authentication succeeded.";
+        this._say("SSH authentication succeeded.");
         this._callbacks?.ready?.();
         break;
       case "exit":
@@ -241,6 +225,10 @@ export class SshOperationConsole implements ISshOperationConsole {
       default:
         this._fail("cs-control returned an unknown SSH operation frame.");
     }
+  }
+
+  private _say(message: string): void {
+    this._callbacks?.status?.(message);
   }
 
   private _enter = (event: KeyboardEvent): void => {
@@ -260,7 +248,7 @@ export class SshOperationConsole implements ISshOperationConsole {
       return;
     }
     this._finished = true;
-    this._status.textContent = message;
+    this._say(message);
     this._terminal.options.disableStdin = true;
     this._callbacks?.failed(message);
   }
