@@ -194,8 +194,7 @@ describe("AuthClient device-code broker flow", () => {
     expect(copy.classList.contains("csDeviceCodeCopied")).toBe(true);
     expect(dialog.textContent).not.toContain("Code copied.");
 
-    const close =
-      dialog.querySelector<HTMLButtonElement>(".csDeviceCodeClose")!;
+    const close = dialog.querySelector<HTMLButtonElement>(".csModalClose")!;
     expect(close.getAttribute("aria-label")).toBe("Close");
     close.click();
     await expect(login).rejects.toBeInstanceOf(AuthInteractionCancelledError);

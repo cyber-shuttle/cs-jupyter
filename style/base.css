@@ -51,7 +51,7 @@
 }
 
 .csDeviceCodeCopy,
-.csDeviceCodeClose {
+.csModalClose {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -63,16 +63,28 @@
   cursor: pointer;
 }
 
+/* JupyterLab paints the dialog's title row; the close control belongs on it,
+   not on a row of its own inside the body. */
+.jp-Dialog-content:has(.csModalClose) {
+  position: relative;
+}
+
+.jp-Dialog-content .csModalClose {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+}
+
 .csDeviceCodeCopy svg,
-.csDeviceCodeClose svg {
+.csModalClose svg {
   width: 18px;
   height: 18px;
 }
 
 .csDeviceCodeCopy:hover,
 .csDeviceCodeCopy:focus-visible,
-.csDeviceCodeClose:hover,
-.csDeviceCodeClose:focus-visible {
+.csModalClose:hover,
+.csModalClose:focus-visible {
   background: var(--jp-layout-color2);
   color: var(--jp-ui-font-color1);
 }
@@ -82,10 +94,57 @@
   color: var(--jp-success-color1);
 }
 
-.csDeviceCodeClose {
+.csModalClose {
   position: absolute;
+  z-index: 1;
   top: 12px;
   right: 12px;
+}
+
+/* The subtitle says what the list is; the rule below it says the title is over
+   and the content has begun. */
+.csModalSubtitle {
+  padding-right: 32px;
+  color: var(--jp-ui-font-color2);
+  font-size: var(--jp-ui-font-size1);
+}
+
+/* Every row reads label on the left, control on the right. */
+.csForm .csField {
+  display: grid;
+  grid-template-columns: 11rem minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.csForm .csField .csFieldHelp {
+  grid-column: 2;
+}
+
+.csForm .csResourceType {
+  display: grid;
+  grid-template-columns: 11rem minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+/* The query is one line: it turns, it says what it is doing, and it can be
+   stopped without leaving the form. */
+.csSshAuthHeader {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.csDiscoveryCancel {
+  margin-left: auto;
+}
+
+.csModalRule {
+  height: 0;
+  border: 0;
+  border-top: 1px solid var(--jp-border-color2);
+  margin: 12px 0;
 }
 
 .csDeviceCodeOpen {
@@ -105,9 +164,12 @@
   margin-top: 16px;
 }
 
-.csDeviceCodeActions a {
+/* JupyterLab resets anchor colour with `.jp-ThemedContainer a`, which outranks
+   a single class, so the anchor form of the primary button restates it here. */
+.csDeviceCodeActions a.csPrimaryButton {
   display: inline-flex;
   align-items: center;
+  color: #fff;
   text-decoration: none;
 }
 
@@ -199,7 +261,17 @@
   /* The same ground the side rails stand on, so the row reads as chrome rather
      than as the first thing in the scrolling content. */
   background: var(--jp-layout-color2);
-  overflow: visible;
+}
+
+/* The account menu hangs below the header row. Every Lumino level between it
+   and the page is stamped `contain: strict` inline, which paint-clips the menu
+   to the row, and the content region is a later absolutely positioned sibling,
+   which would paint over it. Both levels opt out, and the row is lifted. */
+.csRuntimeHeaderWidget,
+.lm-BoxPanel:has(> .csRuntimeHeaderWidget) {
+  z-index: 1;
+  overflow: visible !important;
+  contain: none !important;
 }
 
 .csRuntimeHeaderWidget .csRuntimeLauncherHeader {
@@ -456,6 +528,13 @@
   font-size: 28px;
 }
 
+/* The allocation names the runtime with its host, so it sits between the two. */
+.csRuntimeDetailAccount {
+  margin-right: 8px;
+  color: var(--jp-ui-font-color3);
+  font-size: var(--jp-ui-font-size0);
+}
+
 .csRuntimeDetailHeader,
 .csRuntimeDetailActions {
   display: flex;
@@ -515,10 +594,10 @@
   background: var(--jp-layout-color0);
 }
 
-.csRuntimeLogSummary {
+.csRuntimeLogTitle {
   padding: 6px 8px;
+  margin: 0;
   color: var(--jp-ui-font-color2);
-  cursor: pointer;
   font-size: var(--jp-ui-font-size0);
   font-weight: 600;
 }
@@ -537,27 +616,26 @@
 
 .csRuntimeLogLine {
   display: grid;
-  grid-template-columns: 4.5rem minmax(0, 1fr);
+  grid-template-columns: 5.5rem minmax(0, 1fr);
   gap: 8px;
   min-height: 1.35em;
 }
 
-.csRuntimeLogLabel {
+/* The first column dates the line. The stream stays legible as the colour of
+   the time rather than a word repeated down the whole column. */
+.csRuntimeLogTime {
+  color: var(--jp-ui-font-color3);
   font-family: var(--jp-ui-font-family);
   font-size: var(--jp-ui-font-size0);
-  font-weight: 700;
-  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
-.csRuntimeLog-status .csRuntimeLogLabel {
+.csRuntimeLog-status .csRuntimeLogTime {
   color: var(--jp-brand-color1);
 }
 
-.csRuntimeLog-stdout .csRuntimeLogLabel {
-  color: var(--jp-success-color1);
-}
-
-.csRuntimeLog-stderr .csRuntimeLogLabel,
+.csRuntimeLog-stderr .csRuntimeLogTime,
 .csRuntimeLog-stderr .csRuntimeLogText {
   color: var(--jp-error-color1);
 }
@@ -646,10 +724,17 @@
   color: var(--jp-brand-color1);
 }
 
+/* The brand fill stays blue in both themes, so the text on it is white in both
+   themes; the theme's inverse font colour follows the theme and goes black. */
 .csPrimaryButton {
   border: 1px solid var(--jp-brand-color1);
   background: var(--jp-brand-color1);
-  color: var(--jp-ui-inverse-font-color1);
+  color: #fff;
+}
+
+.csPrimaryButton .csSpinner {
+  border-color: rgb(255 255 255 / 45%);
+  border-top-color: #fff;
 }
 
 .csSecondaryButton {
@@ -886,6 +971,94 @@
   font-weight: 600;
 }
 
+/* An SSH host opens to exactly what ssh will use, and to the two things that
+   can be done about it. */
+.csSshAdd {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 10px;
+}
+
+.csSshAddToggle {
+  align-self: flex-start;
+}
+
+.csSshAddForm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 8px;
+  background: var(--jp-layout-color1);
+}
+
+.csSshHostEntry {
+  border-top: 1px solid var(--jp-border-color2);
+}
+
+.csSshHostEntry:first-child {
+  border-top: 0;
+}
+
+/* Name and target share one row wherever the two fit, and the target keeps to
+   the far end; a narrow viewport lets it drop to a line of its own. */
+.csSshHostSummary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.csSshHostSummary .csSshHostTarget {
+  margin-left: auto;
+}
+
+.csSshHostSummary:hover {
+  background: var(--jp-layout-color2);
+}
+
+.csSshHostTarget {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.csSshHostBody {
+  padding: 6px 12px 12px;
+}
+
+.csSshArgRow {
+  display: grid;
+  grid-template-columns: 12rem minmax(0, 1fr);
+  gap: 8px;
+  font-size: var(--jp-ui-font-size0);
+}
+
+.csSshArgKey {
+  font-weight: 700;
+}
+
+.csSshArgValue {
+  overflow-wrap: anywhere;
+  color: var(--jp-ui-font-color1);
+}
+
+.csSshHostStatus {
+  margin-top: 8px;
+  font-size: var(--jp-ui-font-size0);
+}
+
+.csSshHostActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
 .csFieldHelp {
   margin-top: 6px;
   color: var(--jp-ui-font-color2);
@@ -915,7 +1088,7 @@
   border: 1px solid var(--jp-border-color2);
   border-radius: 6px;
   overflow: hidden;
-  background: #111827;
+  background: var(--jp-layout-color1);
 }
 
 .csSshAuthHeader {
@@ -928,8 +1101,10 @@
   color: var(--jp-ui-font-color1);
 }
 
+/* Only the login transcript carries the terminal's own ground. */
 .csSshAuthSession {
   padding: 8px;
+  background: #111827;
 }
 
 .csSshOperationDetails > summary {
@@ -943,14 +1118,19 @@
   margin: 0 8px 8px;
 }
 
-.csSshAuthInstructions,
-.csSshAuthStatus {
+.csSshAuthInstructions {
   margin: 0 0 8px;
   color: #f3f4f6;
 }
 
 .csSshAuthStatus {
-  min-height: 1.4em;
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--jp-ui-font-color2);
+}
+
+.csSshAuthStatus:empty {
+  display: none;
 }
 
 .csSshOperationTerminal {

@@ -106,7 +106,12 @@ export class RuntimeDetail extends Widget {
     header.className = "csRuntimeDetailHeader";
     const identity = document.createElement("div");
     identity.append(
-      element("h3", runtime.rootFolder, "csRuntimeDetailTitle"),
+      element("h3", runtime.sshHost, "csRuntimeDetailTitle"),
+      element(
+        "span",
+        runtime.account || "(no project)",
+        "csRuntimeDetailAccount",
+      ),
       element(
         "span",
         runtime.state,
@@ -179,8 +184,6 @@ export class RuntimeDetail extends Widget {
     );
     this._field(details, "Generation", runtime.generation ?? "pending");
     this._field(details, "Workspace", runtime.rootFolder);
-    this._field(details, "SSH host", runtime.sshHost);
-    this._field(details, "Account", runtime.account || "(no project)");
     this._field(details, "Partition", runtime.partition);
     this._field(details, "Cores", String(runtime.resources.cores));
     this._field(details, "Memory", `${runtime.resources.memoryMb} MB`);
@@ -215,32 +218,21 @@ export class RuntimeDetail extends Widget {
     );
   }
 
+  // The status of a starting allocation is the thing an owner is waiting on, so
+  // it is always on screen rather than behind a disclosure, and each line is
+  // dated: what matters about a stalled runtime is when it last said anything.
   private _runtimeLog(runtime: IRuntime, tail: IRuntimeLogTail): HTMLElement {
     const view = this._logView ?? this._defaultLogView(runtime);
     this._logView = view;
-    const details = document.createElement("details");
-    details.className = "csRuntimeLog";
-    details.open = view.open;
-    const summary = element(
-      "summary",
-      `Startup output (${tail.lines.length} ${tail.lines.length === 1 ? "line" : "lines"})`,
-      "csRuntimeLogSummary",
-    );
+    const section = document.createElement("section");
+    section.className = "csRuntimeLog";
+    section.appendChild(element("h4", "Status", "csRuntimeLogTitle"));
     const scroller = document.createElement("div");
     scroller.className = "csRuntimeLogScroll";
     scroller.dataset.runtimeId = runtime.id;
     scroller.role = "log";
-    scroller.ariaLabel = `Startup output for ${runtime.rootFolder}`;
+    scroller.ariaLabel = `Status for ${runtime.sshHost}`;
     scroller.setAttribute("aria-live", "polite");
-    details.ontoggle = () => {
-      view.open = details.open;
-      if (details.open) {
-        this._restoreLogScroller(scroller, view);
-      } else if (scroller.clientHeight > 0) {
-        view.scrollTop = scroller.scrollTop;
-        view.atBottom = this._atBottom(scroller);
-      }
-    };
     scroller.onscroll = () => {
       view.scrollTop = scroller.scrollTop;
       view.atBottom = this._atBottom(scroller);
@@ -248,22 +240,26 @@ export class RuntimeDetail extends Widget {
     for (const line of tail.lines) {
       const row = document.createElement("div");
       row.className = `csRuntimeLogLine csRuntimeLog-${line.stream}`;
-      row.append(
-        element("span", line.stream, "csRuntimeLogLabel"),
-        element("span", line.text, "csRuntimeLogText"),
-      );
+      const at = new Date(line.at);
+      const stamp = Number.isFinite(at.getTime())
+        ? at.toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+          })
+        : "";
+      const time = element("time", stamp, "csRuntimeLogTime");
+      if (stamp) time.dateTime = line.at;
+      time.title = line.stream;
+      row.append(time, element("span", line.text, "csRuntimeLogText"));
       scroller.appendChild(row);
     }
-    details.append(summary, scroller);
-    return details;
+    section.appendChild(scroller);
+    return section;
   }
 
-  private _defaultLogView(runtime: IRuntime): IRuntimeLogView {
-    return {
-      open: ACTIVE_STATES.has(runtime.state) || runtime.state === "FAILED",
-      scrollTop: 0,
-      atBottom: true,
-    };
+  private _defaultLogView(_runtime: IRuntime): IRuntimeLogView {
+    return { open: true, scrollTop: 0, atBottom: true };
   }
 
   private _captureLogView(): void {

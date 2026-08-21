@@ -63,6 +63,14 @@ export interface ISshHost {
   port?: number;
   identityFile?: string;
   extraDirectives: string[];
+  // Only entries CyberShuttle wrote can be removed from here; the rest are the
+  // user's own configuration.
+  managed?: boolean;
+}
+
+export interface ISshHostTest {
+  ok: boolean;
+  message: string;
 }
 
 export interface IGres {

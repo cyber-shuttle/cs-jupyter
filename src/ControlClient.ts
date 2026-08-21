@@ -23,6 +23,7 @@ import {
   IRuntimeValidation,
   ISlurmInfo,
   ISshHost,
+  ISshHostTest,
   RUNTIME_STATES,
   RuntimeState,
   RuntimeValidationStatus,
@@ -42,6 +43,7 @@ export type RuntimeLogStream = "status" | "stdout" | "stderr";
 export interface IRuntimeLogLine {
   stream: RuntimeLogStream;
   text: string;
+  at: string;
 }
 
 export interface IRuntimeLogTail {
@@ -162,6 +164,42 @@ export class ControlClient {
       throw new Error("cs-control returned an invalid SSH host list.");
     }
     return value.hosts.map(validateHost);
+  }
+
+  // cs-control parses the pasted command, so the browser never composes SSH
+  // configuration text of its own.
+  async addSshHost(name: string, command: string): Promise<ISshHost> {
+    return validateHost(
+      await this._request("ssh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, command }),
+      }),
+    );
+  }
+
+  async removeSshHost(alias: string): Promise<void> {
+    await this._request(`ssh/${encodeURIComponent(alias)}`, {
+      method: "DELETE",
+    });
+  }
+
+  async testSshHost(
+    alias: string,
+    signal?: AbortSignal,
+  ): Promise<ISshHostTest> {
+    const value = await this._request(`ssh/${encodeURIComponent(alias)}/test`, {
+      method: "POST",
+      signal,
+    });
+    if (
+      !isPlainObject(value) ||
+      typeof value.ok !== "boolean" ||
+      typeof value.message !== "string"
+    ) {
+      throw new Error("cs-control returned an invalid SSH host test.");
+    }
+    return { ok: value.ok, message: value.message };
   }
 
   // Aborting the signal cancels the request, which cancels the remote process group.
@@ -438,8 +476,10 @@ function validateRuntimeLogTail(value: unknown): IRuntimeLogTail {
       !["status", "stdout", "stderr"].includes(String(line.stream)) ||
       typeof line.text !== "string" ||
       RUNTIME_LOG_CONTROL.test(line.text) ||
-      Object.keys(line).length !== 2 ||
-      Object.keys(line).some((key) => !["stream", "text"].includes(key))
+      typeof line.at !== "string" ||
+      !Number.isFinite(Date.parse(line.at)) ||
+      Object.keys(line).length !== 3 ||
+      Object.keys(line).some((key) => !["stream", "text", "at"].includes(key))
     ) {
       throw new Error("cs-control returned an invalid runtime log line.");
     }
@@ -448,7 +488,11 @@ function validateRuntimeLogTail(value: unknown): IRuntimeLogTail {
     if (size > 4096 || bytes > 64 * 1024) {
       throw new Error("cs-control returned an oversized runtime log event.");
     }
-    return { stream: line.stream as RuntimeLogStream, text: line.text };
+    return {
+      stream: line.stream as RuntimeLogStream,
+      text: line.text,
+      at: line.at,
+    };
   });
   return { runtimeId: value.runtimeId, lines };
 }

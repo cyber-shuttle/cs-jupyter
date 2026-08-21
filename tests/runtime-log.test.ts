@@ -22,10 +22,17 @@ function runtimeInState(state: IRuntime["state"]): IRuntime {
   return { ...runtime, state };
 }
 
+const LOG_AT = "2026-01-01T00:00:00.000Z";
+
 function log(
-  lines: IRuntimeLogLine[] = [{ stream: "status", text: "Preparing runtime" }],
+  lines: Array<Partial<IRuntimeLogLine>> = [
+    { stream: "status", text: "Preparing runtime" },
+  ],
 ): IRuntimeLogTail {
-  return { runtimeId, lines };
+  return {
+    runtimeId,
+    lines: lines.map((line) => ({ at: LOG_AT, ...line })) as IRuntimeLogLine[],
+  };
 }
 
 /** Reads one polled list whose logs array is exactly `logs`. */
@@ -125,15 +132,19 @@ class DetailController {
 
 function detailState(
   value: IRuntime,
-  lines: IRuntimeLogLine[] = [
+  lines: Array<Partial<IRuntimeLogLine>> = [
     { stream: "status", text: "Preparing runtime" },
     { stream: "stdout", text: "plain <b>output</b>" },
     { stream: "stderr", text: "warning" },
   ],
 ): IRuntimeUiState {
+  const stamped = lines.map((line) => ({
+    at: LOG_AT,
+    ...line,
+  })) as IRuntimeLogLine[];
   return uiState({
     runtimes: [value],
-    logs: new Map([[value.id, { runtimeId: value.id, lines }]]),
+    logs: new Map([[value.id, { runtimeId: value.id, lines: stamped }]]),
     hosts: [],
     jupyterReady: new Set(value.state === "READY" ? [value.id] : []),
   });
@@ -185,12 +196,25 @@ describe("runtime detail modal body", () => {
       ),
     ).toEqual(["Stop", "Connect", "Delete"]);
     const output = detail.node.querySelector<HTMLElement>("[role=log]")!;
-    expect(output.ariaLabel).toBe("Startup output for projects/logs");
+    expect(output.ariaLabel).toBe("Status for delta");
     expect(
-      [...output.querySelectorAll(".csRuntimeLogLabel")].map(
-        (label) => label.textContent,
+      [...output.querySelectorAll(".csRuntimeLogLine")].map((row) =>
+        [...row.classList].find((name) => name.startsWith("csRuntimeLog-")),
       ),
-    ).toEqual(["status", "stdout", "stderr"]);
+    ).toEqual([
+      "csRuntimeLog-status",
+      "csRuntimeLog-stdout",
+      "csRuntimeLog-stderr",
+    ]);
+    // The first column dates each line rather than repeating its stream.
+    expect(
+      [...output.querySelectorAll(".csRuntimeLogTime")].map((time) =>
+        time.getAttribute("datetime"),
+      ),
+    ).toEqual([LOG_AT, LOG_AT, LOG_AT]);
+    expect(output.querySelector(".csRuntimeLogTime")?.textContent).toMatch(
+      /\d/,
+    );
     expect(output.querySelector("b")).toBeNull();
     expect(output.textContent).toContain("plain <b>output</b>");
     detail.dispose();
@@ -253,7 +277,7 @@ describe("runtime detail modal body", () => {
     detail.dispose();
   });
 
-  it("rerenders live, preserves log expansion and scroll, and disconnects on dispose", () => {
+  it("rerenders live, preserves status scroll, and disconnects on dispose", () => {
     vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(200);
     vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(50);
     const { controller, detail } = runtimeDetail({
@@ -280,16 +304,14 @@ describe("runtime detail modal body", () => {
       ]),
     );
     expect(detail.node.textContent).toContain("READY");
-    expect(detail.node.querySelector<HTMLDetailsElement>("details")?.open).toBe(
-      false,
+    expect(detail.node.querySelector("details")).toBeNull();
+    expect(detail.node.querySelector(".csRuntimeLogTitle")?.textContent).toBe(
+      "Status",
     );
     expect(logScroll().scrollTop).toBe(200);
 
-    const oldDetails =
-      detail.node.querySelector<HTMLDetailsElement>("details")!;
     logScroll().scrollTop = 40;
     logScroll().onscroll?.(new Event("scroll"));
-    oldDetails.open = false;
     controller.setState({
       ...detailState({ ...runtime, state: "STARTING" }),
       logs: new Map(),
@@ -299,11 +321,9 @@ describe("runtime detail modal body", () => {
         { stream: "stdout", text: "new epoch" },
       ]),
     );
-    const newDetails =
-      detail.node.querySelector<HTMLDetailsElement>("details")!;
-    expect(newDetails.open).toBe(true);
-    expect(newDetails.textContent).toContain("new epoch");
-    expect(newDetails.textContent).not.toContain("ready");
+    const status = detail.node.querySelector<HTMLElement>(".csRuntimeLog")!;
+    expect(status.textContent).toContain("new epoch");
+    expect(status.textContent).not.toContain("ready");
     expect(logScroll().scrollTop).toBe(200);
 
     detail.dispose();

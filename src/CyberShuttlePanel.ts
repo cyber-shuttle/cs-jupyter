@@ -573,7 +573,7 @@ export class CyberShuttlePanel extends StackedPanel {
       return;
     }
     this._detailDialog?.resolve(0);
-    await this.openCreate(false, false, runtime);
+    await this.openCreate(runtime);
   }
 
   async stop(runtimeId: string): Promise<void> {
@@ -631,27 +631,21 @@ export class CyberShuttlePanel extends StackedPanel {
     }
   }
 
-  async openCreate(
-    showHosts = false,
-    closeFromHosts = false,
-    like?: IRuntime,
-  ): Promise<void> {
+  // Each modal is one view titled after it, closed by the dialog's own control.
+  async openCreate(like?: IRuntime): Promise<void> {
     const body = new StackedPanel();
     body.addClass("csWorkspaceModal");
     const form = this._createForm();
-    const hosts = this._sshHostsWidget();
     body.addWidget(form);
-    body.addWidget(hosts);
     form.setHosts(this._hosts ?? []);
     if (like) {
       form.prefill(like);
     }
     const dialog = new Dialog({
-      title: closeFromHosts
-        ? "CyberShuttle SSH Hosts"
-        : "Add CyberShuttle Runtime",
+      title: "Add Runtime",
       body,
       buttons: [Dialog.cancelButton({ label: "Close" })],
+      hasClose: true,
     });
     const show = (widget: Widget): void => {
       for (const child of body.widgets) {
@@ -659,25 +653,29 @@ export class CyberShuttlePanel extends StackedPanel {
       }
       widget.activate();
     };
-    const showForm = (): void => show(form);
-    const showHostsView = (): void => {
-      show(hosts);
-      void hosts.refresh();
-    };
-    form.backRequested.connect(() => dialog.resolve(0));
-    form.sshHostsRequested.connect(showHostsView);
-    hosts.backRequested.connect(() =>
-      closeFromHosts ? dialog.resolve(0) : showForm(),
-    );
+    form.sshHostsRequested.connect(() => {
+      dialog.resolve(0);
+      void this.openSshHosts();
+    });
     form.createRequested.connect((_sender, intent) => {
       void this._createInModal(intent, form, body, show);
     });
-    showHosts ? showHostsView() : showForm();
+    show(form);
     await dialog.launch().catch(() => undefined);
   }
 
-  openSshHosts(): Promise<void> {
-    return this.openCreate(true, true);
+  async openSshHosts(): Promise<void> {
+    const hosts = this._sshHostsWidget();
+    hosts.addClass("csWorkspaceModal");
+    void hosts.refresh();
+    await new Dialog({
+      title: "SSH Hosts",
+      body: hosts,
+      buttons: [Dialog.cancelButton({ label: "Close" })],
+      hasClose: true,
+    })
+      .launch()
+      .catch(() => undefined);
   }
 
   private async _createInModal(

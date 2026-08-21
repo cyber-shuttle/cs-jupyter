@@ -87,8 +87,14 @@ export const runtimeUiPlugin: JupyterFrontEndPlugin<void> = {
         );
         if (content) {
           if (panel.node.parentElement !== content) {
-            content.insertBefore(panel.node, content.firstChild);
-            if (!panel.isAttached) Widget.attach(panel, content);
+            // Lumino owns both the insertion and the attach lifecycle: placing
+            // the node first makes it connected, which attach then rejects.
+            if (panel.isAttached) Widget.detach(panel);
+            Widget.attach(
+              panel,
+              content,
+              content.firstElementChild as HTMLElement,
+            );
           }
           return;
         }

@@ -1,6 +1,6 @@
 import { PageConfig } from "@jupyterlab/coreutils";
 import { assertSecureOrLoopback, isPlainObject } from "./Common";
-import { element } from "./dom";
+import { closeButton, element } from "./dom";
 
 const MAX_BROKER_BODY = 64 * 1024;
 const BROKER_REQUEST_TIMEOUT_MS = 15 * 1000;
@@ -58,7 +58,6 @@ const SESSION_KEY = "cybershuttle.oauth.v1";
 
 const COPY_GLYPH = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.2"><rect x="5.6" y="5.6" width="8" height="8" rx="1.4" /><path d="M10.9 5.6V3.9a1.4 1.4 0 0 0-1.4-1.4H3.9a1.4 1.4 0 0 0-1.4 1.4v5.6a1.4 1.4 0 0 0 1.4 1.4h1.7" /></g></svg>`;
 const CHECK_GLYPH = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m3.4 8.4 3 3 6.2-6.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
-const CLOSE_GLYPH = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /></svg>`;
 
 // The header names who is signed in. The claim is read for display only; the
 // control plane still validates the token it is carved from, so nothing here
@@ -594,13 +593,7 @@ function showDeviceCodeModal(
   codeRow.className = "csDeviceCodeRow";
   codeRow.append(code, copy);
 
-  const close = document.createElement("button");
-  close.type = "button";
-  close.className = "csDeviceCodeClose";
-  close.title = "Close";
-  close.setAttribute("aria-label", "Close");
-  close.innerHTML = CLOSE_GLYPH;
-  close.onclick = cancel;
+  const close = closeButton(cancel);
 
   const actions = document.createElement("div");
   actions.className = "csDeviceCodeActions";

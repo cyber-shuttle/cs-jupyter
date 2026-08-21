@@ -115,9 +115,6 @@ describe("host refresh while the runtime wizard is active", () => {
     void state.panel.openCreate();
     await vi.waitFor(() => expect(state.forms).toHaveLength(1));
     const first = state.forms[0];
-    first.sshHostsRequested.emit(undefined);
-    await vi.waitFor(() => expect(state.hostWidgets).toHaveLength(1));
-    state.hostWidgets[0].backRequested.emit(undefined);
     expect([first.isHidden, first.isDisposed]).toEqual([false, false]);
     first.createRequested.emit(createRequest);
     await vi.waitFor(() =>
