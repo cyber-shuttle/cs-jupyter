@@ -7,9 +7,7 @@ import { button, element, statePill } from "./dom";
 export const emptyState = (): IRuntimeUiState => ({
   runtimes: [],
   logs: new Map(),
-  hosts: undefined,
   loading: false,
-  refreshing: false,
   updatesStatus: "",
   error: "",
   busyRuntimeIds: new Set(),

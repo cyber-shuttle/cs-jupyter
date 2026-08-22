@@ -7,20 +7,16 @@ service composition.
 
 ## Static workspace configuration
 
-The Lite site is hosted independently from cs-control. Configure these
-`PageConfig` options for each deployment:
+The Lite site is hosted independently from cs-control. One `PageConfig` option
+configures a deployment:
 
 ```text
 cybershuttleControlApiUrl=https://control.example.edu/api/v1
-cybershuttleProductionOrigin=https://workspace.example.edu
-cybershuttleDevelopmentOrigins=["http://127.0.0.1:8000"]
 ```
 
-`cybershuttleControlApiUrl` must be an absolute URL; relative and implicit
-same-origin values are rejected. The production origin and every development
-origin must exactly match an origin allowed by cs-control for OAuth control
-calls. Linkspan Jupyter service specifications do not contain origins. Use
-HTTPS except for loopback development origins. Configure the tenant-specific
+It must be an absolute URL; relative and implicit same-origin values are
+rejected. The origin it names must be one cs-control allows for OAuth control
+calls. Use HTTPS except for loopback development. Configure the tenant-specific
 Microsoft authority only on cs-control; Lite has no authority, scope, native
 client ID, SPA client, or MSAL configuration.
 
@@ -54,12 +50,11 @@ traffic.
    cross-origin cs-control API.
 2. One authenticated read of `GET /api/v1/runtimes`, polled once a second,
    supplies the runtime state (`SUBMITTING`, `QUEUED`, `STARTING`, `READY`,
-   `STOPPING`, `STOPPED`, `FAILED`) and the startup tails, alongside lowercase
-   Linkspan service states.
-3. A `STOPPED` or `FAILED` allocation is gone. "Create like this" opens the
-   wizard seeded from it rather than resuming a dead job.
-4. Connect is available only when runtime state is `READY` and the Jupyter
-   service state is `ready`. Lite directly
+   `STOPPING`, `STOPPED`, `FAILED`) and the startup tails.
+3. A `STOPPED` or `FAILED` allocation is gone. "Run again" opens the create
+   form seeded from it rather than resuming a dead job.
+4. Connect is available once the runtime state is `READY` and an access
+   response has been fetched for it. Lite directly
    requests the separate owner-authenticated runtime-access response; no Dev
    Tunnel popup or cookie bootstrap is used.
 5. Lite stores that exact generation-bound access response only in

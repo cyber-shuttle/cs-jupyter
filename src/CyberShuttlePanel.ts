@@ -27,9 +27,7 @@ const RUNTIME_POLL_INTERVAL_MS = 1000;
 export interface IRuntimeUiState {
   readonly runtimes: readonly IRuntime[];
   readonly logs: ReadonlyMap<string, IRuntimeLogTail>;
-  readonly hosts: readonly ISshHost[] | undefined;
   readonly loading: boolean;
-  readonly refreshing: boolean;
   readonly updatesStatus: string;
   readonly error: string;
   readonly busyRuntimeIds: ReadonlySet<string>;
@@ -57,7 +55,6 @@ export class CyberShuttlePanel extends StackedPanel {
   private _pollTimer: ReturnType<typeof setInterval> | undefined;
   private _polling = false;
   private _polled = false;
-  private _refreshing = false;
   private _selection = 0;
   private _runtimes: IRuntime[] = [];
   private _logs = new Map<string, IRuntimeLogTail>();
@@ -118,12 +115,7 @@ export class CyberShuttlePanel extends StackedPanel {
           { ...tail, lines: tail.lines.map((line) => ({ ...line })) },
         ]),
       ),
-      hosts: this._hosts?.map((host) => ({
-        ...host,
-        extraDirectives: [...host.extraDirectives],
-      })),
       loading: this._loading,
-      refreshing: this._refreshing,
       updatesStatus: this._updatesStatus,
       error: this._error,
       busyRuntimeIds: new Set(this._busyRuntimeIds),
@@ -312,7 +304,6 @@ export class CyberShuttlePanel extends StackedPanel {
         return;
       }
       this._polled = true;
-      this._refreshing = list.refreshing;
       this._setRuntimes(list.runtimes);
       this._setRuntimeLogs(list.logs);
       for (const runtime of list.runtimes) {
@@ -324,7 +315,7 @@ export class CyberShuttlePanel extends StackedPanel {
           void this.refreshJupyter(runtime.id);
         }
       }
-      this._updateRefreshing();
+      this._emitState();
       this._setStreamStatus("");
     } catch (error) {
       if (this.isDisposed) {
@@ -444,10 +435,6 @@ export class CyberShuttlePanel extends StackedPanel {
     this._setConnecting(undefined);
     this._stopPolling();
     super.dispose();
-  }
-
-  private _updateRefreshing(): void {
-    this._emitState();
   }
 
   private async _refreshHosts(): Promise<void> {

@@ -1,3 +1,4 @@
+import { GENERATION } from "./Common";
 import type { JupyterFrontEndPlugin } from "@jupyterlab/application";
 import { PageConfig } from "@jupyterlab/coreutils";
 import type {
@@ -123,7 +124,7 @@ const remoteServerSettingsPlugin: ServiceManagerPlugin<
       }
       const generation =
         new URLSearchParams(window.location.search).get("generation") ?? "";
-      if (!/^g-[a-f0-9]{16}$/.test(generation))
+      if (!GENERATION.test(generation))
         throw new Error("Invalid runtime generation.");
       // A READY runtime is a running Jupyter Server: cs-control only issues access once the
       // allocation is up, so its response is the readiness signal.

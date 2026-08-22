@@ -12,7 +12,6 @@ import {
 import type { IRuntimeAccess } from "./runtime-access";
 import {
   clearRuntimeAccess,
-  clearRuntimeSession,
   validateRuntimeAccess,
   validDevTunnelRoot,
 } from "./runtime-access";
@@ -27,11 +26,11 @@ import {
   RuntimeState,
   RuntimeValidationStatus,
   VALIDATION_STATUSES,
+  RUNTIME_ID,
+  GENERATION,
 } from "./Common";
 import { isPlainObject } from "./Common";
 
-const ID = /^rt-[a-f0-9]{12}$/;
-const GENERATION = /^g-[a-f0-9]{16}$/;
 const RUNTIME_LOG_CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
 const MAX_CORES = 4096;
 const MAX_MEMORY_MB = 100_000_000;
@@ -281,39 +280,28 @@ export class ControlClient {
   }
 
   async stopRuntime(id: string): Promise<IRuntime> {
-    const runtimeId = validRuntimeId(id);
-    const invalid = "cs-control returned an invalid stopped runtime.";
-    let runtime: IRuntime;
-    try {
-      runtime = validateRuntime(
-        await this._request(`runtimes/${encodeURIComponent(runtimeId)}/stop`, {
-          method: "POST",
-        }),
-      );
-    } catch (error) {
-      if (error instanceof ControlError) {
-        throw error;
-      }
-      throw new Error(invalid);
-    }
-    if (runtime.id !== runtimeId) {
-      throw new Error(invalid);
-    }
-    clearRuntimeSession(runtimeId);
-    return runtime;
+    return this._retireRuntime(id, "stop", "POST", "stopped");
   }
 
-  // Delete stops a live allocation first, so it can take as long as a stop.
   async deleteRuntime(id: string): Promise<IRuntime> {
+    return this._retireRuntime(id, "", "DELETE", "deleted");
+  }
+
+  // Stop and delete differ only in the route and the word for what came back.
+  // Both must answer with the runtime they were asked about, and both end the
+  // browser's session with it.
+  private async _retireRuntime(
+    id: string,
+    suffix: string,
+    method: string,
+    past: string,
+  ): Promise<IRuntime> {
     const runtimeId = validRuntimeId(id);
-    const invalid = "cs-control returned an invalid deleted runtime.";
+    const invalid = `cs-control returned an invalid ${past} runtime.`;
+    const path = `runtimes/${encodeURIComponent(runtimeId)}${suffix ? `/${suffix}` : ""}`;
     let runtime: IRuntime;
     try {
-      runtime = validateRuntime(
-        await this._request(`runtimes/${encodeURIComponent(runtimeId)}`, {
-          method: "DELETE",
-        }),
-      );
+      runtime = validateRuntime(await this._request(path, { method }));
     } catch (error) {
       if (error instanceof ControlError) {
         throw error;
@@ -323,7 +311,7 @@ export class ControlClient {
     if (runtime.id !== runtimeId) {
       throw new Error(invalid);
     }
-    clearRuntimeSession(runtimeId);
+    clearRuntimeAccess(runtimeId);
     return runtime;
   }
 
@@ -438,7 +426,7 @@ export function createRuntimeServerSettings(
 }
 
 export function validRuntimeId(value: string): string {
-  if (!ID.test(value)) {
+  if (!RUNTIME_ID.test(value)) {
     throw new Error("Invalid runtime id.");
   }
   return value;
@@ -448,7 +436,7 @@ function validateRuntimeValidation(value: unknown): IRuntimeValidation {
   if (
     !isPlainObject(value) ||
     typeof value.runtimeId !== "string" ||
-    !ID.test(value.runtimeId) ||
+    !RUNTIME_ID.test(value.runtimeId) ||
     !VALIDATION_STATUSES.includes(value.status as RuntimeValidationStatus) ||
     typeof value.script !== "string" ||
     !value.script ||
@@ -476,7 +464,7 @@ function validateRuntimeLogTail(value: unknown): IRuntimeLogTail {
   if (
     !isPlainObject(value) ||
     typeof value.runtimeId !== "string" ||
-    !ID.test(value.runtimeId) ||
+    !RUNTIME_ID.test(value.runtimeId) ||
     !Array.isArray(value.lines) ||
     value.lines.length < 1 ||
     value.lines.length > 100 ||
@@ -532,7 +520,7 @@ function validateRuntime(value: unknown): IRuntime {
     !isPlainObject(value) ||
     Object.keys(value).some((key) => !allowed.includes(key)) ||
     typeof value.id !== "string" ||
-    !ID.test(value.id) ||
+    !RUNTIME_ID.test(value.id) ||
     typeof value.generation !== "string" ||
     !GENERATION.test(value.generation) ||
     typeof value.state !== "string" ||

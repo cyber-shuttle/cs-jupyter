@@ -1,7 +1,8 @@
+import { GENERATION } from "./Common";
 import type { JupyterFrontEnd } from "@jupyterlab/application";
 import type { Widget } from "@lumino/widgets";
 import { ControlClient, validRuntimeId } from "./ControlClient";
-import { clearRuntimeSession, loadRuntimeAccess } from "./runtime-access";
+import { clearRuntimeAccess, loadRuntimeAccess } from "./runtime-access";
 
 export type RuntimeDestination = (
   runtimeId: string,
@@ -90,7 +91,7 @@ export class RuntimeController {
     }
     this._requestedDocumentPath = undefined;
     if (this.currentRuntimeId && this.currentRuntimeId !== runtime.id) {
-      clearRuntimeSession(this.currentRuntimeId);
+      clearRuntimeAccess(this.currentRuntimeId);
     }
     this._navigate(
       this._destination(runtime.id, runtime.generation, documentPath),
@@ -99,7 +100,7 @@ export class RuntimeController {
 
   private _currentGeneration(search: URLSearchParams): string | undefined {
     const generation = search.get("generation") ?? "";
-    return /^g-[a-f0-9]{16}$/.test(generation) ? generation : undefined;
+    return GENERATION.test(generation) ? generation : undefined;
   }
 
   private _activeDocumentContext(): IDocumentContextLike | undefined {

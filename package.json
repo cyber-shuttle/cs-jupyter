@@ -20,7 +20,7 @@
     "clean": "rimraf lib labextension dist .jupyterlite.doit.db tsconfig.tsbuildinfo",
     "dev": "bun run build:lib && bun run build:extension && uv run jupyter lite serve --config jupyter_lite_config.json",
     "lint": "bun run typecheck && prettier --check .",
-    "typecheck": "tsc -b --pretty false",
+    "typecheck": "tsc -b --pretty false && tsc -p tsconfig.tests.json --pretty false",
     "test": "vitest run",
     "test:dist": "bun tests/distribution.mjs",
     "test:browser": "bun tests/browser.mjs",
