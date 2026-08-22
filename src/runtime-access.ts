@@ -1,7 +1,5 @@
 const CACHE_PREFIX = "cybershuttle.runtime-access.v1.";
-import { isPlainObject } from "./Common";
-const RUNTIME_ID = /^rt-[a-f0-9]{12}$/;
-const GENERATION = /^g-[a-f0-9]{16}$/;
+import { isPlainObject, RUNTIME_ID, GENERATION } from "./Common";
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
 
 export interface IRuntimeAccess {
@@ -106,8 +104,6 @@ export function clearRuntimeAccess(
 ): void {
   storage.removeItem(cacheKey(runtimeId));
 }
-
-export const clearRuntimeSession = clearRuntimeAccess;
 
 function cacheKey(runtimeId: string): string {
   if (!RUNTIME_ID.test(runtimeId)) throw new Error("Invalid runtime id.");

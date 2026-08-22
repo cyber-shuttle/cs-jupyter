@@ -1,3 +1,4 @@
+import { GENERATION } from "./Common";
 import type { JupyterFrontEndPlugin } from "@jupyterlab/application";
 import { ICommandPalette } from "@jupyterlab/apputils";
 import { PageConfig } from "@jupyterlab/coreutils";
@@ -30,7 +31,7 @@ export function runtimeLiteUrl(
   location: Pick<Location, "href"> = window.location,
 ): string {
   const id = validRuntimeId(runtimeId);
-  if (!/^g-[a-f0-9]{16}$/.test(generation))
+  if (!GENERATION.test(generation))
     throw new Error("Invalid runtime generation.");
   const url = new URL(location.href);
   url.searchParams.set("runtime", id);

@@ -1,3 +1,8 @@
+// The two identifier formats cs-control issues. Written once here for the same
+// reason as the state list below: a change to either must not half-land.
+export const RUNTIME_ID = /^rt-[a-f0-9]{12}$/;
+export const GENERATION = /^g-[a-f0-9]{16}$/;
+
 // Types are derived from these values so validation and the type system cannot
 // disagree about what cs-control is allowed to report.
 export const RUNTIME_STATES = [
