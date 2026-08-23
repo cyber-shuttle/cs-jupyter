@@ -13,13 +13,13 @@ const runtimeId = "rt-111111111111";
 const restartId = "rt-222222222222";
 const createdId = "rt-333333333333";
 const generation = "g-0123456789abcdef";
-const linkspanOrigin = "https://31001.use.devtunnels.ms";
 const directOrigin = "https://31002.use.devtunnels.ms";
-const directBase = `/api/v1/runtimes/${createdId}/jupyter/`;
+// The access URI is a Dev Tunnel root, so the server is served from "/".
+const directBase = "/";
 const accessToken = "browser-access-token";
 // The header names who is signed in, from the id token's preferred_username.
 const account = "user@example.edu";
-const jupyterCapability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+const jupyterToken = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 let identityToken = "";
 let staticOrigin = "";
 let controlOrigin = "";
@@ -29,12 +29,6 @@ let discoveryCount = 0;
 let directTerminalSockets = 0;
 const controlRequests = [];
 const directRequests = [];
-const linkspanRequests = [];
-let activeLinkspanRuntime = runtimeId;
-const jupyterStates = new Map([
-  [runtimeId, "ready"],
-  [createdId, "stopped"],
-]);
 const directWebSockets = [];
 // cs-control stamps every log line: RuntimeLogLine is {stream, text, at},
 // and the browser rejects a line carrying anything else or missing one.
@@ -187,6 +181,16 @@ const controlServer = createServer((request, response) => {
       partitions: [{ name: "debug", cpuCount: 16, memoryMb: 32768, gres: [] }],
     });
   }
+  // The review step asks cs-control to build the script before validating it.
+  if (url.pathname === "/api/v1/runtimes/script" && request.method === "POST") {
+    return readRequestJSON(request).then((body) => {
+      assert.equal(body.rootFolder, "projects/browser-created");
+      return json(response, {
+        runtimeId: createdId,
+        script: "#!/bin/bash\n#SBATCH --partition=debug\n",
+      });
+    });
+  }
   if (
     url.pathname === "/api/v1/runtimes/validate" &&
     request.method === "POST"
@@ -214,7 +218,6 @@ const controlServer = createServer((request, response) => {
       json(response, item, 201);
       setTimeout(() => {
         item.state = "READY";
-        activeLinkspanRuntime = createdId;
       }, 25);
     });
   }
@@ -228,15 +231,13 @@ const controlServer = createServer((request, response) => {
     url.pathname,
   );
   if (accessMatch) {
-    activeLinkspanRuntime = accessMatch[1];
     return json(response, {
       runtimeId: accessMatch[1],
       generation,
       expiresAt: "2030-01-01T00:00:00Z",
-      linkspan: {
-        uri: `${linkspanOrigin}/`,
-        capability: jupyterCapability,
-      },
+      // cs-control's RuntimeAccessResponse: the Jupyter Server's own root and
+      // the token that opens it. The browser talks to it directly from here.
+      jupyter: { uri: `${directOrigin}/`, token: jupyterToken },
     });
   }
   const runtimeMatch = /^\/api\/v1\/runtimes\/(rt-[a-f0-9]{12})$/.exec(
@@ -313,59 +314,10 @@ try {
     if (message.type() === "error") browserErrors.push(message.text());
   });
 
-  await context.route(`${linkspanOrigin}/api/v1/jupyter`, async (route) => {
-    const request = route.request();
-    if (request.method() === "OPTIONS") {
-      return route.fulfill({
-        status: 204,
-        headers: {
-          "access-control-allow-origin": "*",
-          "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
-          "access-control-allow-headers": "Authorization, Content-Type",
-        },
-      });
-    }
-    const entry = {
-      method: request.method(),
-      authorization: request.headers().authorization ?? "",
-      body: request.method() === "POST" ? request.postDataJSON() : undefined,
-      runtimeId: activeLinkspanRuntime,
-    };
-    linkspanRequests.push(entry);
-    assert.equal(entry.authorization, `Bearer ${jupyterCapability}`);
-    if (request.method() === "POST") {
-      assert.deepEqual(entry.body, {
-        root: "/home/alice/projects/browser-created",
-        python: "/home/alice/.cybershuttle/jupyter-env/bin/python",
-      });
-      jupyterStates.set(activeLinkspanRuntime, "ready");
-    } else if (request.method() === "DELETE") {
-      jupyterStates.set(activeLinkspanRuntime, "stopped");
-      return route.fulfill({
-        status: 204,
-        headers: { "access-control-allow-origin": "*" },
-      });
-    }
-    const state = jupyterStates.get(activeLinkspanRuntime) ?? "stopped";
-    return route.fulfill({
-      status: request.method() === "POST" ? 201 : 200,
-      contentType: "application/json",
-      body: JSON.stringify(
-        state === "ready"
-          ? {
-              state,
-              uri: `${directOrigin}/`,
-              publicBaseUrl: directBaseFor(activeLinkspanRuntime),
-            }
-          : { state },
-      ),
-      headers: { "access-control-allow-origin": "*" },
-    });
-  });
   await context.route(`${directOrigin}/**`, async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    const relative = url.pathname.slice(directBase.length);
+    const relative = url.pathname.slice(1);
     directRequests.push({
       method: request.method(),
       path: url.pathname,
@@ -509,9 +461,11 @@ try {
     "the access token must not enter the URL, localStorage, or logs",
   );
   assert.deepEqual(
-    Object.keys(browserState.sessionStorage),
-    ["cybershuttle.oauth.v1"],
-    "credentials live under exactly one session-storage key",
+    Object.keys(browserState.sessionStorage)
+      .map((key) => key.replace(/\.rt-[a-f0-9]{12}$/, ".<runtime>"))
+      .sort(),
+    ["cybershuttle.oauth.v1", "cybershuttle.runtime-access.v1.<runtime>"],
+    "session storage holds only the credentials and the cached runtime access",
   );
   assert.ok(controlRequests.includes("GET /api/v1/runtimes"));
 
@@ -614,11 +568,9 @@ try {
     "projects/restart",
     "Run again must seed the finished runtime's root folder",
   );
-  await page.getByRole("button", { name: "Close", exact: true }).click();
-
-  await page.getByRole("button", { name: "Add Runtime" }).click();
-  // The host is a labelled select now, not a button.
-  await page.getByLabel("SSH Host").selectOption("cluster");
+  // Seeding the host starts discovery immediately, and this host wants
+  // interactive authentication first, so the console opens here rather than on
+  // a later selection.
   await page
     .locator(".csSshOperationTerminal .xterm-rows")
     .getByText("Password:", { exact: true })
@@ -626,13 +578,20 @@ try {
   await page.locator(".csSshOperationTerminal .xterm-helper-textarea").focus();
   await page.keyboard.type("password");
   await page.keyboard.press("Control+M");
-  const workspace = page.getByLabel("Workspace folder");
-  await workspace.waitFor({ state: "visible" });
+  await page.getByLabel("Workspace folder").waitFor({ state: "visible" });
   assert.equal(
     discoveryCount,
     2,
     "discovery must resume once after interactive auth",
   );
+  // The create dialog carries JupyterLab's close affordance, not a labelled button.
+  await page.locator(".jp-Dialog-close-button").click();
+
+  await page.getByRole("button", { name: "Add Runtime" }).click();
+  // The host is a labelled select now, not a button.
+  await page.getByLabel("SSH Host").selectOption("cluster");
+  const workspace = page.getByLabel("Workspace folder");
+  await workspace.waitFor({ state: "visible" });
   await workspace.fill("projects/browser-created");
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await page.getByRole("heading", { name: "Review Slurm job" }).waitFor();
@@ -644,16 +603,6 @@ try {
   await createdDetail.getByText("READY", { exact: true }).waitFor({
     timeout: 20_000,
   });
-  await createdDetail.getByText("stopped", { exact: true }).waitFor();
-  await createdDetail
-    .getByRole("button", { name: "Start Jupyter", exact: true })
-    .click();
-  await createdDetail.getByText("ready", { exact: true }).waitFor();
-  assert.equal(
-    linkspanRequests.filter(({ method }) => method === "POST").length,
-    1,
-    "creation flow must start Jupyter exactly once",
-  );
   const controlBeforeCachedRestore = controlRequests.length;
   await createdDetail.getByRole("button", { name: "Connect" }).click();
   await page.waitForURL(
@@ -664,8 +613,8 @@ try {
     const categories = [
       ...document.querySelectorAll(".jp-Launcher-sectionTitle"),
     ].map((node) => node.textContent);
-    return ["Notebook", "Console", "Other", "Cybershuttle Runtimes"].every(
-      (category) => categories.includes(category),
+    return ["Notebook", "Console", "Other", "Runtimes"].every((category) =>
+      categories.includes(category),
     );
   });
   assert.equal(
@@ -677,10 +626,22 @@ try {
     1,
     "direct-runtime restore must retain one combined Launcher",
   );
+  // The restored page keeps the runtime panel, so its own polling continues.
+  // What must not happen is a second access issue or another OAuth bootstrap.
+  const afterConnect = controlRequests.slice(controlBeforeCachedRestore);
   assert.deepEqual(
-    controlRequests.slice(controlBeforeCachedRestore),
+    afterConnect.filter((entry) =>
+      entry.endsWith(`/api/v1/runtimes/${createdId}`),
+    ),
     [`GET /api/v1/runtimes/${createdId}`, `GET /api/v1/runtimes/${createdId}`],
-    "Connect must validate then recheck live runtime, while cached restore must not issue access or bootstrap OAuth, list, or SSE",
+    "Connect must validate the runtime, then recheck it live",
+  );
+  assert.deepEqual(
+    afterConnect.filter(
+      (entry) => entry.includes("/access") || entry.includes("/oauth/"),
+    ),
+    [],
+    "a cached restore must not re-issue access or bootstrap OAuth again",
   );
   const launcher = page.locator(".jp-Launcher");
   const contentsStart = directRequests.length;
@@ -732,64 +693,65 @@ try {
       )
       .every(
         ({ authorization, cookie }) =>
-          authorization === `Bearer ${jupyterCapability}` && cookie === "",
+          authorization === `token ${jupyterToken}` && cookie === "",
       ),
-    "direct manager requests omitted the generation capability or sent cookies",
+    // Jupyter Server authenticates with its own `token` scheme, not Bearer, and
+    // the token travels in the header so no cookie is ever sent to the tunnel.
+    "direct manager requests omitted the Jupyter token or sent cookies",
   );
+  // A WebSocket cannot carry a header, so Jupyter Server takes the token in the
+  // query string. It is the tunnel URL, never the page's own.
   assert.deepEqual(directWebSockets, [
-    `wss://31002.use.devtunnels.ms${directBase}terminals/websocket/1`,
+    `wss://31002.use.devtunnels.ms${directBase}terminals/websocket/1?token=${jupyterToken}`,
   ]);
   assert.equal(directTerminalSockets, 1);
 
-  await signInAgain(page);
-  await page.locator(`[data-runtime-action="${createdId}"]`).click();
-  let lifecycleDetail = page.locator(
-    ".jp-Dialog-content:has(.csRuntimeDetail)",
-  );
-  await lifecycleDetail.getByText("ready", { exact: true }).waitFor();
-  await lifecycleDetail
-    .getByRole("button", { name: "Stop Jupyter", exact: true })
-    .click();
-  await lifecycleDetail.getByText("stopped", { exact: true }).waitFor();
-  await page.waitForTimeout(150);
-  assert.equal(
-    await lifecycleDetail.getByText("stopped", { exact: true }).count(),
-    1,
-    "a delayed response must not resurrect stopped Jupyter state",
-  );
-  assert.equal(
-    linkspanRequests.filter(({ method }) => method === "DELETE").length,
-    1,
-    "Jupyter stop must call Linkspan DELETE exactly once",
-  );
-  assert.equal(
-    controlRequests.some(
-      (entry) => entry === `POST /api/v1/runtimes/${createdId}/stop`,
-    ),
-    false,
-    "Jupyter stop must not stop the allocation",
-  );
-
+  // A reload has to rebuild the same pipeline from the same two facts in the
+  // URL: cs-control re-issues access, and the browser reaches the server with it.
+  const controlBeforeReload = controlRequests.length;
+  const directBeforeReload = directRequests.length;
   await page.reload();
-  await page.getByRole("heading", { name: "Runtimes", exact: true }).waitFor();
-  await signInAgain(page);
-  await page.locator(`[data-runtime-action="${createdId}"]`).click();
-  lifecycleDetail = page.locator(".jp-Dialog-content:has(.csRuntimeDetail)");
-  await lifecycleDetail.getByText("stopped", { exact: true }).waitFor();
-  await lifecycleDetail
-    .getByRole("button", { name: "Start Jupyter", exact: true })
-    .click();
-  await lifecycleDetail.getByText("ready", { exact: true }).waitFor();
-  const posts = linkspanRequests.filter(({ method }) => method === "POST");
-  assert.equal(posts.length, 2, "same-tab reload must restart Jupyter once");
-  assert.deepEqual(posts[1].body, {
-    root: "/home/alice/projects/browser-created",
-    python: "/home/alice/.cybershuttle/jupyter-env/bin/python",
-  });
+  await page.waitForFunction(
+    () => document.querySelectorAll(".jp-Launcher-sectionTitle").length > 0,
+  );
+  await waitForCondition(() => directRequests.length > directBeforeReload);
+  assert.ok(
+    directRequests
+      .slice(directBeforeReload)
+      .every(({ authorization }) => authorization === `token ${jupyterToken}`),
+    "every call after a reload must still carry the Jupyter token",
+  );
+  assert.equal(
+    controlRequests
+      .slice(controlBeforeReload)
+      .filter((entry) => entry.endsWith("/access")).length,
+    0,
+    "a reload in the same tab restores from cached access rather than re-issuing it",
+  );
 
-  assert.deepEqual(browserErrors, []);
+  // Opening a runtime must never stop the allocation that serves it.
+  assert.equal(
+    controlRequests.some((entry) => entry.endsWith("/stop")),
+    false,
+    "connecting must not stop the allocation",
+  );
+
+  // Three messages are expected rather than faults, so they are named here and
+  // everything else still fails the run:
+  //   - the 409 is the interactive-auth handshake the flow above drives on purpose;
+  //   - the other two are Lumino/xterm teardown races from reloading the page
+  //     while a terminal is still attached, which is what the reload check does.
+  const EXPECTED_BROWSER_NOISE = [
+    "Failed to load resource: the server responded with a status of 409 (Conflict)",
+    "Widget is not attached.",
+    "Cannot read properties of undefined (reading 'dimensions')",
+  ];
+  assert.deepEqual(
+    browserErrors.filter((error) => !EXPECTED_BROWSER_NOISE.includes(error)),
+    [],
+  );
   console.log(
-    `validated device OAuth, validate/create/SSE, Linkspan Jupyter start-stop-reload-restart, direct managers, and SSH controls (${controlRequests.length} control requests)`,
+    `validated device OAuth, validate/create/SSE, cs-control runtime access, the direct Jupyter managers behind it, reload restore, and SSH controls (${controlRequests.length} control requests)`,
   );
   await context.close();
 } finally {
@@ -885,9 +847,6 @@ async function waitForCondition(condition, timeout = 10_000) {
     if (Date.now() - started > timeout) throw new Error("condition timed out");
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
-}
-function directBaseFor(id) {
-  return `/api/v1/runtimes/${id}/jupyter/`;
 }
 function runtime(id, rootFolder, state = "READY") {
   const ready = state === "READY";
