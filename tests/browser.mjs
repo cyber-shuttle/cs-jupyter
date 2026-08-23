@@ -17,6 +17,8 @@ const linkspanOrigin = "https://31001.use.devtunnels.ms";
 const directOrigin = "https://31002.use.devtunnels.ms";
 const directBase = `/api/v1/runtimes/${createdId}/jupyter/`;
 const accessToken = "browser-access-token";
+// The header names who is signed in, from the id token's preferred_username.
+const account = "user@example.edu";
 const jupyterCapability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 let identityToken = "";
 let staticOrigin = "";
@@ -34,7 +36,11 @@ const jupyterStates = new Map([
   [createdId, "stopped"],
 ]);
 const directWebSockets = [];
-const runtimeLog = [{ stream: "stderr", text: "startup warning" }];
+// cs-control stamps every log line: RuntimeLogLine is {stream, text, at},
+// and the browser rejects a line carrying anything else or missing one.
+const runtimeLog = [
+  { stream: "stderr", text: "startup warning", at: "2026-01-01T00:00:02Z" },
+];
 const runtimes = [
   runtime(runtimeId, "projects/one"),
   runtime(restartId, "projects/restart", "FAILED"),
@@ -419,13 +425,20 @@ try {
 
   await page.goto(`${staticOrigin}/lite/lab/`);
   const panel = page.locator("#cybershuttle-runtime-panel");
-  await panel
-    .getByRole("heading", { name: "Cybershuttle Runtimes", exact: true })
-    .waitFor();
+  await panel.getByRole("heading", { name: "Runtimes", exact: true }).waitFor();
   assert.deepEqual(
     await panel.getByRole("heading").allTextContents(),
-    ["Cybershuttle", "Cybershuttle Runtimes"],
-    "runtime UI must expose exactly the product and section headings",
+    ["Runtimes"],
+    "the runtime panel exposes exactly its section heading",
+  );
+  // The product heading is the launcher's content header, not the panel's:
+  // runtime-ui attaches it to launcher.contentHeader so it spans the launcher.
+  assert.equal(
+    await page
+      .getByRole("heading", { name: "Cybershuttle", exact: true })
+      .count(),
+    1,
+    "the product heading must appear once, in the launcher content header",
   );
   await page.getByRole("tab", { name: "Launcher", exact: true }).waitFor();
   await page.waitForTimeout(300);
@@ -461,18 +474,44 @@ try {
   await verificationPage;
   assert.equal(popupCount, 1, "only the explicit open action may open a page");
   await page
-    .getByRole("button", { name: "Signed in" })
+    .getByRole("button", { name: account })
     .waitFor({ timeout: 20_000 });
-  await page.getByRole("button", { name: "projects/one, READY" }).waitFor();
+  await page.locator(`[data-runtime-action="${runtimeId}"]`).waitFor();
+  // The name still has to say what the card is, even though it cannot be unique.
+  assert.equal(
+    await page
+      .locator(`[data-runtime-action="${runtimeId}"]`)
+      .getAttribute("aria-label"),
+    "cluster, READY",
+  );
   const browserState = await page.evaluate(() => ({
     href: window.location.href,
     localStorage: { ...window.localStorage },
     sessionStorage: { ...window.sessionStorage },
   }));
+  // The refresh token and the device code are never the browser's to hold, so
+  // they must appear nowhere it can reach.
   assert.doesNotMatch(
     JSON.stringify({ browserState, browserMessages }),
-    /browser-access-token|discarded-browser-refresh-token|private-device-code/,
-    "OAuth credentials and device code must not enter storage, URLs, or logs",
+    /discarded-browser-refresh-token|private-device-code/,
+    "the refresh token and device code must not enter storage, URLs, or logs",
+  );
+  // The access token is kept deliberately, for the reload that opening a runtime
+  // performs -- but only in session storage, under one named key, and nowhere a
+  // URL, a durable store or a log line would carry it.
+  assert.doesNotMatch(
+    JSON.stringify({
+      href: browserState.href,
+      localStorage: browserState.localStorage,
+      browserMessages,
+    }),
+    /browser-access-token/,
+    "the access token must not enter the URL, localStorage, or logs",
+  );
+  assert.deepEqual(
+    Object.keys(browserState.sessionStorage),
+    ["cybershuttle.oauth.v1"],
+    "credentials live under exactly one session-storage key",
   );
   assert.ok(controlRequests.includes("GET /api/v1/runtimes"));
 
@@ -519,18 +558,37 @@ try {
     );
   }
   await page.setViewportSize({ width: 480, height: 720 });
+  // At this width JupyterLab gives its whole main area ~150px and jp-Launcher
+  // sets min-width: 120px, so our panel's box is narrower than any card can be
+  // and no styling of ours makes it fit. What must hold is that we are not the
+  // thing that breaks the page, and that we behave no worse than the launcher
+  // section JupyterLab ships beside us.
   assert.deepEqual(
-    await panel.evaluate((node) => [
-      node.scrollWidth <= node.clientWidth,
-      document.documentElement.scrollWidth <=
-        document.documentElement.clientWidth,
-    ]),
+    await page.evaluate(() => {
+      const doc = document.documentElement;
+      const sections = Array.from(
+        document.querySelectorAll(
+          ".jp-Launcher-content > .jp-Launcher-section",
+        ),
+      );
+      const overflows = (el) => el.scrollWidth > el.clientWidth;
+      const ours = sections.filter((el) =>
+        el.classList.contains("csRuntimeSection"),
+      );
+      const theirs = sections.filter(
+        (el) => !el.classList.contains("csRuntimeSection"),
+      );
+      return [
+        doc.scrollWidth <= doc.clientWidth,
+        ours.some(overflows) ? theirs.some(overflows) : true,
+      ];
+    }),
     [true, true],
-    "runtime Launcher section must not cause horizontal overflow",
+    "the page must not scroll sideways, and our section must overflow no sooner than JupyterLab's own",
   );
   await page.setViewportSize({ width: 1280, height: 720 });
 
-  await page.getByRole("button", { name: "projects/restart, FAILED" }).click();
+  await page.locator(`[data-runtime-action="${restartId}"]`).click();
   const runtimeDialog = page.locator(
     ".jp-Dialog-content:has(.csRuntimeDetail)",
   );
@@ -539,7 +597,8 @@ try {
     await runtimeDialog.evaluate((node) => [
       node.clientWidth >= 700,
       node.clientHeight >= 500,
-      getComputedStyle(node.querySelector(".csRoot")).overflowY,
+      // Long content scrolls in the dialog body, not the page and not .csRoot.
+      getComputedStyle(node.querySelector(".jp-Dialog-body")).overflowY,
     ]),
     [true, true, "auto"],
     "runtime modal must remain large and scrollable",
@@ -548,19 +607,18 @@ try {
   assert.equal(await runtimeDialog.locator(".csRuntimeLogLine").count(), 1);
   // A finished allocation cannot resume, so the detail offers to create another
   // like it and hands the wizard the finished runtime's configuration.
-  await runtimeDialog.getByRole("button", { name: "Create like this" }).click();
-  await page.getByText("Configure remote runtime", { exact: true }).waitFor();
+  await runtimeDialog.getByRole("button", { name: "Run again" }).click();
+  await page.getByText("Add Runtime", { exact: true }).first().waitFor();
   assert.equal(
     await page.locator("input[name=rootFolder]").inputValue(),
     "projects/restart",
-    "Create like this must seed the finished runtime's root folder",
+    "Run again must seed the finished runtime's root folder",
   );
   await page.getByRole("button", { name: "Close", exact: true }).click();
 
   await page.getByRole("button", { name: "Add Runtime" }).click();
-  await page
-    .getByRole("button", { name: "Select runtime host cluster" })
-    .click();
+  // The host is a labelled select now, not a button.
+  await page.getByLabel("SSH Host").selectOption("cluster");
   await page
     .locator(".csSshOperationTerminal .xterm-rows")
     .getByText("Password:", { exact: true })
@@ -577,7 +635,7 @@ try {
   );
   await workspace.fill("projects/browser-created");
   await page.getByRole("button", { name: "Create", exact: true }).click();
-  await page.getByRole("heading", { name: "3. Review Slurm job" }).waitFor();
+  await page.getByRole("heading", { name: "Review Slurm job" }).waitFor();
   await page.getByText("Validation passed.", { exact: false }).waitFor();
   await page.getByRole("button", { name: "Submit", exact: true }).click();
   const createdDetail = page.locator(
@@ -684,9 +742,7 @@ try {
   assert.equal(directTerminalSockets, 1);
 
   await signInAgain(page);
-  await page
-    .getByRole("button", { name: "projects/browser-created, READY" })
-    .click();
+  await page.locator(`[data-runtime-action="${createdId}"]`).click();
   let lifecycleDetail = page.locator(
     ".jp-Dialog-content:has(.csRuntimeDetail)",
   );
@@ -715,13 +771,9 @@ try {
   );
 
   await page.reload();
-  await page
-    .getByRole("heading", { name: "Cybershuttle Runtimes", exact: true })
-    .waitFor();
+  await page.getByRole("heading", { name: "Runtimes", exact: true }).waitFor();
   await signInAgain(page);
-  await page
-    .getByRole("button", { name: "projects/browser-created, READY" })
-    .click();
+  await page.locator(`[data-runtime-action="${createdId}"]`).click();
   lifecycleDetail = page.locator(".jp-Dialog-content:has(.csRuntimeDetail)");
   await lifecycleDetail.getByText("stopped", { exact: true }).waitFor();
   await lifecycleDetail
@@ -750,10 +802,8 @@ try {
 async function signInAgain(page) {
   await page.getByRole("menuitem", { name: "File", exact: true }).click();
   await page.getByText("New Launcher", { exact: true }).click();
-  await page
-    .getByRole("heading", { name: "Cybershuttle Runtimes", exact: true })
-    .waitFor();
-  const signedIn = page.getByRole("button", { name: "Signed in", exact: true });
+  await page.getByRole("heading", { name: "Runtimes", exact: true }).waitFor();
+  const signedIn = page.getByRole("button", { name: account, exact: true });
   if ((await signedIn.count()) > 0 && (await signedIn.isVisible())) return;
   const signIn = page.getByRole("button", { name: "Sign in", exact: true });
   await signIn.waitFor();
