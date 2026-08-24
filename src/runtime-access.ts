@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "cybershuttle.runtime-access.v1.";
-import { isPlainObject, RUNTIME_ID, GENERATION } from "./Common";
+import { GENERATION, RUNTIME_ID, exactKeys, isPlainObject } from "./Common";
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
 
 export interface IRuntimeAccess {
@@ -41,8 +41,7 @@ export function validateRuntimeAccess(
 ): IRuntimeAccess {
   if (
     !isPlainObject(value) ||
-    Object.keys(value).sort().join(",") !==
-      "expiresAt,generation,jupyter,runtimeId" ||
+    !exactKeys(value, ["expiresAt", "generation", "jupyter", "runtimeId"]) ||
     typeof value.runtimeId !== "string" ||
     !RUNTIME_ID.test(value.runtimeId) ||
     typeof value.generation !== "string" ||
@@ -51,7 +50,7 @@ export function validateRuntimeAccess(
     !Number.isFinite(Date.parse(value.expiresAt)) ||
     Date.parse(value.expiresAt) <= now ||
     !isPlainObject(value.jupyter) ||
-    Object.keys(value.jupyter).sort().join(",") !== "token,uri" ||
+    !exactKeys(value.jupyter, ["token", "uri"]) ||
     typeof value.jupyter.uri !== "string" ||
     typeof value.jupyter.token !== "string" ||
     !TOKEN.test(value.jupyter.token)

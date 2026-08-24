@@ -119,3 +119,29 @@ export function assertSecureOrLoopback(
     throw new Error(message);
   }
 }
+
+// Two different questions cs-control's responses are asked, each written out
+// several times before: is this exactly these keys, and does it carry anything
+// outside this list. The second still permits an absent optional field, so they
+// are not interchangeable.
+export function exactKeys(
+  value: unknown,
+  expected: string[],
+): value is Record<string, any> {
+  if (!isPlainObject(value)) return false;
+  const actual = Object.keys(value).sort();
+  return (
+    actual.length === expected.length &&
+    [...expected].sort().every((key, index) => key === actual[index])
+  );
+}
+
+export function onlyKeys(
+  value: unknown,
+  allowed: string[],
+): value is Record<string, any> {
+  return (
+    isPlainObject(value) &&
+    Object.keys(value).every((key) => allowed.includes(key))
+  );
+}

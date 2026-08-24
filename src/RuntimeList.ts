@@ -45,11 +45,12 @@ export class CyberShuttleHeader extends Widget {
       ? (document.activeElement as HTMLElement).dataset.runtimeAction
       : undefined;
     this.node.textContent = "";
-    const header = document.createElement("header");
-    header.className = "jp-Launcher-sectionHeader csRuntimeLauncherHeader";
-    const title = document.createElement("h2");
-    title.className = "jp-Launcher-sectionTitle";
-    title.textContent = "Cybershuttle";
+    const header = element(
+      "header",
+      "",
+      "jp-Launcher-sectionHeader csRuntimeLauncherHeader",
+    );
+    const title = element("h2", "Cybershuttle", "jp-Launcher-sectionTitle");
     header.append(
       element("div", "", "csRuntimeSectionIcon"),
       title,
@@ -156,16 +157,15 @@ export class RuntimeList extends Widget {
   }
 
   private _build(): HTMLElement {
-    const launcher = document.createElement("div");
-    launcher.className = "csRuntimeLauncher";
+    const launcher = element("div", "", "csRuntimeLauncher");
 
-    const section = document.createElement("section");
-    section.className = "jp-Launcher-section csRuntimeSection";
-    const sectionHeader = document.createElement("header");
-    sectionHeader.className = "jp-Launcher-sectionHeader";
-    const sectionTitle = document.createElement("h2");
-    sectionTitle.className = "jp-Launcher-sectionTitle";
-    sectionTitle.textContent = "Runtimes";
+    const section = element(
+      "section",
+      "",
+      "jp-Launcher-section csRuntimeSection",
+    );
+    const sectionHeader = element("header", "", "jp-Launcher-sectionHeader");
+    const sectionTitle = element("h2", "Runtimes", "jp-Launcher-sectionTitle");
     const sshHosts = button("SSH Hosts", "csTextButton csSshHostsButton");
     sshHosts.dataset.runtimeAction = "ssh-hosts";
     sshHosts.disabled = !this._state.signedIn || this._state.authRequired;
@@ -191,9 +191,7 @@ export class RuntimeList extends Widget {
       }
     }
     if (this._state.loading && this._state.runtimes.length === 0) {
-      const status = document.createElement("div");
-      status.className = "csStatus";
-      status.textContent = "Loading runtimes…";
+      const status = element("div", "Loading runtimes…", "csStatus");
       section.appendChild(status);
     }
 
@@ -209,8 +207,7 @@ export class RuntimeList extends Widget {
       return launcher;
     }
 
-    const cards = document.createElement("div");
-    cards.className = "jp-Launcher-cardContainer";
+    const cards = element("div", "", "jp-Launcher-cardContainer");
     for (const runtime of this._state.runtimes) {
       cards.appendChild(this._runtimeCard(runtime));
     }
@@ -245,8 +242,11 @@ export class RuntimeList extends Widget {
     card.dataset.category = "Cybershuttle Runtimes";
     card.dataset.runtimeAction = runtime.id;
     card.onclick = () => this.runtimeRequested.emit(runtime.id);
-    const label = document.createElement("div");
-    label.className = "jp-LauncherCard-label csRuntimeCardLabel";
+    const label = element(
+      "div",
+      "",
+      "jp-LauncherCard-label csRuntimeCardLabel",
+    );
     // The card identifies the runtime and what it costs; everything else about
     // it, including the working directory, belongs to the detail dialog a click
     // away.

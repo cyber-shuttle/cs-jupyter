@@ -165,8 +165,7 @@ export class SshHosts extends Widget {
     if (!this._adding) {
       return section;
     }
-    const form = document.createElement("form");
-    form.className = "csForm csSshAddForm";
+    const form = element("form", "", "csForm csSshAddForm");
     const name = element("input", "", "csInput");
     name.name = "sshHostName";
     name.required = true;
