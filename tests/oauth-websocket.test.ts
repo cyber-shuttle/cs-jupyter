@@ -1,3 +1,4 @@
+import { fakeAuth } from "./fakes";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ControlClient } from "../src/ControlClient";
 import {
@@ -34,12 +35,7 @@ describe("OAuth WebSocket factory", () => {
       async () => new FakeSocket("wss://unused", []) as unknown as WebSocket,
     );
     const webSockets = { open } as OAuthWebSocketFactory;
-    const auth = {
-      acquireToken: vi.fn(async () => ({
-        accessToken: "delegated-token",
-        idToken: "identity-token",
-      })),
-    };
+    const auth = fakeAuth();
     const client = new ControlClient(
       "https://control.example.edu/api/v1",
       auth,
@@ -128,10 +124,7 @@ describe("OAuth WebSocket factory", () => {
   );
 
   it("rejects token-bearing or unrelated URL forms before token acquisition", async () => {
-    const acquireToken = vi.fn(async () => ({
-      accessToken: "delegated-token",
-      idToken: "identity-token",
-    }));
+    const { acquireToken } = fakeAuth();
     const factory = new OAuthWebSocketFactory(
       { acquireToken },
       "https://control.example.edu",

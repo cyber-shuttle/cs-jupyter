@@ -2,14 +2,8 @@ import { Widget } from "@lumino/widgets";
 import { isTerminal, type IRuntime, type RuntimeState } from "./Common";
 import type { CyberShuttlePanel, IRuntimeUiState } from "./CyberShuttlePanel";
 import type { IRuntimeLogTail } from "./ControlClient";
-import { button, element, statePill } from "./dom";
+import { button, element, keepingFocus, statePill } from "./dom";
 
-const ACTIVE_STATES = new Set<RuntimeState>([
-  "SUBMITTING",
-  "QUEUED",
-  "STARTING",
-  "STOPPING",
-]);
 const STOPPABLE_STATES = new Set<RuntimeState>([
   "SUBMITTING",
   "QUEUED",
@@ -63,24 +57,21 @@ export class RuntimeDetail extends Widget {
   }
 
   private _render(): void {
-    const focusedAction = this.node.contains(document.activeElement)
-      ? (document.activeElement as HTMLElement).dataset.runtimeAction
-      : undefined;
+    keepingFocus(this.node, () => this._rebuild());
+  }
+
+  private _rebuild(): void {
     this._captureLogView();
     const previous = this._runtime;
     this._runtime = this._state.runtimes.find(
       (runtime) => runtime.id === this._runtimeId,
     );
-    if (this._runtime && previous?.state !== this._runtime.state) {
-      if (!this._logView) {
-        this._logView = this._defaultLogView();
-      } else if (this._runtime.state === "READY") {
-      } else if (this._runtime.state === "FAILED") {
-      } else if (
-        ACTIVE_STATES.has(this._runtime.state) &&
-        (!previous || !ACTIVE_STATES.has(previous.state))
-      ) {
-      }
+    if (
+      this._runtime &&
+      previous?.state !== this._runtime.state &&
+      !this._logView
+    ) {
+      this._logView = this._defaultLogView();
     }
     this.node.textContent = "";
     this.node.appendChild(
@@ -89,11 +80,6 @@ export class RuntimeDetail extends Widget {
         : element("div", "Waiting for live runtime state…", "csStatus"),
     );
     this._restoreLogScroll();
-    for (const element of Array.from(
-      this.node.querySelectorAll<HTMLElement>("[data-runtime-action]"),
-    )) {
-      if (element.dataset.runtimeAction === focusedAction) element.focus();
-    }
   }
 
   private _buildRuntime(runtime: IRuntime): HTMLElement {

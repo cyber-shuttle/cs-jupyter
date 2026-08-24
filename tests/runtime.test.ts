@@ -11,14 +11,9 @@ import {
 } from "../src/RuntimeController";
 import type { IRuntime } from "../src/Common";
 import { cacheRuntimeAccess, type IRuntimeAccess } from "../src/runtime-access";
-import { runtimeFixture } from "./fakes";
+import { fakeAuth, runtimeFixture } from "./fakes";
 
-const auth = {
-  acquireToken: vi.fn(async () => ({
-    accessToken: "test-delegated-token",
-    idToken: "identity-token",
-  })),
-};
+const auth = fakeAuth("test-delegated-token");
 
 const runtimeRequest = {
   idempotencyKey: "idem",

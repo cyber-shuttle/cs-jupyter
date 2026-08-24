@@ -2,7 +2,7 @@ import { Signal } from "@lumino/signaling";
 import { Widget } from "@lumino/widgets";
 import type { IRuntime } from "./Common";
 import type { IRuntimeUiState } from "./CyberShuttlePanel";
-import { button, element, statePill } from "./dom";
+import { button, element, keepingFocus, statePill } from "./dom";
 
 export const emptyState = (): IRuntimeUiState => ({
   runtimes: [],
@@ -41,9 +41,10 @@ export class CyberShuttleHeader extends Widget {
   }
 
   private _render(): void {
-    const focused = this.node.contains(document.activeElement)
-      ? (document.activeElement as HTMLElement).dataset.runtimeAction
-      : undefined;
+    keepingFocus(this.node, () => this._rebuild());
+  }
+
+  private _rebuild(): void {
     this.node.textContent = "";
     const header = element(
       "header",
@@ -57,11 +58,6 @@ export class CyberShuttleHeader extends Widget {
       this._identityControl(),
     );
     this.node.appendChild(header);
-    for (const node of Array.from(
-      this.node.querySelectorAll<HTMLElement>("[data-runtime-action]"),
-    )) {
-      if (node.dataset.runtimeAction === focused) node.focus();
-    }
   }
 
   // Signed out this is one button; signed in it names the account and hides
@@ -144,16 +140,10 @@ export class RuntimeList extends Widget {
   }
 
   private _render(): void {
-    const focusedAction = this.node.contains(document.activeElement)
-      ? (document.activeElement as HTMLElement).dataset.runtimeAction
-      : undefined;
-    this.node.textContent = "";
-    this.node.appendChild(this._build());
-    for (const element of Array.from(
-      this.node.querySelectorAll<HTMLElement>("[data-runtime-action]"),
-    )) {
-      if (element.dataset.runtimeAction === focusedAction) element.focus();
-    }
+    keepingFocus(this.node, () => {
+      this.node.textContent = "";
+      this.node.appendChild(this._build());
+    });
   }
 
   private _build(): HTMLElement {
