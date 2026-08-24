@@ -1,5 +1,5 @@
 import { PageConfig } from "@jupyterlab/coreutils";
-import { assertSecureOrLoopback, isPlainObject } from "./Common";
+import { assertSecureOrLoopback, exactKeys, isPlainObject } from "./Common";
 import { closeButton, element } from "./dom";
 
 const MAX_BROKER_BODY = 64 * 1024;
@@ -100,7 +100,7 @@ function readStoredCredentials(
     const value: unknown = JSON.parse(raw);
     if (
       !isPlainObject(value) ||
-      Object.keys(value).sort().join(",") !== "accessToken,expiresAt,idToken" ||
+      !exactKeys(value, ["accessToken", "expiresAt", "idToken"]) ||
       typeof value.accessToken !== "string" ||
       typeof value.idToken !== "string" ||
       typeof value.expiresAt !== "number" ||
@@ -384,18 +384,6 @@ export function validControlApiUrl(configured: string): string {
   return url.toString().replace(/\/$/, "");
 }
 
-function exactKeys(
-  value: unknown,
-  expected: string[],
-): value is Record<string, any> {
-  if (!isPlainObject(value)) return false;
-  const actual = Object.keys(value).sort();
-  return (
-    actual.length === expected.length &&
-    [...expected].sort().every((key, index) => key === actual[index])
-  );
-}
-
 function brokerFailure(status: number, value: unknown): Error {
   if (
     !exactKeys(value, ["error"]) ||
@@ -536,8 +524,7 @@ function showDeviceCodeModal(
   cancel: () => void,
 ): { close(): void } {
   const activeElement = document.activeElement;
-  const overlay = document.createElement("div");
-  overlay.className = "csDeviceCodeOverlay";
+  const overlay = element("div", "", "csDeviceCodeOverlay");
   const dialog = document.createElement("section");
   dialog.className = "csDeviceCodeDialog";
   dialog.setAttribute("role", "dialog");
@@ -595,8 +582,7 @@ function showDeviceCodeModal(
 
   const close = closeButton(cancel);
 
-  const actions = document.createElement("div");
-  actions.className = "csDeviceCodeActions";
+  const actions = element("div", "", "csDeviceCodeActions");
   const open = document.createElement("a");
   open.className = "csPrimaryButton csDeviceCodeOpen";
   open.href = authorization.verificationUri;

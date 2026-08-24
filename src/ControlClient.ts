@@ -16,18 +16,20 @@ import {
   validDevTunnelRoot,
 } from "./runtime-access";
 import {
+  GENERATION,
   IRuntime,
   IRuntimeCreateRequest,
   IRuntimeValidation,
   ISlurmInfo,
   ISshHost,
   ISshHostTest,
+  RUNTIME_ID,
   RUNTIME_STATES,
   RuntimeState,
   RuntimeValidationStatus,
   VALIDATION_STATUSES,
-  RUNTIME_ID,
-  GENERATION,
+  exactKeys,
+  onlyKeys,
 } from "./Common";
 import { isPlainObject } from "./Common";
 
@@ -468,8 +470,7 @@ function validateRuntimeLogTail(value: unknown): IRuntimeLogTail {
     !Array.isArray(value.lines) ||
     value.lines.length < 1 ||
     value.lines.length > 100 ||
-    Object.keys(value).length !== 2 ||
-    Object.keys(value).some((key) => !["runtimeId", "lines"].includes(key))
+    !exactKeys(value, ["runtimeId", "lines"])
   ) {
     throw new Error("cs-control returned an invalid runtime log event.");
   }
@@ -483,8 +484,7 @@ function validateRuntimeLogTail(value: unknown): IRuntimeLogTail {
       RUNTIME_LOG_CONTROL.test(line.text) ||
       typeof line.at !== "string" ||
       !Number.isFinite(Date.parse(line.at)) ||
-      Object.keys(line).length !== 3 ||
-      Object.keys(line).some((key) => !["stream", "text", "at"].includes(key))
+      !exactKeys(line, ["stream", "text", "at"])
     ) {
       throw new Error("cs-control returned an invalid runtime log line.");
     }
@@ -518,7 +518,7 @@ function validateRuntime(value: unknown): IRuntime {
   ];
   if (
     !isPlainObject(value) ||
-    Object.keys(value).some((key) => !allowed.includes(key)) ||
+    !onlyKeys(value, allowed) ||
     typeof value.id !== "string" ||
     !RUNTIME_ID.test(value.id) ||
     typeof value.generation !== "string" ||

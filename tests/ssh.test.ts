@@ -8,7 +8,7 @@ import {
   CreateRuntimeForm,
   rootFolderValidationMessage,
 } from "../src/CreateRuntimeForm";
-import { FakeOperation } from "./fakes";
+import { FakeOperation, fakeAuth } from "./fakes";
 
 const hosts = ["alpha", "beta"].map((name) => ({
   name,
@@ -251,12 +251,7 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
     );
     const client = new ControlClient(
       "http://localhost:3000/api/v1",
-      {
-        acquireToken: vi.fn(async () => ({
-          accessToken: "test-delegated-token",
-          idToken: "identity-token",
-        })),
-      },
+      fakeAuth("test-delegated-token"),
       fetch as any,
     );
     await client.listSshHosts();

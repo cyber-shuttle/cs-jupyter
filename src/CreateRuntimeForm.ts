@@ -419,8 +419,7 @@ export class CreateRuntimeForm extends Widget {
 
   private _buildConfigurationStep(): HTMLElement {
     const container = element("div");
-    const form = document.createElement("form");
-    form.className = "csForm";
+    const form = element("form", "", "csForm");
 
     const host = select("sshHost", [
       [
@@ -469,8 +468,7 @@ export class CreateRuntimeForm extends Widget {
 
     const options = element("div", "", "csRuntimeOptions");
     options.hidden = true;
-    const resourceType = document.createElement("fieldset");
-    resourceType.className = "csResourceType";
+    const resourceType = element("fieldset", "", "csResourceType");
     const resourceLegend = document.createElement("legend");
     resourceLegend.textContent = "Resource type";
     resourceLegend.className = "csLabel";

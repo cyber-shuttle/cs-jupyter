@@ -8,7 +8,7 @@ import {
 } from "../src/ControlClient";
 import type { IRuntimeUiState } from "../src/CyberShuttlePanel";
 import { RuntimeDetail } from "../src/RuntimeDetail";
-import { runtimeFixture, uiState } from "./fakes";
+import { fakeAuth, runtimeFixture, uiState } from "./fakes";
 
 const runtimeId = "rt-012345abcdef";
 
@@ -39,12 +39,7 @@ function log(
 function clientFor(logs: unknown[]): ControlClient {
   return new ControlClient(
     "https://control.example.edu/api/v1",
-    {
-      acquireToken: vi.fn(async () => ({
-        accessToken: "delegated-token",
-        idToken: "identity-token",
-      })),
-    },
+    fakeAuth(),
     vi.fn(
       async () =>
         new Response(

@@ -1,13 +1,8 @@
+import { fakeAuth } from "./fakes";
 import { describe, expect, it, vi } from "vitest";
 import { ControlClient, safeControlFetch } from "../src/ControlClient";
 
-const auth = {
-  acquireToken: vi.fn(async () => ({
-    accessToken: "delegated-token",
-    idToken: "identity-token",
-  })),
-  invalidateToken: vi.fn(),
-};
+const auth = { ...fakeAuth(), invalidateToken: vi.fn() };
 
 describe("OAuth cross-origin control client", () => {
   it("sends bearer with omitted credentials to only the configured control origin", async () => {

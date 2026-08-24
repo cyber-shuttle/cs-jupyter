@@ -1,3 +1,4 @@
+import { fakeAuth } from "./fakes";
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { ControlClient } from "../src/ControlClient";
@@ -12,12 +13,7 @@ const response = (value: unknown): Response =>
 const clientFor = (value: unknown) =>
   new ControlClient(
     "https://control.example.edu/api/v1",
-    {
-      acquireToken: vi.fn(async () => ({
-        accessToken: "delegated-token",
-        idToken: "identity-token",
-      })),
-    },
+    fakeAuth(),
     vi.fn(async () => response(value)) as any,
   );
 

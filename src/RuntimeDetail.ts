@@ -2,14 +2,8 @@ import { Widget } from "@lumino/widgets";
 import { isTerminal, type IRuntime, type RuntimeState } from "./Common";
 import type { CyberShuttlePanel, IRuntimeUiState } from "./CyberShuttlePanel";
 import type { IRuntimeLogTail } from "./ControlClient";
-import { button, element, statePill } from "./dom";
+import { button, element, keepingFocus, statePill } from "./dom";
 
-const ACTIVE_STATES = new Set<RuntimeState>([
-  "SUBMITTING",
-  "QUEUED",
-  "STARTING",
-  "STOPPING",
-]);
 const STOPPABLE_STATES = new Set<RuntimeState>([
   "SUBMITTING",
   "QUEUED",
@@ -17,8 +11,9 @@ const STOPPABLE_STATES = new Set<RuntimeState>([
   "READY",
 ]);
 
+// Where the status log was scrolled, so a re-render does not throw the reader
+// back to the top. The log is always on screen, so there is no open state.
 interface IRuntimeLogView {
-  open: boolean;
   scrollTop: number;
   atBottom: boolean;
 }
@@ -62,27 +57,21 @@ export class RuntimeDetail extends Widget {
   }
 
   private _render(): void {
-    const focusedAction = this.node.contains(document.activeElement)
-      ? (document.activeElement as HTMLElement).dataset.runtimeAction
-      : undefined;
+    keepingFocus(this.node, () => this._rebuild());
+  }
+
+  private _rebuild(): void {
     this._captureLogView();
     const previous = this._runtime;
     this._runtime = this._state.runtimes.find(
       (runtime) => runtime.id === this._runtimeId,
     );
-    if (this._runtime && previous?.state !== this._runtime.state) {
-      if (!this._logView) {
-        this._logView = this._defaultLogView(this._runtime);
-      } else if (this._runtime.state === "READY") {
-        this._logView.open = false;
-      } else if (this._runtime.state === "FAILED") {
-        this._logView.open = true;
-      } else if (
-        ACTIVE_STATES.has(this._runtime.state) &&
-        (!previous || !ACTIVE_STATES.has(previous.state))
-      ) {
-        this._logView.open = true;
-      }
+    if (
+      this._runtime &&
+      previous?.state !== this._runtime.state &&
+      !this._logView
+    ) {
+      this._logView = this._defaultLogView();
     }
     this.node.textContent = "";
     this.node.appendChild(
@@ -91,19 +80,12 @@ export class RuntimeDetail extends Widget {
         : element("div", "Waiting for live runtime state…", "csStatus"),
     );
     this._restoreLogScroll();
-    for (const element of Array.from(
-      this.node.querySelectorAll<HTMLElement>("[data-runtime-action]"),
-    )) {
-      if (element.dataset.runtimeAction === focusedAction) element.focus();
-    }
   }
 
   private _buildRuntime(runtime: IRuntime): HTMLElement {
-    const root = document.createElement("div");
-    root.className = "csRoot";
+    const root = element("div", "", "csRoot");
 
-    const header = document.createElement("div");
-    header.className = "csRuntimeDetailHeader";
+    const header = element("div", "", "csRuntimeDetailHeader");
     const identity = document.createElement("div");
     identity.append(
       element("h3", runtime.sshHost, "csRuntimeDetailTitle"),
@@ -114,8 +96,7 @@ export class RuntimeDetail extends Widget {
       ),
       statePill(runtime.state),
     );
-    const actions = document.createElement("div");
-    actions.className = "csRuntimeDetailActions";
+    const actions = element("div", "", "csRuntimeDetailActions");
     const busy = this._state.busyRuntimeIds.has(runtime.id);
     if (isTerminal(runtime.state)) {
       // A terminal allocation cannot resume: its job, tunnel, and generation are
@@ -171,8 +152,7 @@ export class RuntimeDetail extends Widget {
     header.append(identity, actions);
     root.appendChild(header);
 
-    const details = document.createElement("dl");
-    details.className = "csRuntimeDetailGrid";
+    const details = element("dl", "", "csRuntimeDetailGrid");
     this._field(
       details,
       "Jupyter",
@@ -218,7 +198,7 @@ export class RuntimeDetail extends Widget {
   // it is always on screen rather than behind a disclosure, and each line is
   // dated: what matters about a stalled runtime is when it last said anything.
   private _runtimeLog(runtime: IRuntime, tail: IRuntimeLogTail): HTMLElement {
-    const view = this._logView ?? this._defaultLogView(runtime);
+    const view = this._logView ?? this._defaultLogView();
     this._logView = view;
     const section = document.createElement("section");
     section.className = "csRuntimeLog";
@@ -234,8 +214,11 @@ export class RuntimeDetail extends Widget {
       view.atBottom = this._atBottom(scroller);
     };
     for (const line of tail.lines) {
-      const row = document.createElement("div");
-      row.className = `csRuntimeLogLine csRuntimeLog-${line.stream}`;
+      const row = element(
+        "div",
+        "",
+        `csRuntimeLogLine csRuntimeLog-${line.stream}`,
+      );
       const at = new Date(line.at);
       const stamp = Number.isFinite(at.getTime())
         ? at.toLocaleTimeString([], {
@@ -254,8 +237,8 @@ export class RuntimeDetail extends Widget {
     return section;
   }
 
-  private _defaultLogView(_runtime: IRuntime): IRuntimeLogView {
-    return { open: true, scrollTop: 0, atBottom: true };
+  private _defaultLogView(): IRuntimeLogView {
+    return { scrollTop: 0, atBottom: true };
   }
 
   private _captureLogView(): void {

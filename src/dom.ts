@@ -50,3 +50,23 @@ export function statePill(state: string): HTMLElement {
     `csRuntimeState csRuntimeState-${state.toLowerCase()}`,
   );
 }
+
+/**
+ * Rebuilds a node's contents, leaving keyboard focus on the same action
+ * control it was on before.
+ */
+export function keepingFocus(node: HTMLElement, rebuild: () => void): void {
+  const action = node.contains(document.activeElement)
+    ? (document.activeElement as HTMLElement).dataset.runtimeAction
+    : undefined;
+  rebuild();
+  if (action === undefined) return;
+  for (const control of Array.from(
+    node.querySelectorAll<HTMLElement>("[data-runtime-action]"),
+  )) {
+    if (control.dataset.runtimeAction === action) {
+      control.focus();
+      return;
+    }
+  }
+}
