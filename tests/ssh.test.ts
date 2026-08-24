@@ -8,7 +8,7 @@ import {
   CreateRuntimeForm,
   rootFolderValidationMessage,
 } from "../src/CreateRuntimeForm";
-import { FakeOperation } from "./fakes";
+import { FakeOperation, fakeAuth } from "./fakes";
 
 const hosts = ["alpha", "beta"].map((name) => ({
   name,
@@ -30,23 +30,28 @@ function discovery(host: string) {
     ],
   };
 }
-function choose(form: CreateRuntimeForm, runtime: string): void {
-  const control = form.node.querySelector<HTMLButtonElement>(
-    `button[aria-label="Select runtime host ${runtime}"]`,
+// The host is the form's first field, so choosing one is answering it.
+function hostSelect(form: CreateRuntimeForm): HTMLSelectElement {
+  const control = form.node.querySelector<HTMLSelectElement>(
+    'select[name="sshHost"]',
   );
   if (!control) {
+    throw new Error("the SSH host field is unavailable");
+  }
+  return control;
+}
+function choose(form: CreateRuntimeForm, runtime: string): void {
+  const control = hostSelect(form);
+  if (![...control.options].some((option) => option.value === runtime)) {
     throw new Error(`runtime host ${runtime} is not listed`);
   }
-  control.click();
+  control.value = runtime;
+  control.onchange?.(new Event("change"));
 }
 function backToHosts(form: CreateRuntimeForm): void {
-  const control = [...form.node.querySelectorAll("button")].find(
-    (item) => item.textContent === "← Back to hosts",
-  );
-  if (!control) {
-    throw new Error("Back to hosts is unavailable");
-  }
-  control.click();
+  const control = hostSelect(form);
+  control.value = "";
+  control.onchange?.(new Event("change"));
 }
 function options(form: CreateRuntimeForm): HTMLElement | null {
   return form.node.querySelector<HTMLElement>(".csRuntimeOptions");
@@ -96,7 +101,7 @@ async function advanceToValidation(): Promise<void> {
 async function reviewAndSubmit(form: CreateRuntimeForm): Promise<void> {
   submitConfiguration(form);
   await vi.waitFor(() =>
-    expect(form.node.textContent).toContain("3. Review Slurm job"),
+    expect(form.node.textContent).toContain("Review Slurm job"),
   );
   await advanceToValidation();
   let submit: HTMLButtonElement | undefined;
@@ -142,6 +147,9 @@ function formHarness() {
         }),
     ),
     sshAuthWebSocket: vi.fn((_host: string) => vi.fn()),
+    previewRuntimeScript: vi.fn(
+      async () => "#!/bin/bash\n#SBATCH --partition=test\n",
+    ),
     validateRuntime: vi.fn(async () => ({
       runtimeId: "rt-012345abcdef",
       status: "PASSED",
@@ -243,12 +251,7 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
     );
     const client = new ControlClient(
       "http://localhost:3000/api/v1",
-      {
-        acquireToken: vi.fn(async () => ({
-          accessToken: "test-delegated-token",
-          idToken: "identity-token",
-        })),
-      },
+      fakeAuth("test-delegated-token"),
       fetch as any,
     );
     await client.listSshHosts();
@@ -267,7 +270,7 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
     );
   });
 
-  it("lists host metadata before discovery and exposes an empty-host call to action", () => {
+  it("lists configured hosts before discovery and exposes an empty-host call to action", () => {
     const operations: FakeOperation[] = [];
     const form = new CreateRuntimeForm({} as any, () => {
       const operation = new FakeOperation();
@@ -283,8 +286,10 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
         extraDirectives: [],
       },
     ]);
-    expect(form.node.textContent).toContain("alice@login.example.edu");
-    expect(form.node.textContent).toContain("port 2222");
+    expect([...hostSelect(form).options].map((item) => item.value)).toEqual([
+      "",
+      "system-host",
+    ]);
     expect(operations).toHaveLength(0);
     form.setHosts([]);
     expect(form.node.textContent).toContain("No SSH hosts are configured.");
@@ -298,16 +303,16 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
   it("starts with host selection and reveals options after a valid result", async () => {
     const { form, api, operations, deliver, failDiscovery, discoveries } =
       formHarness();
-    expect(options(form)).toBeNull();
+    expect(options(form)?.hidden).toBe(true);
     expect(operations).toHaveLength(0);
-    expect(form.node.textContent).toContain("1. Select a configured SSH host");
+    expect(hostSelect(form).value).toBe("");
     choose(form, "alpha");
     // Discovery is a plain request, so no login console is opened for it.
     expect(operations).toHaveLength(0);
     expect(options(form)?.hidden).toBe(true);
     expect(
       [...form.node.querySelectorAll<HTMLButtonElement>("button")].find(
-        (item) => item.textContent === "Cancel operation",
+        (item) => item.textContent === "Cancel",
       )?.hidden,
     ).toBe(false);
     expect(api.discoverSlurm).toHaveBeenCalledWith("alpha", expect.anything());
@@ -317,12 +322,10 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
       form.node.querySelector<HTMLSelectElement>('select[name="account"]')
         ?.value,
     ).toBe("alpha-one");
-    expect(form.node.textContent).toContain("2 allocation account(s)");
-    expect(
-      [...form.node.querySelectorAll<HTMLButtonElement>("button")].find(
-        (item) => item.textContent === "Cancel operation",
-      )?.hidden,
-    ).toBe(true);
+    // The expanded form is the result, so the query row retires with it.
+    expect(form.node.querySelector<HTMLElement>(".csSshAuth")?.hidden).toBe(
+      true,
+    );
   });
 
   it("opens the login console on demand and restarts discovery once", async () => {
@@ -582,8 +585,9 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
     const gpu = radios.find((item) => item.value === "gpu")!;
     gpu.checked = true;
     gpu.dispatchEvent(new Event("change"));
-    expect(cores.value).toBe("1");
-    expect(memory.value).toBe("1024");
+    expect(cores.value).toBe("2");
+    expect(memory.value).toBe("4096");
+    expect([cores.min, memory.min]).toEqual(["2", "4096"]);
     expect(
       [
         ...form.node.querySelectorAll<HTMLOptionElement>(
@@ -749,6 +753,43 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
     ).toBe("projects/preserved-review");
   });
 
+  // The script has to exist before anything can validate it, and the review says
+  // which of the two is happening rather than one word for both.
+  it("says it is building the script until there is one to validate", async () => {
+    const { form, deliver, discoveries } = formHarness();
+    void discoveries;
+    choose(form, "alpha");
+    await deliver(0, discovery("alpha"));
+    const script = Promise.withResolvers<string>();
+    const validation = Promise.withResolvers<unknown>();
+    (form as any)._api.previewRuntimeScript = () => script.promise;
+    (form as any)._api.validateRuntime = () => validation.promise;
+    const workspace = form.node.querySelector<HTMLInputElement>(
+      'input[name="rootFolder"]',
+    )!;
+    workspace.value = "$HOME";
+    workspace.dispatchEvent(new Event("input"));
+    submitConfiguration(form);
+    await vi.waitFor(() =>
+      expect(form.node.textContent).toContain("Building the Slurm script"),
+    );
+    expect(form.node.textContent).not.toContain("Validating with Slurm");
+    script.resolve("#!/bin/bash\n#SBATCH --partition=test\n");
+    await vi.waitFor(() =>
+      expect(form.node.textContent).toContain("Validating with Slurm"),
+    );
+    expect(form.node.querySelector(".csSlurmScript")?.textContent).toContain(
+      "#!/bin/bash",
+    );
+    validation.resolve({
+      runtimeId: "rt-012345abcdef",
+      status: "PASSED",
+      script: "#!/bin/bash\n#SBATCH --partition=test\n",
+      message: "Slurm accepted the script.",
+    });
+    form.dispose();
+  });
+
   it("shows create errors on the review step without losing validation", async () => {
     const { form, operations, deliver, failDiscovery, discoveries } =
       formHarness();
@@ -791,5 +832,137 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
     form.setHosts([...hosts]);
     expect(discoveries).toHaveLength(1);
     expect(workspace.value).toBe("projects/preserved");
+  });
+});
+
+describe("SSH hosts modal chrome", () => {
+  it("opens with its meaning and a rule, and carries no close of its own", async () => {
+    const { SshHosts } = await import("../src/SshHosts");
+    const hosts = new SshHosts({
+      listSshHosts: async () => [],
+    } as unknown as ControlClient);
+    const root = hosts.node.querySelector(".csRoot")!;
+    // The dialog names itself and closes itself, so the body does neither.
+    expect(root.querySelector(".csFormTitle")).toBeNull();
+    expect(root.querySelector(".csModalClose")).toBeNull();
+    expect(root.textContent).not.toContain("← Back");
+    expect(
+      [...root.children]
+        .map((node) => node.className.split(" ")[0])
+        .slice(0, 2),
+    ).toEqual(["csModalSubtitle", "csModalRule"]);
+    expect(root.querySelector(".csModalSubtitle")?.textContent).toContain(
+      "~/.ssh/config",
+    );
+    hosts.dispose();
+  });
+
+  it("expands a host to what ssh uses and to what can be done about it", async () => {
+    const { SshHosts } = await import("../src/SshHosts");
+    const api = {
+      listSshHosts: vi.fn(async () => [
+        {
+          name: "delta",
+          hostname: "login.example.edu",
+          user: "me",
+          port: 2222,
+          extraDirectives: ["ProxyJump bastion"],
+          managed: true,
+        },
+        { name: "theirs", hostname: "own.example.edu", extraDirectives: [] },
+      ]),
+      testSshHost: vi.fn(async () => ({ ok: true, message: "Connected." })),
+    };
+    const hosts = new SshHosts(api as unknown as ControlClient);
+    await hosts.refresh();
+    const entries = [
+      ...hosts.node.querySelectorAll<HTMLDetailsElement>(".csSshHostEntry"),
+    ];
+    expect(entries).toHaveLength(2);
+    expect(
+      [...entries[0].querySelectorAll(".csSshArgRow")].map(
+        (row) => row.textContent,
+      ),
+    ).toEqual([
+      "HostNamelogin.example.edu",
+      "Userme",
+      "Port2222",
+      "ProxyJumpbastion",
+    ]);
+    const [test, remove] = [
+      ...entries[0].querySelectorAll<HTMLButtonElement>("button"),
+    ];
+    // Only the entry CyberShuttle wrote is CyberShuttle's to remove.
+    expect(remove.disabled).toBe(false);
+    expect(
+      [...entries[1].querySelectorAll<HTMLButtonElement>("button")][1].disabled,
+    ).toBe(true);
+    test.click();
+    await vi.waitFor(() =>
+      expect(hosts.node.textContent).toContain("Connected."),
+    );
+    expect(api.testSshHost).toHaveBeenCalledWith("delta");
+    hosts.dispose();
+  });
+
+  it("asks before removing, in the row rather than behind a queued dialog", async () => {
+    const { SshHosts } = await import("../src/SshHosts");
+    const api = {
+      listSshHosts: vi.fn(async () => [
+        {
+          name: "delta",
+          hostname: "a.example.edu",
+          extraDirectives: [],
+          managed: true,
+        },
+      ]),
+      removeSshHost: vi.fn(async () => undefined),
+    };
+    const hosts = new SshHosts(api as unknown as ControlClient);
+    await hosts.refresh();
+    const remove = (): HTMLButtonElement =>
+      [...hosts.node.querySelectorAll<HTMLButtonElement>("button")].filter(
+        (item) => item.textContent === "Delete",
+      )[0];
+    remove().click();
+    expect(hosts.node.textContent).toContain("Remove this entry");
+    expect(api.removeSshHost).not.toHaveBeenCalled();
+    remove().click();
+    await vi.waitFor(() =>
+      expect(api.removeSshHost).toHaveBeenCalledWith("delta"),
+    );
+    hosts.dispose();
+  });
+
+  it("sends the pasted command for the server to parse", async () => {
+    const { SshHosts } = await import("../src/SshHosts");
+    const api = {
+      listSshHosts: vi.fn(async () => []),
+      addSshHost: vi.fn(async () => ({ name: "delta", extraDirectives: [] })),
+    };
+    const hosts = new SshHosts(api as unknown as ControlClient);
+    [...hosts.node.querySelectorAll<HTMLButtonElement>("button")]
+      .find((item) => item.textContent === "Add SSH Host")!
+      .click();
+    const name = hosts.node.querySelector<HTMLInputElement>(
+      'input[name="sshHostName"]',
+    )!;
+    const command = hosts.node.querySelector<HTMLInputElement>(
+      'input[name="sshHostCommand"]',
+    )!;
+    name.value = "delta";
+    name.dispatchEvent(new Event("input"));
+    command.value = " ssh -p 2222 me@login.example.edu ";
+    command.dispatchEvent(new Event("input"));
+    hosts.node
+      .querySelector("form")!
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() =>
+      expect(api.addSshHost).toHaveBeenCalledWith(
+        "delta",
+        "ssh -p 2222 me@login.example.edu",
+      ),
+    );
+    hosts.dispose();
   });
 });

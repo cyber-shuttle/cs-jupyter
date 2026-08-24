@@ -1,3 +1,8 @@
+// The two identifier formats cs-control issues. Written once here for the same
+// reason as the state list below: a change to either must not half-land.
+export const RUNTIME_ID = /^rt-[a-f0-9]{12}$/;
+export const GENERATION = /^g-[a-f0-9]{16}$/;
+
 // Types are derived from these values so validation and the type system cannot
 // disagree about what cs-control is allowed to report.
 export const RUNTIME_STATES = [
@@ -63,6 +68,14 @@ export interface ISshHost {
   port?: number;
   identityFile?: string;
   extraDirectives: string[];
+  // Only entries CyberShuttle wrote can be removed from here; the rest are the
+  // user's own configuration.
+  managed?: boolean;
+}
+
+export interface ISshHostTest {
+  ok: boolean;
+  message: string;
 }
 
 export interface IGres {
@@ -105,4 +118,30 @@ export function assertSecureOrLoopback(
   ) {
     throw new Error(message);
   }
+}
+
+// Two different questions cs-control's responses are asked, each written out
+// several times before: is this exactly these keys, and does it carry anything
+// outside this list. The second still permits an absent optional field, so they
+// are not interchangeable.
+export function exactKeys(
+  value: unknown,
+  expected: string[],
+): value is Record<string, any> {
+  if (!isPlainObject(value)) return false;
+  const actual = Object.keys(value).sort();
+  return (
+    actual.length === expected.length &&
+    [...expected].sort().every((key, index) => key === actual[index])
+  );
+}
+
+export function onlyKeys(
+  value: unknown,
+  allowed: string[],
+): value is Record<string, any> {
+  return (
+    isPlainObject(value) &&
+    Object.keys(value).every((key) => allowed.includes(key))
+  );
 }

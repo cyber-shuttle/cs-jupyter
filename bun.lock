@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@cybershuttle/jupyterlite",
+      "name": "@cybershuttle/jupyter",
       "dependencies": {
         "@jupyterlab/application": "4.6.0",
         "@jupyterlab/apputils": "4.6.0",
@@ -29,6 +29,7 @@
         "style-loader": "3.3.4",
         "typescript": "5.9.3",
         "vitest": "4.1.10",
+        "ws": "^8.18.0",
       },
     },
   },

@@ -11,14 +11,9 @@ import {
 } from "../src/RuntimeController";
 import type { IRuntime } from "../src/Common";
 import { cacheRuntimeAccess, type IRuntimeAccess } from "../src/runtime-access";
-import { runtimeFixture } from "./fakes";
+import { fakeAuth, runtimeFixture } from "./fakes";
 
-const auth = {
-  acquireToken: vi.fn(async () => ({
-    accessToken: "test-delegated-token",
-    idToken: "identity-token",
-  })),
-};
+const auth = fakeAuth("test-delegated-token");
 
 const runtimeRequest = {
   idempotencyKey: "idem",
@@ -360,5 +355,34 @@ describe("runtime command guard", () => {
       "choose",
       "choose",
     ]);
+  });
+});
+
+describe("kernel spec logos", () => {
+  it("drops resources an <img> could never fetch instead of rendering a broken icon", async () => {
+    const body = {
+      kernelspecs: {
+        python3: {
+          name: "python3",
+          resources: {
+            "logo-svg": "/kernelspecs/python3/logo-svg.svg",
+            "logo-64x64": "/kernelspecs/python3/logo-64x64.png",
+          },
+        },
+      },
+    };
+    const settings = createRuntimeServerSettings(access, {
+      fetch: (async () =>
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })) as unknown as typeof fetch,
+    });
+    const response = await settings.fetch(
+      "https://31002.use.devtunnels.ms/api/kernelspecs",
+    );
+    const parsed = await response.json();
+    expect(parsed.kernelspecs.python3.resources).toEqual({});
+    expect(parsed.kernelspecs.python3.name).toBe("python3");
   });
 });

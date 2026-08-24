@@ -10,6 +10,8 @@
     "outDir": "lib",
     "rootDir": "src",
     "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "target": "ES2022"
   },
   "include": ["src/**/*.ts"],

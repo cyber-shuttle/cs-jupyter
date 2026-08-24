@@ -72,9 +72,62 @@ describe("runtime stop action", () => {
       { currentRuntimeId: undefined, select: vi.fn() } as any,
     );
     await loaded(panel);
-    expect(card(panel).textContent).toContain("projects/restart");
+    expect(card(panel).textContent).toContain("delta");
     expect(card(panel).textContent).not.toContain("Start");
     expect((api as any).startRuntime).toBeUndefined();
+    panel.dispose();
+  });
+});
+
+// showDialog renders real buttons, so the confirmation is exercised the way a
+// person answers it rather than stubbed away.
+async function answerDialog(accept: boolean): Promise<void> {
+  await vi.waitFor(() =>
+    expect(document.querySelector(".jp-Dialog-button")).not.toBeNull(),
+  );
+  const buttons = [
+    ...document.querySelectorAll<HTMLButtonElement>(".jp-Dialog-button"),
+  ];
+  const target = buttons.find((button) =>
+    accept
+      ? button.classList.contains("jp-mod-accept")
+      : button.classList.contains("jp-mod-reject"),
+  );
+  target!.click();
+}
+
+describe("runtime delete", () => {
+  it("confirms, removes the card, and leaves the list alone when cancelled", async () => {
+    const runtime = runtimeFixture({ state: "FAILED" });
+    const api = {
+      resumeSession: vi.fn(async () => undefined),
+      signIn: vi.fn(async () => undefined),
+      listRuntimes: vi.fn(async () => runtimeListFixture([runtime])),
+      listSshHosts: vi.fn(async () => []),
+      deleteRuntime: vi.fn(async () => runtime),
+    };
+    const panel = new CyberShuttlePanel(
+      api as any,
+      {
+        currentRuntimeId: undefined,
+        select: vi.fn(),
+      } as any,
+    );
+    await vi.waitFor(() => expect(panel.state.runtimes.length).toBe(1));
+
+    const cancelled = panel.remove(runtime.id);
+    await answerDialog(false);
+    await cancelled;
+    expect(api.deleteRuntime).not.toHaveBeenCalled();
+    expect(panel.state.runtimes.length).toBe(1);
+
+    const accepted = panel.remove(runtime.id);
+    await answerDialog(true);
+    await accepted;
+    expect(api.deleteRuntime).toHaveBeenCalledWith(runtime.id);
+    expect(panel.state.runtimes.map((each) => each.id)).not.toContain(
+      runtime.id,
+    );
     panel.dispose();
   });
 });

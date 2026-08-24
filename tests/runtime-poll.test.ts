@@ -48,7 +48,9 @@ describe("runtime polling", () => {
     expect(api.listRuntimes).not.toHaveBeenCalled();
     expect(api.listSshHosts).not.toHaveBeenCalled();
 
-    panel.node.querySelector<HTMLButtonElement>(".csSignInButton")!.click();
+    panel.header.node
+      .querySelector<HTMLButtonElement>(".csSignInButton")!
+      .click();
     const second = panel.signIn();
     expect(api.signIn).toHaveBeenCalledOnce();
     expect(panel.state.signingIn).toBe(true);
@@ -235,6 +237,38 @@ describe("runtime polling", () => {
     await signedIn;
     expect(panel.state.runtimes[0]?.state).toBe("QUEUED");
     expect(panel.state.runtimes[0]?.error).toBeUndefined();
+    panel.dispose();
+  });
+});
+
+describe("session resume", () => {
+  it("treats a restored credential as signed in without a device-code round trip", async () => {
+    const api = {
+      resumeSession: vi.fn(async () => undefined),
+      signIn: vi.fn(async () => undefined),
+      listRuntimes: vi.fn(async () => runtimeListFixture()),
+      listSshHosts: vi.fn(async () => []),
+    };
+    const panel = panelFor(api);
+    await vi.waitFor(() => expect(panel.state.signedIn).toBe(true));
+    expect(api.signIn).not.toHaveBeenCalled();
+    expect(api.listRuntimes).toHaveBeenCalled();
+    panel.dispose();
+  });
+
+  it("stays signed out when no credential survived the reload", async () => {
+    const api = {
+      resumeSession: vi.fn(async () => {
+        throw new AuthInteractionRequiredError();
+      }),
+      signIn: vi.fn(async () => undefined),
+      listRuntimes: vi.fn(async () => runtimeListFixture()),
+      listSshHosts: vi.fn(async () => []),
+    };
+    const panel = panelFor(api);
+    await vi.waitFor(() => expect(api.resumeSession).toHaveBeenCalled());
+    expect(panel.state.signedIn).toBe(false);
+    expect(api.listRuntimes).not.toHaveBeenCalled();
     panel.dispose();
   });
 });

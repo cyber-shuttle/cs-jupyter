@@ -1,5 +1,6 @@
 import { PageConfig } from "@jupyterlab/coreutils";
-import { assertSecureOrLoopback, isPlainObject } from "./Common";
+import { assertSecureOrLoopback, exactKeys, isPlainObject } from "./Common";
+import { closeButton, element } from "./dom";
 
 const MAX_BROKER_BODY = 64 * 1024;
 const BROKER_REQUEST_TIMEOUT_MS = 15 * 1000;
@@ -37,6 +38,7 @@ export interface IAuthClientOptions {
 export interface IAuthClientDependencies {
   fetch?: typeof globalThis.fetch;
   now?: () => number;
+  storage?: Storage;
   sleep?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
 }
 
@@ -52,12 +54,76 @@ interface TokenResult extends OAuthCredentials {
   expiresInSeconds: number;
 }
 
-// Tokens live only in memory: never storage, never a URL, never a log.
+const SESSION_KEY = "cybershuttle.oauth.v1";
+
+const COPY_GLYPH = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.2"><rect x="5.6" y="5.6" width="8" height="8" rx="1.4" /><path d="M10.9 5.6V3.9a1.4 1.4 0 0 0-1.4-1.4H3.9a1.4 1.4 0 0 0-1.4 1.4v5.6a1.4 1.4 0 0 0 1.4 1.4h1.7" /></g></svg>`;
+const CHECK_GLYPH = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m3.4 8.4 3 3 6.2-6.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
+
+// The header names who is signed in. The claim is read for display only; the
+// control plane still validates the token it is carved from, so nothing here
+// depends on this being trustworthy.
+function accountFromIdToken(idToken: string): string | undefined {
+  const payload = idToken.split(".")[1];
+  if (!payload) {
+    return undefined;
+  }
+  try {
+    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const claims: unknown = JSON.parse(
+      atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, "=")),
+    );
+    if (!isPlainObject(claims)) {
+      return undefined;
+    }
+    for (const claim of ["preferred_username", "email", "upn"]) {
+      const value = claims[claim];
+      if (typeof value === "string" && value) {
+        return value;
+      }
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+// Tokens survive a reload in per-tab session storage, never a URL and never a
+// log. Opening a runtime navigates the page, so a memory-only credential would
+// force a device-code round trip on every navigation.
+function readStoredCredentials(
+  storage: Storage,
+  now: number,
+): { credentials: OAuthCredentials; expiresAt: number } | undefined {
+  const raw = storage.getItem(SESSION_KEY);
+  if (!raw) return undefined;
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (
+      !isPlainObject(value) ||
+      !exactKeys(value, ["accessToken", "expiresAt", "idToken"]) ||
+      typeof value.accessToken !== "string" ||
+      typeof value.idToken !== "string" ||
+      typeof value.expiresAt !== "number" ||
+      !(value.expiresAt > now)
+    ) {
+      throw new Error("stored credentials are invalid or expired");
+    }
+    return {
+      credentials: { accessToken: value.accessToken, idToken: value.idToken },
+      expiresAt: value.expiresAt,
+    };
+  } catch {
+    storage.removeItem(SESSION_KEY);
+    return undefined;
+  }
+}
+
 export class AuthClient {
   private readonly _startEndpoint: string;
   private readonly _pollEndpoint: string;
   private readonly _fetch: typeof globalThis.fetch;
   private readonly _now: () => number;
+  private readonly _storage: Storage;
   private readonly _sleep: (
     milliseconds: number,
     signal: AbortSignal,
@@ -80,13 +146,22 @@ export class AuthClient {
     this._pollEndpoint = `${base}/oauth/device/poll/`;
     this._fetch = dependencies.fetch ?? globalThis.fetch.bind(globalThis);
     this._now = dependencies.now ?? Date.now;
+    this._storage = dependencies.storage ?? window.sessionStorage;
     this._sleep = dependencies.sleep ?? abortableSleep;
+    const stored = readStoredCredentials(this._storage, this._now());
+    if (stored) {
+      this._credentials = stored.credentials;
+      this._expiresAt = stored.expiresAt;
+    }
+  }
+
+  get account(): string | undefined {
+    return this._credentials && accountFromIdToken(this._credentials.idToken);
   }
 
   async acquireToken(): Promise<OAuthCredentials> {
     if (!this._credentials || this._now() >= this._expiresAt) {
-      this._credentials = undefined;
-      this._expiresAt = 0;
+      this.invalidateToken();
       throw new AuthInteractionRequiredError();
     }
     return { ...this._credentials };
@@ -95,6 +170,7 @@ export class AuthClient {
   invalidateToken(): void {
     this._credentials = undefined;
     this._expiresAt = 0;
+    this._storage.removeItem(SESSION_KEY);
   }
 
   interactiveLogin(): Promise<OAuthCredentials> {
@@ -130,6 +206,10 @@ export class AuthClient {
         };
         this._expiresAt =
           this._now() + secondsToMilliseconds(result.expiresInSeconds);
+        this._storage.setItem(
+          SESSION_KEY,
+          JSON.stringify({ ...this._credentials, expiresAt: this._expiresAt }),
+        );
         return { ...this._credentials };
       } finally {
         modal.close();
@@ -304,18 +384,6 @@ export function validControlApiUrl(configured: string): string {
   return url.toString().replace(/\/$/, "");
 }
 
-function exactKeys(
-  value: unknown,
-  expected: string[],
-): value is Record<string, any> {
-  if (!isPlainObject(value)) return false;
-  const actual = Object.keys(value).sort();
-  return (
-    actual.length === expected.length &&
-    [...expected].sort().every((key, index) => key === actual[index])
-  );
-}
-
 function brokerFailure(status: number, value: unknown): Error {
   if (
     !exactKeys(value, ["error"]) ||
@@ -456,8 +524,7 @@ function showDeviceCodeModal(
   cancel: () => void,
 ): { close(): void } {
   const activeElement = document.activeElement;
-  const overlay = document.createElement("div");
-  overlay.className = "csDeviceCodeOverlay";
+  const overlay = element("div", "", "csDeviceCodeOverlay");
   const dialog = document.createElement("section");
   dialog.className = "csDeviceCodeDialog";
   dialog.setAttribute("role", "dialog");
@@ -475,42 +542,71 @@ function showDeviceCodeModal(
   code.className = "csDeviceCode";
   code.textContent = authorization.userCode;
   code.setAttribute("aria-label", `Device code ${authorization.userCode}`);
-  const status = document.createElement("span");
-  status.className = "csDeviceCodeStatus";
-  status.setAttribute("role", "status");
-  status.setAttribute("aria-live", "polite");
-  const actions = document.createElement("div");
-  actions.className = "csDeviceCodeActions";
+
+  // The copy control answers in place: a checkmark where the icon was says the
+  // code is on the clipboard without a line of prose that outlives its moment.
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.className = "csDeviceCodeCopy";
+  copy.title = "Copy code";
+  copy.setAttribute("aria-label", "Copy code");
+  copy.innerHTML = COPY_GLYPH;
+  // The label and the tooltip say the same thing, so a failed attempt cannot
+  // leave a stale explanation behind a later success.
+  const describeCopy = (text: string): void => {
+    copy.title = text;
+    copy.setAttribute("aria-label", text);
+  };
+  let copyReset: ReturnType<typeof setTimeout> | undefined;
+  copy.onclick = async () => {
+    clearTimeout(copyReset);
+    try {
+      await navigator.clipboard.writeText(authorization.userCode);
+      copy.innerHTML = CHECK_GLYPH;
+      copy.classList.add("csDeviceCodeCopied");
+      describeCopy("Code copied");
+      copyReset = setTimeout(() => {
+        copy.innerHTML = COPY_GLYPH;
+        copy.classList.remove("csDeviceCodeCopied");
+        describeCopy("Copy code");
+      }, 2000);
+    } catch {
+      copy.innerHTML = COPY_GLYPH;
+      copy.classList.remove("csDeviceCodeCopied");
+      describeCopy("Could not copy the code");
+    }
+  };
+  const codeRow = document.createElement("div");
+  codeRow.className = "csDeviceCodeRow";
+  codeRow.append(code, copy);
+
+  const close = closeButton(cancel);
+
+  const actions = element("div", "", "csDeviceCodeActions");
   const open = document.createElement("a");
-  open.className = "jp-mod-accept jp-Button";
+  open.className = "csPrimaryButton csDeviceCodeOpen";
   open.href = authorization.verificationUri;
   open.target = "_blank";
   open.rel = "noopener noreferrer";
   open.referrerPolicy = "no-referrer";
   open.textContent = "Open sign-in page";
-  const copy = document.createElement("button");
-  copy.type = "button";
-  copy.className = "jp-Button";
-  copy.textContent = "Copy code";
-  copy.onclick = async () => {
-    try {
-      await navigator.clipboard.writeText(authorization.userCode);
-      status.textContent = "Code copied.";
-    } catch {
-      status.textContent = "Could not copy the code.";
-    }
+  // Once the page is open the answer arrives on the other device, so the button
+  // stops inviting a second click and reports what it is now doing.
+  open.onclick = () => {
+    open.classList.add("csDeviceCodeWaiting");
+    open.textContent = "";
+    open.append(
+      element("span", "", "csSpinner"),
+      document.createTextNode("Waiting…"),
+    );
   };
-  const cancelButton = document.createElement("button");
-  cancelButton.type = "button";
-  cancelButton.className = "jp-Button";
-  cancelButton.textContent = "Cancel";
-  cancelButton.onclick = cancel;
-  actions.append(open, copy, cancelButton);
-  dialog.append(title, instructions, code, status, actions);
+  actions.appendChild(open);
+
+  dialog.append(close, title, instructions, codeRow, actions);
   overlay.appendChild(dialog);
   document.body.appendChild(overlay);
 
-  const focusable = [open, copy, cancelButton];
+  const focusable = [open, copy, close];
   const onKeyDown = (event: KeyboardEvent): void => {
     if (event.key === "Escape") {
       event.preventDefault();

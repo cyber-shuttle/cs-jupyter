@@ -2,14 +2,8 @@ import { Widget } from "@lumino/widgets";
 import { isTerminal, type IRuntime, type RuntimeState } from "./Common";
 import type { CyberShuttlePanel, IRuntimeUiState } from "./CyberShuttlePanel";
 import type { IRuntimeLogTail } from "./ControlClient";
-import { button, element } from "./dom";
+import { button, element, keepingFocus, statePill } from "./dom";
 
-const ACTIVE_STATES = new Set<RuntimeState>([
-  "SUBMITTING",
-  "QUEUED",
-  "STARTING",
-  "STOPPING",
-]);
 const STOPPABLE_STATES = new Set<RuntimeState>([
   "SUBMITTING",
   "QUEUED",
@@ -17,8 +11,9 @@ const STOPPABLE_STATES = new Set<RuntimeState>([
   "READY",
 ]);
 
+// Where the status log was scrolled, so a re-render does not throw the reader
+// back to the top. The log is always on screen, so there is no open state.
 interface IRuntimeLogView {
-  open: boolean;
   scrollTop: number;
   atBottom: boolean;
 }
@@ -62,27 +57,21 @@ export class RuntimeDetail extends Widget {
   }
 
   private _render(): void {
-    const focusedAction = this.node.contains(document.activeElement)
-      ? (document.activeElement as HTMLElement).dataset.runtimeAction
-      : undefined;
+    keepingFocus(this.node, () => this._rebuild());
+  }
+
+  private _rebuild(): void {
     this._captureLogView();
     const previous = this._runtime;
     this._runtime = this._state.runtimes.find(
       (runtime) => runtime.id === this._runtimeId,
     );
-    if (this._runtime && previous?.state !== this._runtime.state) {
-      if (!this._logView) {
-        this._logView = this._defaultLogView(this._runtime);
-      } else if (this._runtime.state === "READY") {
-        this._logView.open = false;
-      } else if (this._runtime.state === "FAILED") {
-        this._logView.open = true;
-      } else if (
-        ACTIVE_STATES.has(this._runtime.state) &&
-        (!previous || !ACTIVE_STATES.has(previous.state))
-      ) {
-        this._logView.open = true;
-      }
+    if (
+      this._runtime &&
+      previous?.state !== this._runtime.state &&
+      !this._logView
+    ) {
+      this._logView = this._defaultLogView();
     }
     this.node.textContent = "";
     this.node.appendChild(
@@ -91,35 +80,31 @@ export class RuntimeDetail extends Widget {
         : element("div", "Waiting for live runtime state…", "csStatus"),
     );
     this._restoreLogScroll();
-    for (const element of Array.from(
-      this.node.querySelectorAll<HTMLElement>("[data-runtime-action]"),
-    )) {
-      if (element.dataset.runtimeAction === focusedAction) element.focus();
-    }
   }
 
   private _buildRuntime(runtime: IRuntime): HTMLElement {
-    const root = document.createElement("div");
-    root.className = "csRoot";
+    const root = element("div", "", "csRoot");
 
-    const header = document.createElement("div");
-    header.className = "csRuntimeDetailHeader";
+    const header = element("div", "", "csRuntimeDetailHeader");
     const identity = document.createElement("div");
     identity.append(
-      element("h3", runtime.rootFolder, "csRuntimeDetailTitle"),
+      element("h3", runtime.sshHost, "csRuntimeDetailTitle"),
       element(
         "span",
-        runtime.state,
-        `csRuntimeState csRuntimeState-${runtime.state.toLowerCase()}`,
+        runtime.account || "(no project)",
+        "csRuntimeDetailAccount",
       ),
+      statePill(runtime.state),
     );
-    const actions = document.createElement("div");
-    actions.className = "csRuntimeDetailActions";
+    const actions = element("div", "", "csRuntimeDetailActions");
     const busy = this._state.busyRuntimeIds.has(runtime.id);
     if (isTerminal(runtime.state)) {
+      // A terminal allocation cannot resume: its job, tunnel, and generation are
+      // gone. Running it again means submitting a fresh one from the same form,
+      // which is also where its settings are edited.
       actions.appendChild(
         this._button(
-          "Create like this",
+          "Run again",
           "csPrimaryButton",
           busy,
           () => void this._controller.createLike(runtime.id),
@@ -153,14 +138,21 @@ export class RuntimeDetail extends Widget {
         );
       }
     }
+    actions.appendChild(
+      this._button(
+        "Delete",
+        "csDangerButton",
+        busy,
+        () => void this._controller.remove(runtime.id),
+      ),
+    );
     if (busy || this._state.connectingRuntimeId === runtime.id) {
       actions.appendChild(element("span", "", "csSpinner"));
     }
     header.append(identity, actions);
     root.appendChild(header);
 
-    const details = document.createElement("dl");
-    details.className = "csRuntimeDetailGrid";
+    const details = element("dl", "", "csRuntimeDetailGrid");
     this._field(
       details,
       "Jupyter",
@@ -168,8 +160,6 @@ export class RuntimeDetail extends Widget {
     );
     this._field(details, "Generation", runtime.generation ?? "pending");
     this._field(details, "Workspace", runtime.rootFolder);
-    this._field(details, "SSH host", runtime.sshHost);
-    this._field(details, "Account", runtime.account || "(no project)");
     this._field(details, "Partition", runtime.partition);
     this._field(details, "Cores", String(runtime.resources.cores));
     this._field(details, "Memory", `${runtime.resources.memoryMb} MB`);
@@ -204,55 +194,51 @@ export class RuntimeDetail extends Widget {
     );
   }
 
+  // The status of a starting allocation is the thing an owner is waiting on, so
+  // it is always on screen rather than behind a disclosure, and each line is
+  // dated: what matters about a stalled runtime is when it last said anything.
   private _runtimeLog(runtime: IRuntime, tail: IRuntimeLogTail): HTMLElement {
-    const view = this._logView ?? this._defaultLogView(runtime);
+    const view = this._logView ?? this._defaultLogView();
     this._logView = view;
-    const details = document.createElement("details");
-    details.className = "csRuntimeLog";
-    details.open = view.open;
-    const summary = element(
-      "summary",
-      `Startup output (${tail.lines.length} ${tail.lines.length === 1 ? "line" : "lines"})`,
-      "csRuntimeLogSummary",
-    );
+    const section = document.createElement("section");
+    section.className = "csRuntimeLog";
+    section.appendChild(element("h4", "Status", "csRuntimeLogTitle"));
     const scroller = document.createElement("div");
     scroller.className = "csRuntimeLogScroll";
     scroller.dataset.runtimeId = runtime.id;
     scroller.role = "log";
-    scroller.ariaLabel = `Startup output for ${runtime.rootFolder}`;
+    scroller.ariaLabel = `Status for ${runtime.sshHost}`;
     scroller.setAttribute("aria-live", "polite");
-    details.ontoggle = () => {
-      view.open = details.open;
-      if (details.open) {
-        this._restoreLogScroller(scroller, view);
-      } else if (scroller.clientHeight > 0) {
-        view.scrollTop = scroller.scrollTop;
-        view.atBottom = this._atBottom(scroller);
-      }
-    };
     scroller.onscroll = () => {
       view.scrollTop = scroller.scrollTop;
       view.atBottom = this._atBottom(scroller);
     };
     for (const line of tail.lines) {
-      const row = document.createElement("div");
-      row.className = `csRuntimeLogLine csRuntimeLog-${line.stream}`;
-      row.append(
-        element("span", line.stream, "csRuntimeLogLabel"),
-        element("span", line.text, "csRuntimeLogText"),
+      const row = element(
+        "div",
+        "",
+        `csRuntimeLogLine csRuntimeLog-${line.stream}`,
       );
+      const at = new Date(line.at);
+      const stamp = Number.isFinite(at.getTime())
+        ? at.toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+          })
+        : "";
+      const time = element("time", stamp, "csRuntimeLogTime");
+      if (stamp) time.dateTime = line.at;
+      time.title = line.stream;
+      row.append(time, element("span", line.text, "csRuntimeLogText"));
       scroller.appendChild(row);
     }
-    details.append(summary, scroller);
-    return details;
+    section.appendChild(scroller);
+    return section;
   }
 
-  private _defaultLogView(runtime: IRuntime): IRuntimeLogView {
-    return {
-      open: ACTIVE_STATES.has(runtime.state) || runtime.state === "FAILED",
-      scrollTop: 0,
-      atBottom: true,
-    };
+  private _defaultLogView(): IRuntimeLogView {
+    return { scrollTop: 0, atBottom: true };
   }
 
   private _captureLogView(): void {

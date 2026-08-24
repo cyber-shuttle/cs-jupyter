@@ -1,6 +1,6 @@
-import { Dialog } from "@jupyterlab/apputils";
+import { Dialog, showDialog } from "@jupyterlab/apputils";
 import { Signal } from "@lumino/signaling";
-import { StackedPanel, Widget } from "@lumino/widgets";
+import { Panel, StackedPanel, Widget } from "@lumino/widgets";
 import { AuthInteractionRequiredError } from "./AuthClient";
 import { CreateRuntimeForm } from "./CreateRuntimeForm";
 import {
@@ -17,7 +17,7 @@ import {
   clearRuntimeAccess,
   loadRuntimeAccess,
 } from "./runtime-access";
-import { RuntimeList } from "./RuntimeList";
+import { CyberShuttleHeader, RuntimeList } from "./RuntimeList";
 import { SshHosts } from "./SshHosts";
 
 /** How often the workspace re-reads cs-control. It caps its own SSH work at
@@ -27,9 +27,7 @@ const RUNTIME_POLL_INTERVAL_MS = 1000;
 export interface IRuntimeUiState {
   readonly runtimes: readonly IRuntime[];
   readonly logs: ReadonlyMap<string, IRuntimeLogTail>;
-  readonly hosts: readonly ISshHost[] | undefined;
   readonly loading: boolean;
-  readonly refreshing: boolean;
   readonly updatesStatus: string;
   readonly error: string;
   readonly busyRuntimeIds: ReadonlySet<string>;
@@ -38,6 +36,7 @@ export interface IRuntimeUiState {
   readonly signedIn: boolean;
   readonly signingIn: boolean;
   readonly authRequired: boolean;
+  readonly account: string | undefined;
 }
 
 interface IJupyterOperation {
@@ -51,11 +50,11 @@ interface IJupyterOperation {
 export class CyberShuttlePanel extends StackedPanel {
   readonly stateChanged = new Signal<this, IRuntimeUiState>(this);
 
+  readonly header = new CyberShuttleHeader();
   private _list = new RuntimeList();
   private _pollTimer: ReturnType<typeof setInterval> | undefined;
   private _polling = false;
   private _polled = false;
-  private _refreshing = false;
   private _selection = 0;
   private _runtimes: IRuntime[] = [];
   private _logs = new Map<string, IRuntimeLogTail>();
@@ -94,8 +93,10 @@ export class CyberShuttlePanel extends StackedPanel {
     );
     this._list.createRequested.connect(() => void this.openCreate());
     this._list.sshHostsRequested.connect(() => void this.openSshHosts());
-    this._list.signInRequested.connect(() => void this.signIn());
+    this.header.signInRequested.connect(() => void this.signIn());
+    this.header.signOutRequested.connect(() => this.signOut());
     this._emitState();
+    void this.resume();
   }
 
   get currentRuntimeId(): string | undefined {
@@ -114,12 +115,7 @@ export class CyberShuttlePanel extends StackedPanel {
           { ...tail, lines: tail.lines.map((line) => ({ ...line })) },
         ]),
       ),
-      hosts: this._hosts?.map((host) => ({
-        ...host,
-        extraDirectives: [...host.extraDirectives],
-      })),
       loading: this._loading,
-      refreshing: this._refreshing,
       updatesStatus: this._updatesStatus,
       error: this._error,
       busyRuntimeIds: new Set(this._busyRuntimeIds),
@@ -128,11 +124,13 @@ export class CyberShuttlePanel extends StackedPanel {
       signedIn: this._signedIn,
       signingIn: this._signingIn,
       authRequired: this._authRequired,
+      account: this._signedIn ? this._api.account : undefined,
     };
   }
 
   private _emitState(): void {
     const state = this.state;
+    this.header.setControllerState(state);
     this._list.setControllerState(state);
     this.stateChanged.emit(state);
   }
@@ -306,7 +304,6 @@ export class CyberShuttlePanel extends StackedPanel {
         return;
       }
       this._polled = true;
-      this._refreshing = list.refreshing;
       this._setRuntimes(list.runtimes);
       this._setRuntimeLogs(list.logs);
       for (const runtime of list.runtimes) {
@@ -318,7 +315,7 @@ export class CyberShuttlePanel extends StackedPanel {
           void this.refreshJupyter(runtime.id);
         }
       }
-      this._updateRefreshing();
+      this._emitState();
       this._setStreamStatus("");
     } catch (error) {
       if (this.isDisposed) {
@@ -352,14 +349,7 @@ export class CyberShuttlePanel extends StackedPanel {
     try {
       await this._api.signIn();
       if (this.isDisposed) return;
-      this._signedIn = true;
-      this._authRequired = false;
-      this._setStreamStatus("");
-      this._startPolling();
-      if (!this._controlInitialized) {
-        this._controlInitialized = true;
-        await this._initialize();
-      }
+      await this._activateSession();
     } catch (error) {
       if (!this.isDisposed) {
         if (error instanceof AuthInteractionRequiredError)
@@ -367,6 +357,51 @@ export class CyberShuttlePanel extends StackedPanel {
         else this._setError(errorMessage(error));
       }
     }
+  }
+
+  // Signing out has to take the cached Jupyter credentials with it: they grant
+  // code execution on the allocation and would otherwise outlive the session
+  // that authorised them.
+  signOut(): void {
+    for (const runtime of this._runtimes) {
+      clearRuntimeAccess(runtime.id);
+    }
+    this._api.signOut();
+    this._stopPolling();
+    this._signedIn = false;
+    this._authRequired = false;
+    this._controlInitialized = false;
+    this._polled = false;
+    this._runtimes = [];
+    this._hosts = undefined;
+    this._logs = new Map();
+    this._jupyterReady = new Set();
+    this._updatesStatus = "";
+    this._error = "";
+    this._emitState();
+  }
+
+  private async _activateSession(): Promise<void> {
+    this._signedIn = true;
+    this._authRequired = false;
+    this._setStreamStatus("");
+    this._startPolling();
+    if (!this._controlInitialized) {
+      this._controlInitialized = true;
+      await this._initialize();
+    }
+  }
+
+  // A credential restored from the previous page is already a live session:
+  // without this the header offers a sign-in the browser does not need and
+  // runtime polling never starts.
+  async resume(): Promise<void> {
+    try {
+      await this._api.resumeSession();
+    } catch {
+      return;
+    }
+    if (!this.isDisposed) await this._activateSession();
   }
 
   private _requireAuthentication(): void {
@@ -400,10 +435,6 @@ export class CyberShuttlePanel extends StackedPanel {
     this._setConnecting(undefined);
     this._stopPolling();
     super.dispose();
-  }
-
-  private _updateRefreshing(): void {
-    this._emitState();
   }
 
   private async _refreshHosts(): Promise<void> {
@@ -529,7 +560,7 @@ export class CyberShuttlePanel extends StackedPanel {
       return;
     }
     this._detailDialog?.resolve(0);
-    await this.openCreate(false, false, runtime);
+    await this.openCreate(runtime);
   }
 
   async stop(runtimeId: string): Promise<void> {
@@ -549,27 +580,60 @@ export class CyberShuttlePanel extends StackedPanel {
     }
   }
 
-  async openCreate(
-    showHosts = false,
-    closeFromHosts = false,
-    like?: IRuntime,
-  ): Promise<void> {
-    const body = new StackedPanel();
+  // Deleting a live allocation cancels its job, so the confirmation names what
+  // is actually lost rather than asking a generic "are you sure".
+  async remove(runtimeId: string): Promise<void> {
+    const runtime = this._selectedRuntime(runtimeId);
+    if (!runtime) {
+      return;
+    }
+    const live = !isTerminal(runtime.state);
+    // JupyterLab shows one dialog at a time, so a confirmation raised from the
+    // open detail modal would queue behind it and never reach the owner.
+    this._detailDialog?.resolve(0);
+    const confirmed = await showDialog({
+      title: "Delete runtime",
+      body: live
+        ? `${runtime.rootFolder} on ${runtime.sshHost} is ${runtime.state.toLowerCase()}. Deleting it cancels the Slurm job and removes the card.`
+        : `Remove ${runtime.rootFolder} on ${runtime.sshHost} from this list? Its allocation has already ended.`,
+      buttons: [
+        Dialog.cancelButton({ label: "Cancel" }),
+        Dialog.warnButton({ label: "Delete" }),
+      ],
+    });
+    if (!confirmed.button.accept || this.isDisposed) {
+      return;
+    }
+    this._setError("");
+    this._releaseRuntime(runtime.id);
+    this._setBusy(runtime.id, true);
+    try {
+      await this._api.deleteRuntime(runtime.id);
+      this._runtimes = this._runtimes.filter((each) => each.id !== runtime.id);
+      this._emitState();
+    } catch (error) {
+      this._setError(errorMessage(error));
+    } finally {
+      this._setBusy(runtime.id, false);
+    }
+  }
+
+  // Each modal is one view titled after it, closed by the dialog's own control:
+  // no footer repeats that, and the view's own action sits where a footer would.
+  async openCreate(like?: IRuntime): Promise<void> {
+    const body = new Panel();
     body.addClass("csWorkspaceModal");
     const form = this._createForm();
-    const hosts = this._sshHostsWidget();
     body.addWidget(form);
-    body.addWidget(hosts);
     form.setHosts(this._hosts ?? []);
     if (like) {
       form.prefill(like);
     }
     const dialog = new Dialog({
-      title: closeFromHosts
-        ? "CyberShuttle SSH Hosts"
-        : "Add CyberShuttle Runtime",
+      title: "Add Runtime",
       body,
-      buttons: [Dialog.cancelButton({ label: "Close" })],
+      buttons: [],
+      hasClose: true,
     });
     const show = (widget: Widget): void => {
       for (const child of body.widgets) {
@@ -577,31 +641,35 @@ export class CyberShuttlePanel extends StackedPanel {
       }
       widget.activate();
     };
-    const showForm = (): void => show(form);
-    const showHostsView = (): void => {
-      show(hosts);
-      void hosts.refresh();
-    };
-    form.backRequested.connect(() => dialog.resolve(0));
-    form.sshHostsRequested.connect(showHostsView);
-    hosts.backRequested.connect(() =>
-      closeFromHosts ? dialog.resolve(0) : showForm(),
-    );
+    form.sshHostsRequested.connect(() => {
+      dialog.reject();
+      void this.openSshHosts();
+    });
     form.createRequested.connect((_sender, intent) => {
       void this._createInModal(intent, form, body, show);
     });
-    showHosts ? showHostsView() : showForm();
+    show(form);
     await dialog.launch().catch(() => undefined);
   }
 
-  openSshHosts(): Promise<void> {
-    return this.openCreate(true, true);
+  async openSshHosts(): Promise<void> {
+    const hosts = this._sshHostsWidget();
+    hosts.addClass("csWorkspaceModal");
+    void hosts.refresh();
+    await new Dialog({
+      title: "SSH Hosts",
+      body: hosts,
+      buttons: [],
+      hasClose: true,
+    })
+      .launch()
+      .catch(() => undefined);
   }
 
   private async _createInModal(
     allocation: IRuntimeCreateRequest,
     form: CreateRuntimeForm,
-    body: StackedPanel,
+    body: Panel,
     show: (widget: Widget) => void,
   ): Promise<void> {
     form.setError("");

@@ -14,7 +14,7 @@ import {
   ISshOperationConsole,
   SshOperationConsoleFactory,
 } from "./SshOperationConsole";
-import { button, element, field, stepHeader } from "./dom";
+import { button, element, field } from "./dom";
 
 type ResourceType = "cpu" | "gpu";
 
@@ -22,6 +22,11 @@ interface IPartitionChoice {
   key: string;
   partition: IPartition;
 }
+
+// The smallest allocation worth scheduling. cs-control enforces the same
+// floor in validateCreate; keep the two in step.
+const MIN_CORES = 2;
+const MIN_MEMORY_MB = 4096;
 
 interface IRuntimeDraft {
   sshHost: string;
@@ -43,8 +48,8 @@ function freshDraft(sshHost = ""): IRuntimeDraft {
     account: "",
     partitionKey: "",
     rootFolder: "",
-    cores: 1,
-    memoryMb: 1024,
+    cores: MIN_CORES,
+    memoryMb: MIN_MEMORY_MB,
     wallMinutes: 60,
     gpuType: "",
     gpuCount: 1,
@@ -52,7 +57,6 @@ function freshDraft(sshHost = ""): IRuntimeDraft {
 }
 
 export class CreateRuntimeForm extends Widget {
-  readonly backRequested = new Signal<this, void>(this);
   readonly sshHostsRequested = new Signal<this, void>(this);
   readonly createRequested = new Signal<this, IRuntimeCreateRequest>(this);
   private _hosts: ISshHost[] = [];
@@ -72,6 +76,7 @@ export class CreateRuntimeForm extends Widget {
   private _draft = freshDraft();
   private _reviewRequest: IRuntimeCreateRequest | undefined;
   private _validation: IRuntimeValidation | undefined;
+  private _script = "";
   private _validationError = "";
   private _validating = false;
   private _validationGeneration = 0;
@@ -148,6 +153,29 @@ export class CreateRuntimeForm extends Widget {
     super.dispose();
   }
 
+  // The dialog claims Enter for a footer this form does not have, and it claims
+  // it from the document down, so the key is taken back before the dialog sees
+  // it. Propagation only: the browser's own form submission is the point.
+  protected onAfterAttach(): void {
+    document.addEventListener("keydown", this._keepEnter, true);
+  }
+
+  protected onBeforeDetach(): void {
+    document.removeEventListener("keydown", this._keepEnter, true);
+  }
+
+  private _keepEnter = (event: KeyboardEvent): void => {
+    const target = event.target;
+    if (
+      event.key === "Enter" &&
+      this.node.contains(target as Node) &&
+      (target instanceof HTMLInputElement ||
+        target instanceof HTMLSelectElement)
+    ) {
+      event.stopPropagation();
+    }
+  };
+
   private _selectHost(alias: string): void {
     this._stopOperation();
     this._leaveReview();
@@ -177,6 +205,7 @@ export class CreateRuntimeForm extends Widget {
     this._cancelReviewOperation();
     this._reviewRequest = undefined;
     this._validation = undefined;
+    this._script = "";
     this._validationError = "";
     this._reviewSubmit = undefined;
     this._reviewStatus = undefined;
@@ -202,7 +231,9 @@ export class CreateRuntimeForm extends Widget {
     }
     if (this._reviewStatus) {
       const state = this._validating
-        ? "Validating with Slurm…"
+        ? this._script
+          ? "Validating with Slurm…"
+          : "Building the Slurm script…"
         : this._validation?.status === "PASSED"
           ? `Validation passed. ${this._validation.message}`
           : this._validation?.status === "FAILED"
@@ -225,10 +256,15 @@ export class CreateRuntimeForm extends Widget {
       }`;
     }
     if (this._reviewError) {
+      const failed =
+        !!this._error ||
+        !!this._validationError ||
+        this._validation?.status === "FAILED";
       const detail =
         this._error || this._validation?.stderr || this._validationError;
       this._reviewError.textContent = detail;
       this._reviewError.hidden = !detail;
+      this._reviewError.className = `csValidationError${failed ? "" : " csValidationDetail"}`;
     }
   }
 
@@ -242,75 +278,13 @@ export class CreateRuntimeForm extends Widget {
     this._reviewStatus = undefined;
     this._reviewError = undefined;
     const root = element("div", "", "csRoot");
-    root.appendChild(
+    root.append(
+      element("hr", "", "csModalRule"),
       this._reviewRequest
         ? this._buildReviewStep()
-        : this._draft.sshHost
-          ? this._buildConfigurationStep()
-          : this._buildHostStep(),
+        : this._buildConfigurationStep(),
     );
     this.node.appendChild(root);
-  }
-
-  private _buildHostStep(): HTMLElement {
-    const container = element("div");
-    container.appendChild(
-      stepHeader("← Back", "Choose a runtime host", () =>
-        this.backRequested.emit(undefined),
-      ),
-    );
-    const content = element("section", "", "csHostPicker");
-    content.setAttribute("aria-labelledby", "cs-host-step-title");
-    const heading = element("h2", "1. Select a configured SSH host");
-    heading.id = "cs-host-step-title";
-    content.appendChild(heading);
-    content.appendChild(
-      element(
-        "p",
-        "Choose the system where CyberShuttle should discover your SLURM allocation accounts and partitions.",
-        "csMeta",
-      ),
-    );
-    if (!this._hosts.length) {
-      content.appendChild(
-        element("p", "No SSH hosts are configured.", "csCreateUnavailable"),
-      );
-      content.appendChild(
-        button("Manage SSH hosts", "csPrimaryButton", () =>
-          this.sshHostsRequested.emit(undefined),
-        ),
-      );
-    } else {
-      const list = element("div", "", "csHostPickerList");
-      list.setAttribute("role", "list");
-      for (const host of this._hosts) {
-        const card = element("article", "", "csHostChoice");
-        card.setAttribute("role", "listitem");
-        const details = element("div", "", "csRuntimeDetails");
-        details.appendChild(element("div", host.name, "csRuntimeName"));
-        const endpoint = [
-          host.user && host.hostname
-            ? `${host.user}@${host.hostname}`
-            : (host.hostname ?? host.user),
-          host.port ? `port ${host.port}` : undefined,
-        ]
-          .filter(Boolean)
-          .join(" · ");
-        if (endpoint) {
-          details.appendChild(element("div", endpoint, "csMeta"));
-        }
-        const choose = button(`Select ${host.name}`, "csPrimaryButton", () => {
-          this._selectHost(host.name);
-          this._render();
-        });
-        choose.setAttribute("aria-label", `Select runtime host ${host.name}`);
-        card.append(details, choose);
-        list.appendChild(card);
-      }
-      content.appendChild(list);
-    }
-    container.appendChild(content);
-    return container;
   }
 
   private _buildReviewStep(): HTMLElement {
@@ -318,16 +292,10 @@ export class CreateRuntimeForm extends Widget {
     if (!request) {
       throw new Error("Runtime review request is unavailable.");
     }
+    // One way back, beside the action it undoes.
     const container = element("div");
-    container.appendChild(
-      stepHeader("← Back to configuration", "Review and submit", () => {
-        this._leaveReview();
-        this._render();
-      }),
-    );
-
     const review = element("section", "", "csRuntimeReview");
-    const heading = element("h2", "3. Review Slurm job", "csStepHeading");
+    const heading = element("h2", "Review Slurm job", "csStepHeading");
     const description = element(
       "p",
       "Review the exact Slurm script generated by cs-control. Submission is enabled only after Slurm validation passes.",
@@ -336,18 +304,21 @@ export class CreateRuntimeForm extends Widget {
     const scriptHeader = element("div", "", "csScriptHeader");
     const scriptLabel = element("label", "Generated Slurm script", "csLabel");
     scriptLabel.htmlFor = "cybershuttle-slurm-script";
+    const shown = this._script;
     const copy = button("Copy script", "csSecondaryButton", () => {
-      if (this._validation) {
-        void navigator.clipboard?.writeText(this._validation.script);
+      if (shown) {
+        void navigator.clipboard?.writeText(shown);
       }
     });
-    copy.disabled = !this._validation;
+    copy.disabled = !shown;
     scriptHeader.append(scriptLabel, copy);
     const script = document.createElement("pre");
     script.id = "cybershuttle-slurm-script";
     script.className = "csSlurmScript";
     script.setAttribute("tabindex", "0");
-    script.textContent = this._validation?.script || "Validating script…";
+    // The status line below says what is happening; the script area stays empty
+    // until there is a script to show rather than repeating it.
+    script.textContent = this._script;
 
     const status = element("div", "", "csValidationStatus");
     status.setAttribute("role", "status");
@@ -414,16 +385,30 @@ export class CreateRuntimeForm extends Widget {
     const abort = new AbortController();
     this._reviewAbort = abort;
     this._validation = undefined;
+    this._script = "";
     this._validationError = "";
     this._validating = true;
     this._render();
     try {
+      // The script comes first and on its own, so what Slurm is being asked
+      // about is readable while it is being asked.
+      const script = await this._api.previewRuntimeScript(
+        cloneRequest(request),
+        abort.signal,
+      );
+      if (this._currentReview(request, generation)) {
+        this._script = script;
+        this._render();
+      }
       const validation = await this._api.validateRuntime(
         cloneRequest(request),
         abort.signal,
       );
       if (this._currentReview(request, generation)) {
+        // Validation returns the same text it was asked about; keeping one copy
+        // means the review cannot show one script and validate another.
         this._validation = validation;
+        this._script = validation.script;
       }
     } catch (error) {
       if (!abort.signal.aborted && this._currentReview(request, generation)) {
@@ -439,31 +424,43 @@ export class CreateRuntimeForm extends Widget {
 
   private _buildConfigurationStep(): HTMLElement {
     const container = element("div");
-    container.appendChild(
-      stepHeader("← Back to hosts", "Configure remote runtime", () => {
-        this._selectHost("");
-        this._render();
-      }),
-    );
-    const form = document.createElement("form");
-    form.className = "csForm";
-    const heading = element(
-      "h2",
-      `2. Configure ${this._draft.sshHost}`,
-      "csStepHeading",
-    );
-    form.appendChild(heading);
+    const form = element("form", "", "csForm");
+
+    const host = select("sshHost", [
+      [
+        "",
+        this._hosts.length ? "Select a host…" : "No SSH hosts are configured.",
+      ],
+      ...this._hosts.map((item) => [item.name, item.name] as [string, string]),
+    ]);
+    host.value = this._draft.sshHost;
+    host.required = true;
+    host.disabled = !this._hosts.length;
+    host.onchange = () => {
+      this._selectHost(host.value);
+      this._render();
+    };
+    form.appendChild(field("SSH Host", host));
+    if (!this._hosts.length) {
+      form.appendChild(
+        button("Manage SSH hosts", "csTextButton", () =>
+          this.sshHostsRequested.emit(undefined),
+        ),
+      );
+    }
 
     const operationArea = element("section", "", "csSshAuth");
+    operationArea.hidden = !this._draft.sshHost;
     const operationHeader = element("div", "", "csSshAuthHeader");
+    const spinner = element("span", "", "csSpinner");
     const operationTitle = element("strong", "SLURM discovery");
     const cancelOperation = button(
-      "Cancel operation",
-      "csSecondaryButton",
+      "Cancel",
+      "csTextButton csDiscoveryCancel",
       () => undefined,
     );
     cancelOperation.hidden = true;
-    operationHeader.append(operationTitle, cancelOperation);
+    operationHeader.append(spinner, operationTitle, cancelOperation);
     // Discovery is a plain request, so its outcome has to be readable here.
     // The console below only ever holds an interactive login transcript.
     const operationStatus = element("div", "", "csSshAuthStatus");
@@ -476,8 +473,7 @@ export class CreateRuntimeForm extends Widget {
 
     const options = element("div", "", "csRuntimeOptions");
     options.hidden = true;
-    const resourceType = document.createElement("fieldset");
-    resourceType.className = "csResourceType";
+    const resourceType = element("fieldset", "", "csResourceType");
     const resourceLegend = document.createElement("legend");
     resourceLegend.textContent = "Resource type";
     resourceLegend.className = "csLabel";
@@ -502,8 +498,8 @@ export class CreateRuntimeForm extends Widget {
     rootFolder.setAttribute("aria-describedby", workspaceHelp.id);
     const workspaceField = field("Workspace folder", rootFolder);
     workspaceField.appendChild(workspaceHelp);
-    const cores = number("cores", this._draft.cores);
-    const memory = number("memoryMb", this._draft.memoryMb);
+    const cores = number("cores", this._draft.cores, MIN_CORES);
+    const memory = number("memoryMb", this._draft.memoryMb, MIN_MEMORY_MB);
     const wall = number("wallMinutes", this._draft.wallMinutes);
     const gpuType = select("gpuType", []);
     const gpuCount = number("gpuCount", this._draft.gpuCount);
@@ -525,12 +521,6 @@ export class CreateRuntimeForm extends Widget {
     this._errorNode = error;
     options.appendChild(error);
     const footer = element("div", "", "csFormFooter");
-    footer.appendChild(
-      button("Back to hosts", "csSecondaryButton", () => {
-        this._selectHost("");
-        this._render();
-      }),
-    );
     const create = button("Create", "csPrimaryButton", () => undefined);
     create.type = "submit";
     this._create = create;
@@ -562,8 +552,11 @@ export class CreateRuntimeForm extends Widget {
       gpuCount.value = String(this._draft.gpuCount);
     };
     const resetPartitionResources = (selected?: IPartition): void => {
-      this._draft.cores = Math.min(1, selected?.cpuCount ?? 1);
-      this._draft.memoryMb = Math.min(1024, selected?.memoryMb ?? 1024);
+      this._draft.cores = Math.min(MIN_CORES, selected?.cpuCount ?? MIN_CORES);
+      this._draft.memoryMb = Math.min(
+        MIN_MEMORY_MB,
+        selected?.memoryMb ?? MIN_MEMORY_MB,
+      );
       this._draft.gpuType = "";
       this._draft.gpuCount = 1;
       cores.value = String(this._draft.cores);
@@ -661,12 +654,11 @@ export class CreateRuntimeForm extends Widget {
       account.value = this._draft.account;
       buildResourceTypes();
       options.hidden = false;
-      retry.hidden = true;
-      const summary = `${value.accounts.length} allocation account(s) and ${value.partitions.length} partition(s) discovered for ${value.host}.`;
-      operationStatus.textContent = summary;
-      this._operation?.complete(summary);
-      operationTitle.textContent = `SLURM discovery complete — ${value.host}`;
-      cancelOperation.hidden = true;
+      // The expanded form is the result, so the query's own progress row and any
+      // login transcript that produced it retire together.
+      this._stopOperation();
+      consoleHost.textContent = "";
+      operationArea.hidden = true;
     };
     const clearDependentState = (): void => {
       this._slurm = undefined;
@@ -700,6 +692,7 @@ export class CreateRuntimeForm extends Widget {
       }
       retry.hidden = false;
       cancelOperation.hidden = true;
+      spinner.hidden = true;
       clearDependentState();
       operationStatus.textContent = message;
       this._operation?.complete(message, options.collapse ?? true);
@@ -718,10 +711,11 @@ export class CreateRuntimeForm extends Widget {
       const alias = this._draft.sshHost;
       const generation = ++this._operationGeneration;
       clearDependentState();
-      operationTitle.textContent = `Discovering SLURM — ${alias}`;
-      operationStatus.textContent = `Connecting to ${alias} and querying SLURM…`;
+      operationTitle.textContent = "Querying SLURM…";
+      operationStatus.textContent = `Connecting to ${alias}.`;
       retry.hidden = true;
       cancelOperation.hidden = false;
+      spinner.hidden = false;
       const abort = new AbortController();
       this._discoveryAbort = abort;
       void this._api.discoverSlurm(alias, abort.signal).then(
@@ -768,6 +762,11 @@ export class CreateRuntimeForm extends Widget {
             },
             failed: (message) =>
               current(generation, alias) && showFailure(message),
+            status: (message) => {
+              if (current(generation, alias)) {
+                operationStatus.textContent = message;
+              }
+            },
           });
           requestAnimationFrame(
             () => current(generation, alias) && operation.focus(),
@@ -810,7 +809,7 @@ export class CreateRuntimeForm extends Widget {
 
     if (this._slurm?.host === this._draft.sshHost) {
       applyDiscovery(this._slurm);
-    } else {
+    } else if (this._draft.sshHost) {
       startDiscovery();
     }
     this._syncStatus();
@@ -994,9 +993,9 @@ function input(
   return value;
 }
 
-function number(name: string, value: number): HTMLInputElement {
+function number(name: string, value: number, min = 1): HTMLInputElement {
   const result = input(name, "number", "");
-  result.min = "1";
+  result.min = String(min);
   result.value = String(value);
   return result;
 }

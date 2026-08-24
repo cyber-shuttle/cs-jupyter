@@ -1,7 +1,8 @@
+import { GENERATION } from "./Common";
 import type { JupyterFrontEndPlugin } from "@jupyterlab/application";
 import { ICommandPalette } from "@jupyterlab/apputils";
 import { PageConfig } from "@jupyterlab/coreutils";
-import { BoxPanel, type Widget } from "@lumino/widgets";
+import { BoxPanel, Widget } from "@lumino/widgets";
 import { ControlClient, validRuntimeId } from "./ControlClient.js";
 import { CyberShuttlePanel } from "./CyberShuttlePanel.js";
 import {
@@ -10,8 +11,7 @@ import {
 } from "./RuntimeController.js";
 import { getActiveRuntimeId } from "./runtime-state.js";
 
-export const SELECT_RUNTIME_COMMAND =
-  "@cybershuttle/jupyterlite:select-runtime";
+export const SELECT_RUNTIME_COMMAND = "@cybershuttle/jupyter:select-runtime";
 
 export function resolveRuntimeId(
   search = window.location.search,
@@ -31,7 +31,7 @@ export function runtimeLiteUrl(
   location: Pick<Location, "href"> = window.location,
 ): string {
   const id = validRuntimeId(runtimeId);
-  if (!/^g-[a-f0-9]{16}$/.test(generation))
+  if (!GENERATION.test(generation))
     throw new Error("Invalid runtime generation.");
   const url = new URL(location.href);
   url.searchParams.set("runtime", id);
@@ -52,8 +52,10 @@ class LiteRuntimeController extends RuntimeController {
   }
 }
 
+const launcherHeaderHeight = 46;
+
 export const runtimeUiPlugin: JupyterFrontEndPlugin<void> = {
-  id: "@cybershuttle/jupyterlite:runtime-ui",
+  id: "@cybershuttle/jupyter:runtime-ui",
   autoStart: true,
   optional: [ICommandPalette],
   activate: async (app, palette) => {
@@ -68,39 +70,54 @@ export const runtimeUiPlugin: JupyterFrontEndPlugin<void> = {
     );
     controller.activeRuntimeId = getActiveRuntimeId();
     let panel: CyberShuttlePanel | undefined;
-    let panelObserver: ResizeObserver | undefined;
-    const sizeHeader = (): void => {
-      const section = panel?.node.querySelector(".csRuntimeLauncher");
-      const height = section?.scrollHeight;
-      if (panel?.parent && height) {
-        BoxPanel.setSizeBasis(panel, height);
-        BoxPanel.setSizeBasis(panel.parent, height);
-      }
-    };
-    const queueHeader = (): number =>
-      requestAnimationFrame(() => requestAnimationFrame(sizeHeader));
-    window.addEventListener("resize", sizeHeader);
     const asLauncher = (widget: Widget | null): MainWidget | undefined =>
       (widget as MainWidget | null)?.content?.hasClass("jp-Launcher")
         ? (widget as MainWidget)
         : undefined;
+    // The title row stays put, so it goes where a main-area widget keeps a
+    // fixed header. The runtimes scroll with the page, so they go into the
+    // launcher's own content beside the sections it renders itself; mounting
+    // them in the header too gave them a second scroll container and a long
+    // list scrolled against the rest of the page rather than with it.
+    // The launcher renders its content asynchronously, so the section waits for
+    // that content to exist rather than watching the DOM for it.
+    const mountSection = async (launcher: MainWidget): Promise<void> => {
+      for (let frame = 0; panel && frame < 60; frame += 1) {
+        const content = launcher.content.node.querySelector<HTMLElement>(
+          ".jp-Launcher-content",
+        );
+        if (content) {
+          if (panel.node.parentElement !== content) {
+            // Lumino owns both the insertion and the attach lifecycle: placing
+            // the node first makes it connected, which attach then rejects.
+            if (panel.isAttached) Widget.detach(panel);
+            Widget.attach(
+              panel,
+              content,
+              content.firstElementChild as HTMLElement,
+            );
+          }
+          return;
+        }
+        await new Promise(requestAnimationFrame);
+      }
+    };
+
     const attachLauncher = (launcher: MainWidget): void => {
-      if (panel?.parent === launcher.contentHeader) return;
-      const previous = panel?.parent?.parent;
       if (!panel || panel.isDisposed) {
         panel = new CyberShuttlePanel(api, controller);
-        panel.stateChanged.connect(queueHeader);
       }
-      launcher.contentHeader.addWidget(panel);
-      panelObserver?.disconnect();
-      panelObserver = new ResizeObserver(sizeHeader);
-      const section = panel.node.querySelector(".csRuntimeLauncher");
-      if (section) panelObserver.observe(section);
-      queueHeader();
+      if (panel.header.parent !== launcher.contentHeader) {
+        launcher.contentHeader.addWidget(panel.header);
+        // The header region carries no size of its own, so both it and the
+        // widget inside it are given the row's height.
+        BoxPanel.setSizeBasis(panel.header, launcherHeaderHeight);
+        BoxPanel.setSizeBasis(launcher.contentHeader, launcherHeaderHeight);
+      }
+      void mountSection(launcher);
       const lockTitle = () => (launcher.title.closable = false);
       launcher.title.changed.connect(lockTitle, panel);
       lockTitle();
-      if (previous && previous !== launcher) previous.dispose();
     };
     const openLauncher = async () => {
       const launcher =

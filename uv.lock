@@ -350,7 +350,7 @@ wheels = [
 ]
 
 [[package]]
-name = "cs-jupyterlite"
+name = "cs-jupyter"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

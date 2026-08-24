@@ -1,5 +1,5 @@
 [project]
-name = "cs-jupyterlite"
+name = "cs-jupyter"
 version = "0.1.0"
 description = "Reproducible remote-only CyberShuttle JupyterLite distribution"
 requires-python = ">=3.11"

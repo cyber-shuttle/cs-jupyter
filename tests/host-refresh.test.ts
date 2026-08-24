@@ -115,9 +115,6 @@ describe("host refresh while the runtime wizard is active", () => {
     void state.panel.openCreate();
     await vi.waitFor(() => expect(state.forms).toHaveLength(1));
     const first = state.forms[0];
-    first.sshHostsRequested.emit(undefined);
-    await vi.waitFor(() => expect(state.hostWidgets).toHaveLength(1));
-    state.hostWidgets[0].backRequested.emit(undefined);
     expect([first.isHidden, first.isDisposed]).toEqual([false, false]);
     first.createRequested.emit(createRequest);
     await vi.waitFor(() =>
@@ -202,9 +199,8 @@ describe("host refresh while the runtime wizard is active", () => {
       await vi.waitFor(() => expect(listHosts).toHaveBeenCalledTimes(2));
       const host = state.hostWidgets[0];
       await vi.waitFor(() => expect(Dialog.tracker.size).toBe(1));
-      [...document.querySelectorAll<HTMLButtonElement>("button")]
-        .find((button) => button.textContent === "Close")!
-        .click();
+      // The dialog's own control is the only close: no footer repeats it.
+      Dialog.tracker.currentWidget!.reject();
       await vi.waitFor(() => expect(host.isDisposed).toBe(true));
       state.hostRenders[0].mockClear();
       outcome === "resolve"

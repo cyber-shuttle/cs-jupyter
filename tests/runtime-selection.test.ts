@@ -10,7 +10,7 @@ import {
   clearRuntimeAccess,
   loadRuntimeAccess,
 } from "../src/runtime-access";
-import { RuntimeList } from "../src/RuntimeList";
+import { CyberShuttleHeader, RuntimeList } from "../src/RuntimeList";
 import {
   pollPanel,
   runtimeFixture,
@@ -183,8 +183,8 @@ describe("serialized runtime selection", () => {
     expect([
       cards.length,
       [...cards].slice(0, 2).every((card) => card.tagName === "BUTTON"),
-      cards[0].ariaLabel?.includes("projects/one, READY"),
-      cards[0].textContent?.includes("delta · 1 CPU · 1024 MB"),
+      cards[0].ariaLabel?.includes("delta, READY"),
+      cards[0].textContent?.includes("1·0·1G"),
       cards[1].ariaLabel?.includes("FAILED"),
       cards[0].querySelector(".csRuntimeState-ready")?.textContent,
       cards[2].classList.contains("csRuntimeAddCard"),
@@ -194,10 +194,17 @@ describe("serialized runtime selection", () => {
       [...panel.node.querySelectorAll("h2")].map((heading) =>
         heading.textContent?.trim(),
       ),
-    ).toEqual(["Cybershuttle", "Cybershuttle Runtimes"]);
+    ).toEqual(["Runtimes"]);
     expect(
+      [...panel.header.node.querySelectorAll("h2")].map((h) =>
+        h.textContent?.trim(),
+      ),
+    ).toEqual(["Cybershuttle"]);
+    expect(
+      // The runtimes render as a section the launcher can host directly, so
+      // they share its scrolling content instead of bringing their own.
       panel.node.querySelector(
-        ".jp-Launcher-body > .jp-Launcher-content > .jp-Launcher-section > .jp-Launcher-cardContainer",
+        ".csRuntimeLauncher > .jp-Launcher-section > .jp-Launcher-cardContainer",
       ),
     ).not.toBeNull();
     cards[0].click();
@@ -220,7 +227,7 @@ describe("serialized runtime selection", () => {
     list.node.querySelector<HTMLButtonElement>(".csRuntimeCard")!.focus();
     setRuntimes(list, [{ ...first }]);
     expect(document.activeElement?.getAttribute("aria-label")).toContain(
-      "projects/one",
+      "delta",
     );
 
     list.node.querySelector<HTMLButtonElement>(".csRuntimeCard")!.click();
@@ -418,5 +425,129 @@ describe("serialized runtime selection", () => {
     expect(navigate).toHaveBeenCalledWith(`/selected/${second.id}`);
     expect(panel.state.connectingRuntimeId).toBeUndefined();
     panel.dispose();
+  });
+});
+
+describe("current session pill", () => {
+  it("marks only the runtime this page is attached to", () => {
+    const list = new RuntimeList();
+    const other = { ...first, id: "rt-999999999999" };
+    list.setCurrentRuntimeId(first.id);
+    setRuntimes(list, [first, other]);
+    const cards = [
+      ...list.node.querySelectorAll<HTMLElement>(".csRuntimeCard"),
+    ];
+    expect(cards[0].querySelector(".csCurrentPill")?.textContent).toBe(
+      "Current",
+    );
+    expect(cards[0].classList).toContain("csRuntimeCardCurrent");
+    expect(cards[0].getAttribute("aria-label")).toContain("current session");
+    expect(cards[1].querySelector(".csCurrentPill")).toBeNull();
+    expect(cards[1].classList).not.toContain("csRuntimeCardCurrent");
+  });
+});
+
+describe("runtime card contract", () => {
+  it("shows host, resources, and state only, leaving the rest to the dialog", () => {
+    const list = new RuntimeList();
+    const gpu = {
+      ...first,
+      resources: { ...first.resources, cores: 8, memoryMb: 32768, gpuCount: 2 },
+    };
+    setRuntimes(list, [gpu]);
+    const card = list.node.querySelector<HTMLElement>(".csRuntimeCard")!;
+    expect(card.querySelector(".csRuntimeCardTitle")?.textContent).toBe(
+      gpu.sshHost,
+    );
+    expect(
+      [...card.querySelectorAll(".csResourceMeasure")].map((measure) => [
+        measure.getAttribute("title"),
+        measure.querySelector(".csResourceValue")?.textContent,
+        !!measure.querySelector("svg"),
+      ]),
+    ).toEqual([
+      ["8 CPU", "8", true],
+      ["2 GPU", "2", true],
+      ["32G memory", "32G", true],
+    ]);
+    expect(card.querySelector(".csRuntimeCardMeta")?.textContent).toBe(
+      "8·2·32G",
+    );
+    expect(card.querySelector(".csRuntimeState")?.textContent).toBe(gpu.state);
+    // Identity, then what state it is in, then what it costs.
+    expect(
+      [...card.querySelectorAll(".csRuntimeCardLabel > *")].map(
+        (node) => node.className.split(" ")[0],
+      ),
+    ).toEqual(["csRuntimeCardIdentity", "csRuntimeState", "csRuntimeCardMeta"]);
+    // The allocation sits with the host, not as another block.
+    expect(
+      [...card.querySelectorAll(".csRuntimeCardIdentity > *")].map(
+        (node) => node.textContent,
+      ),
+    ).toEqual([gpu.sshHost, gpu.account]);
+    // The working directory and Jupyter readiness live in the detail dialog.
+    expect(card.textContent).not.toContain(gpu.rootFolder);
+    expect(card.textContent).not.toContain("Jupyter:");
+    expect(card.querySelector(".csRuntimeCardIcon svg")).not.toBeNull();
+    expect(list.node.querySelector(".csRuntimeSectionRack")).not.toBeNull();
+  });
+});
+
+describe("identity control", () => {
+  it("offers sign in when signed out and hides the runtime cards behind a reason", () => {
+    const list = new RuntimeList();
+    const header = new CyberShuttleHeader();
+    const signIn = vi.fn();
+    header.signInRequested.connect(signIn);
+    const state = { ...uiState({ runtimes: [first] }), signedIn: false };
+    list.setControllerState(state);
+    header.setControllerState(state);
+    expect(list.node.textContent).toContain(
+      "Sign in to see your runtimes and SSH hosts.",
+    );
+    expect(list.node.querySelector(".csRuntimeAddCard")).toBeNull();
+    expect(list.node.querySelector(".csRuntimeCard")).toBeNull();
+    expect(header.node.querySelector(".csAccountButton")).toBeNull();
+    header.node.querySelector<HTMLButtonElement>(".csSignInButton")!.click();
+    expect(signIn).toHaveBeenCalledTimes(1);
+  });
+
+  it("names the account and keeps sign out behind its menu", () => {
+    const header = new CyberShuttleHeader();
+    const signOut = vi.fn();
+    header.signOutRequested.connect(signOut);
+    header.setControllerState({
+      ...uiState({ runtimes: [first] }),
+      signedIn: true,
+      account: "someone@gatech.edu",
+    });
+    const list = header;
+    const trigger =
+      list.node.querySelector<HTMLButtonElement>(".csAccountButton")!;
+    expect(trigger.textContent).toBe("someone@gatech.edu");
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(list.node.querySelector(".csAccountMenuItem")).toBeNull();
+
+    trigger.click();
+    const item =
+      list.node.querySelector<HTMLButtonElement>(".csAccountMenuItem")!;
+    expect(item.textContent).toBe("Sign out");
+    expect(
+      list.node
+        .querySelector(".csAccountButton")
+        ?.getAttribute("aria-expanded"),
+    ).toBe("true");
+    item.click();
+    expect(signOut).toHaveBeenCalledTimes(1);
+  });
+
+  it("puts SSH Hosts on the runtimes row, not the title row", () => {
+    const list = new RuntimeList();
+    setRuntimes(list, [first]);
+    const sshHosts = list.node.querySelector(".csSshHostsButton")!;
+    expect(sshHosts.closest("header")?.querySelector("h2")?.textContent).toBe(
+      "Runtimes",
+    );
   });
 });

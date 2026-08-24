@@ -1,3 +1,4 @@
+import { vi } from "vitest";
 import type { IRuntime } from "../src/Common";
 import type { IRuntimeList, IRuntimeLogTail } from "../src/ControlClient";
 import type { IRuntimeUiState } from "../src/CyberShuttlePanel";
@@ -65,4 +66,14 @@ export function runtimeListFixture(
   refreshing = false,
 ): IRuntimeList {
   return { runtimes, refreshing, logs };
+}
+
+/** The token provider a ControlClient needs, stubbed. */
+export function fakeAuth(accessToken = "delegated-token") {
+  return {
+    acquireToken: vi.fn(async () => ({
+      accessToken,
+      idToken: "identity-token",
+    })),
+  };
 }

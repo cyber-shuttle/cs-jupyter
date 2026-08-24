@@ -2,7 +2,6 @@ import { PageConfig, URLExt } from "@jupyterlab/coreutils";
 import { ServerConnection } from "@jupyterlab/services";
 import {
   AuthClient,
-  AuthInteractionRequiredError,
   validControlApiUrl,
   type OAuthCredentials,
 } from "./AuthClient";
@@ -13,25 +12,27 @@ import {
 import type { IRuntimeAccess } from "./runtime-access";
 import {
   clearRuntimeAccess,
-  clearRuntimeSession,
   validateRuntimeAccess,
   validDevTunnelRoot,
 } from "./runtime-access";
 import {
+  GENERATION,
   IRuntime,
   IRuntimeCreateRequest,
   IRuntimeValidation,
   ISlurmInfo,
   ISshHost,
+  ISshHostTest,
+  RUNTIME_ID,
   RUNTIME_STATES,
   RuntimeState,
   RuntimeValidationStatus,
   VALIDATION_STATUSES,
+  exactKeys,
+  onlyKeys,
 } from "./Common";
 import { isPlainObject } from "./Common";
 
-const ID = /^rt-[a-f0-9]{12}$/;
-const GENERATION = /^g-[a-f0-9]{16}$/;
 const RUNTIME_LOG_CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
 const MAX_CORES = 4096;
 const MAX_MEMORY_MB = 100_000_000;
@@ -42,6 +43,7 @@ export type RuntimeLogStream = "status" | "stdout" | "stderr";
 export interface IRuntimeLogLine {
   stream: RuntimeLogStream;
   text: string;
+  at: string;
 }
 
 export interface IRuntimeLogTail {
@@ -62,6 +64,7 @@ export interface ITokenProvider {
 
 export interface IControlAuth extends ITokenProvider {
   interactiveLogin(): Promise<OAuthCredentials>;
+  readonly account?: string | undefined;
 }
 
 export class ControlError extends Error {
@@ -141,12 +144,62 @@ export class ControlClient {
     await this._auth.interactiveLogin();
   }
 
+  // Succeeds only on a credential that is still valid, so callers can tell a
+  // resumable session from one that needs the device-code round trip.
+  async resumeSession(): Promise<void> {
+    await this._auth.acquireToken();
+  }
+
+  get account(): string | undefined {
+    return this._auth.account;
+  }
+
+  signOut(): void {
+    this._auth.invalidateToken?.();
+  }
+
   async listSshHosts(): Promise<ISshHost[]> {
     const value = await this._request("ssh");
     if (!isPlainObject(value) || !Array.isArray(value.hosts)) {
       throw new Error("cs-control returned an invalid SSH host list.");
     }
     return value.hosts.map(validateHost);
+  }
+
+  // cs-control parses the pasted command, so the browser never composes SSH
+  // configuration text of its own.
+  async addSshHost(name: string, command: string): Promise<ISshHost> {
+    return validateHost(
+      await this._request("ssh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, command }),
+      }),
+    );
+  }
+
+  async removeSshHost(alias: string): Promise<void> {
+    await this._request(`ssh/${encodeURIComponent(alias)}`, {
+      method: "DELETE",
+    });
+  }
+
+  async testSshHost(
+    alias: string,
+    signal?: AbortSignal,
+  ): Promise<ISshHostTest> {
+    const value = await this._request(`ssh/${encodeURIComponent(alias)}/test`, {
+      method: "POST",
+      signal,
+    });
+    if (
+      !isPlainObject(value) ||
+      typeof value.ok !== "boolean" ||
+      typeof value.message !== "string"
+    ) {
+      throw new Error("cs-control returned an invalid SSH host test.");
+    }
+    return { ok: value.ok, message: value.message };
   }
 
   // Aborting the signal cancels the request, which cancels the remote process group.
@@ -180,6 +233,24 @@ export class ControlClient {
     };
   }
 
+  // The script alone, so a caller can read what Slurm is about to be asked
+  // about while it is being asked.
+  async previewRuntimeScript(
+    request: IRuntimeCreateRequest,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const value = await this._request("runtimes/script", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+      signal,
+    });
+    if (!isPlainObject(value) || typeof value.script !== "string") {
+      throw new Error("cs-control returned an invalid runtime script.");
+    }
+    return value.script;
+  }
+
   async validateRuntime(
     request: IRuntimeCreateRequest,
     signal?: AbortSignal,
@@ -211,15 +282,28 @@ export class ControlClient {
   }
 
   async stopRuntime(id: string): Promise<IRuntime> {
+    return this._retireRuntime(id, "stop", "POST", "stopped");
+  }
+
+  async deleteRuntime(id: string): Promise<IRuntime> {
+    return this._retireRuntime(id, "", "DELETE", "deleted");
+  }
+
+  // Stop and delete differ only in the route and the word for what came back.
+  // Both must answer with the runtime they were asked about, and both end the
+  // browser's session with it.
+  private async _retireRuntime(
+    id: string,
+    suffix: string,
+    method: string,
+    past: string,
+  ): Promise<IRuntime> {
     const runtimeId = validRuntimeId(id);
-    const invalid = "cs-control returned an invalid stopped runtime.";
+    const invalid = `cs-control returned an invalid ${past} runtime.`;
+    const path = `runtimes/${encodeURIComponent(runtimeId)}${suffix ? `/${suffix}` : ""}`;
     let runtime: IRuntime;
     try {
-      runtime = validateRuntime(
-        await this._request(`runtimes/${encodeURIComponent(runtimeId)}/stop`, {
-          method: "POST",
-        }),
-      );
+      runtime = validateRuntime(await this._request(path, { method }));
     } catch (error) {
       if (error instanceof ControlError) {
         throw error;
@@ -229,7 +313,7 @@ export class ControlClient {
     if (runtime.id !== runtimeId) {
       throw new Error(invalid);
     }
-    clearRuntimeSession(runtimeId);
+    clearRuntimeAccess(runtimeId);
     return runtime;
   }
 
@@ -284,6 +368,31 @@ export class ControlClient {
 
 // Jupyter Server owns its own auth, so ServerConnection's built-in token handling is the whole
 // integration: the Authorization header on REST and ?token= on WebSocket URLs.
+// A kernel spec reports its logos as paths on the runtime, but an <img> cannot
+// carry the identity token: unauthenticated the runtime answers with its login
+// page, and its static handler refuses the cross-origin preflight that an
+// Authorization header forces. Putting the token in the URL is the one thing
+// that would work and the one thing that must never happen, so drop the
+// resources and let the launcher fall back to its built-in kernel icon rather
+// than render a broken image.
+async function withoutUnreachableKernelSpecLogos(
+  response: Response,
+): Promise<Response> {
+  const payload: unknown = await response.json();
+  if (isPlainObject(payload) && isPlainObject(payload.kernelspecs)) {
+    for (const spec of Object.values(payload.kernelspecs)) {
+      if (isPlainObject(spec)) {
+        spec.resources = {};
+      }
+    }
+  }
+  return new Response(JSON.stringify(payload), {
+    status: response.status,
+    statusText: response.statusText,
+    headers: { "content-type": "application/json" },
+  });
+}
+
 export function createRuntimeServerSettings(
   descriptor: IRuntimeAccess,
   options: { fetch?: typeof globalThis.fetch } = {},
@@ -296,6 +405,16 @@ export function createRuntimeServerSettings(
     const response = await browserFetch(input, init);
     if (response.status === 401 || response.status === 403) {
       clearRuntimeAccess(access.runtimeId);
+      return response;
+    }
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+    if (response.ok && url.includes("/api/kernelspecs")) {
+      return withoutUnreachableKernelSpecLogos(response);
     }
     return response;
   };
@@ -309,7 +428,7 @@ export function createRuntimeServerSettings(
 }
 
 export function validRuntimeId(value: string): string {
-  if (!ID.test(value)) {
+  if (!RUNTIME_ID.test(value)) {
     throw new Error("Invalid runtime id.");
   }
   return value;
@@ -319,7 +438,7 @@ function validateRuntimeValidation(value: unknown): IRuntimeValidation {
   if (
     !isPlainObject(value) ||
     typeof value.runtimeId !== "string" ||
-    !ID.test(value.runtimeId) ||
+    !RUNTIME_ID.test(value.runtimeId) ||
     !VALIDATION_STATUSES.includes(value.status as RuntimeValidationStatus) ||
     typeof value.script !== "string" ||
     !value.script ||
@@ -347,12 +466,11 @@ function validateRuntimeLogTail(value: unknown): IRuntimeLogTail {
   if (
     !isPlainObject(value) ||
     typeof value.runtimeId !== "string" ||
-    !ID.test(value.runtimeId) ||
+    !RUNTIME_ID.test(value.runtimeId) ||
     !Array.isArray(value.lines) ||
     value.lines.length < 1 ||
     value.lines.length > 100 ||
-    Object.keys(value).length !== 2 ||
-    Object.keys(value).some((key) => !["runtimeId", "lines"].includes(key))
+    !exactKeys(value, ["runtimeId", "lines"])
   ) {
     throw new Error("cs-control returned an invalid runtime log event.");
   }
@@ -364,8 +482,9 @@ function validateRuntimeLogTail(value: unknown): IRuntimeLogTail {
       !["status", "stdout", "stderr"].includes(String(line.stream)) ||
       typeof line.text !== "string" ||
       RUNTIME_LOG_CONTROL.test(line.text) ||
-      Object.keys(line).length !== 2 ||
-      Object.keys(line).some((key) => !["stream", "text"].includes(key))
+      typeof line.at !== "string" ||
+      !Number.isFinite(Date.parse(line.at)) ||
+      !exactKeys(line, ["stream", "text", "at"])
     ) {
       throw new Error("cs-control returned an invalid runtime log line.");
     }
@@ -374,7 +493,11 @@ function validateRuntimeLogTail(value: unknown): IRuntimeLogTail {
     if (size > 4096 || bytes > 64 * 1024) {
       throw new Error("cs-control returned an oversized runtime log event.");
     }
-    return { stream: line.stream as RuntimeLogStream, text: line.text };
+    return {
+      stream: line.stream as RuntimeLogStream,
+      text: line.text,
+      at: line.at,
+    };
   });
   return { runtimeId: value.runtimeId, lines };
 }
@@ -395,9 +518,9 @@ function validateRuntime(value: unknown): IRuntime {
   ];
   if (
     !isPlainObject(value) ||
-    Object.keys(value).some((key) => !allowed.includes(key)) ||
+    !onlyKeys(value, allowed) ||
     typeof value.id !== "string" ||
-    !ID.test(value.id) ||
+    !RUNTIME_ID.test(value.id) ||
     typeof value.generation !== "string" ||
     !GENERATION.test(value.generation) ||
     typeof value.state !== "string" ||

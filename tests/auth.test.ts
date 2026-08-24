@@ -178,15 +178,25 @@ describe("AuthClient device-code broker flow", () => {
     expect(open.rel).toContain("noopener");
     expect(document.activeElement).toBe(open);
 
-    const copy = [...dialog.querySelectorAll("button")].find(
-      (button) => button.textContent === "Copy code",
-    )!;
+    // Opening the page moves the answer to the other device, so the button
+    // reports waiting instead of inviting a second click.
+    open.click();
+    expect(open.textContent).toContain("Waiting");
+    expect(open.querySelector(".csSpinner")).not.toBeNull();
+
+    const copy = dialog.querySelector<HTMLButtonElement>(".csDeviceCodeCopy")!;
+    expect(copy.getAttribute("aria-label")).toBe("Copy code");
     copy.click();
     await vi.waitFor(() => expect(clipboard).toHaveBeenCalledWith("ABCD-EFGH"));
-    const cancel = [...dialog.querySelectorAll("button")].find(
-      (button) => button.textContent === "Cancel",
-    )!;
-    cancel.click();
+    await vi.waitFor(() =>
+      expect(copy.getAttribute("aria-label")).toBe("Code copied"),
+    );
+    expect(copy.classList.contains("csDeviceCodeCopied")).toBe(true);
+    expect(dialog.textContent).not.toContain("Code copied.");
+
+    const close = dialog.querySelector<HTMLButtonElement>(".csModalClose")!;
+    expect(close.getAttribute("aria-label")).toBe("Close");
+    close.click();
     await expect(login).rejects.toBeInstanceOf(AuthInteractionCancelledError);
     expect(observedSignal?.aborted).toBe(true);
     expect(document.querySelector('[role="dialog"]')).toBeNull();
@@ -471,7 +481,7 @@ describe("AuthClient device-code broker flow", () => {
     }
   });
 
-  it("does not persist, log, or place OAuth credentials in URLs", async () => {
+  it("keeps OAuth credentials out of local storage, URLs, and logs", async () => {
     const originalUrl = window.location.href;
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -492,8 +502,12 @@ describe("AuthClient device-code broker flow", () => {
       accessToken: "access-token",
       idToken: "id-token",
     });
+    // Credentials survive a reload in per-tab session storage only: local
+    // storage would outlive the tab, and a URL would leak them to history.
     expect(localStorage.length).toBe(0);
-    expect(sessionStorage.length).toBe(0);
+    expect(sessionStorage.getItem("cybershuttle.oauth.v1")).toContain(
+      "access-token",
+    );
     expect(window.location.href).toBe(originalUrl);
     expect(
       vi
@@ -507,5 +521,43 @@ describe("AuthClient device-code broker flow", () => {
     log.mockRestore();
     warn.mockRestore();
     error.mockRestore();
+  });
+});
+
+describe("AuthClient credential persistence", () => {
+  it("restores an unexpired credential into a fresh client and drops it on expiry or sign-out", async () => {
+    const dependencies = advancingDependencies([
+      { body: deviceAuthorization },
+      { body: tokens },
+    ]);
+    const signedIn = new AuthClient(options, dependencies);
+    await signedIn.interactiveLogin();
+
+    // Opening a runtime navigates the page, so the next client is a new object.
+    const reloaded = new AuthClient(options, {
+      fetch: fetchSequence([]),
+      now: dependencies.nowValue,
+    });
+    await expect(reloaded.acquireToken()).resolves.toEqual({
+      accessToken: "access-token",
+      idToken: "id-token",
+    });
+
+    const expired = new AuthClient(options, {
+      fetch: fetchSequence([]),
+      now: () => dependencies.nowValue() + 60_000,
+    });
+    await expect(expired.acquireToken()).rejects.toBeInstanceOf(
+      AuthInteractionRequiredError,
+    );
+
+    await signedIn.interactiveLogin().catch(() => undefined);
+    signedIn.invalidateToken();
+    await expect(
+      new AuthClient(options, {
+        fetch: fetchSequence([]),
+        now: dependencies.nowValue,
+      }).acquireToken(),
+    ).rejects.toBeInstanceOf(AuthInteractionRequiredError);
   });
 });
