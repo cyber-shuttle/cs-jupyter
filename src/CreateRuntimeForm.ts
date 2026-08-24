@@ -23,6 +23,11 @@ interface IPartitionChoice {
   partition: IPartition;
 }
 
+// The smallest allocation worth scheduling. cs-control enforces the same
+// floor in validateCreate; keep the two in step.
+const MIN_CORES = 2;
+const MIN_MEMORY_MB = 4096;
+
 interface IRuntimeDraft {
   sshHost: string;
   resourceType: ResourceType | "";
@@ -43,8 +48,8 @@ function freshDraft(sshHost = ""): IRuntimeDraft {
     account: "",
     partitionKey: "",
     rootFolder: "",
-    cores: 1,
-    memoryMb: 1024,
+    cores: MIN_CORES,
+    memoryMb: MIN_MEMORY_MB,
     wallMinutes: 60,
     gpuType: "",
     gpuCount: 1,
@@ -493,8 +498,8 @@ export class CreateRuntimeForm extends Widget {
     rootFolder.setAttribute("aria-describedby", workspaceHelp.id);
     const workspaceField = field("Workspace folder", rootFolder);
     workspaceField.appendChild(workspaceHelp);
-    const cores = number("cores", this._draft.cores);
-    const memory = number("memoryMb", this._draft.memoryMb);
+    const cores = number("cores", this._draft.cores, MIN_CORES);
+    const memory = number("memoryMb", this._draft.memoryMb, MIN_MEMORY_MB);
     const wall = number("wallMinutes", this._draft.wallMinutes);
     const gpuType = select("gpuType", []);
     const gpuCount = number("gpuCount", this._draft.gpuCount);
@@ -547,8 +552,11 @@ export class CreateRuntimeForm extends Widget {
       gpuCount.value = String(this._draft.gpuCount);
     };
     const resetPartitionResources = (selected?: IPartition): void => {
-      this._draft.cores = Math.min(1, selected?.cpuCount ?? 1);
-      this._draft.memoryMb = Math.min(1024, selected?.memoryMb ?? 1024);
+      this._draft.cores = Math.min(MIN_CORES, selected?.cpuCount ?? MIN_CORES);
+      this._draft.memoryMb = Math.min(
+        MIN_MEMORY_MB,
+        selected?.memoryMb ?? MIN_MEMORY_MB,
+      );
       this._draft.gpuType = "";
       this._draft.gpuCount = 1;
       cores.value = String(this._draft.cores);
@@ -985,9 +993,9 @@ function input(
   return value;
 }
 
-function number(name: string, value: number): HTMLInputElement {
+function number(name: string, value: number, min = 1): HTMLInputElement {
   const result = input(name, "number", "");
-  result.min = "1";
+  result.min = String(min);
   result.value = String(value);
   return result;
 }

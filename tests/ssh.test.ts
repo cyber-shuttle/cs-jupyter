@@ -585,8 +585,9 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
     const gpu = radios.find((item) => item.value === "gpu")!;
     gpu.checked = true;
     gpu.dispatchEvent(new Event("change"));
-    expect(cores.value).toBe("1");
-    expect(memory.value).toBe("1024");
+    expect(cores.value).toBe("2");
+    expect(memory.value).toBe("4096");
+    expect([cores.min, memory.min]).toEqual(["2", "4096"]);
     expect(
       [
         ...form.node.querySelectorAll<HTMLOptionElement>(
