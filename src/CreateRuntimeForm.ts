@@ -2,7 +2,6 @@ import { Signal } from "@lumino/signaling";
 import { Widget } from "@lumino/widgets";
 import {
   IPartition,
-  IRuntime,
   IRuntimeCreateRequest,
   IRuntimeValidation,
   ISlurmInfo,
@@ -120,23 +119,6 @@ export class CreateRuntimeForm extends Widget {
   setError(message: string): void {
     this._error = message;
     this._syncStatus();
-  }
-
-  // The partition is not carried over: partitions come from discovery, which
-  // has not run for this host yet.
-  prefill(runtime: IRuntime): void {
-    this._selectHost(runtime.sshHost);
-    this._draft = {
-      ...this._draft,
-      account: runtime.account ?? "",
-      rootFolder: runtime.rootFolder,
-      cores: runtime.resources.cores,
-      memoryMb: runtime.resources.memoryMb,
-      wallMinutes: runtime.resources.wallMinutes,
-      gpuType: runtime.resources.gpuType ?? "",
-      gpuCount: runtime.resources.gpuCount ?? 1,
-    };
-    this._render();
   }
 
   resetRequestIdentity(): void {

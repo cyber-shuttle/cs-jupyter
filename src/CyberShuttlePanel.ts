@@ -552,18 +552,23 @@ export class CyberShuttlePanel extends StackedPanel {
     }
   }
 
-  // A finished Slurm allocation cannot be restarted, so running one again means
-  // creating another like it.
-  async createLike(runtimeId: string): Promise<void> {
-    const runtime = this._selectedRuntime(runtimeId);
-    if (!runtime) {
-      return;
-    }
-    this._detailDialog?.resolve(0);
-    await this.openCreate(runtime);
+  // A finished Slurm allocation cannot be restarted, so running one again is a
+  // new allocation submitted onto the card that already exists: same runtime,
+  // same workspace and settings, new job and generation.
+  async runAgain(runtimeId: string): Promise<void> {
+    await this._act(runtimeId, (id) => this._api.startRuntime(id));
   }
 
   async stop(runtimeId: string): Promise<void> {
+    await this._act(runtimeId, (id) => this._api.stopRuntime(id));
+  }
+
+  // Starting and stopping are the same move: end the browser's session with the
+  // allocation on the card, ask cs-control, and report a refusal on the card.
+  private async _act(
+    runtimeId: string,
+    act: (id: string) => Promise<IRuntime>,
+  ): Promise<void> {
     const runtime = this._selectedRuntime(runtimeId);
     if (!runtime) {
       return;
@@ -572,7 +577,7 @@ export class CyberShuttlePanel extends StackedPanel {
     this._releaseRuntime(runtime.id);
     this._setBusy(runtime.id, true);
     try {
-      await this._api.stopRuntime(runtime.id);
+      await act(runtime.id);
     } catch (error) {
       this._setError(errorMessage(error));
     } finally {
@@ -620,15 +625,12 @@ export class CyberShuttlePanel extends StackedPanel {
 
   // Each modal is one view titled after it, closed by the dialog's own control:
   // no footer repeats that, and the view's own action sits where a footer would.
-  async openCreate(like?: IRuntime): Promise<void> {
+  async openCreate(): Promise<void> {
     const body = new Panel();
     body.addClass("csWorkspaceModal");
     const form = this._createForm();
     body.addWidget(form);
     form.setHosts(this._hosts ?? []);
-    if (like) {
-      form.prefill(like);
-    }
     const dialog = new Dialog({
       title: "Add Runtime",
       body,

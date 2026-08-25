@@ -112,7 +112,7 @@ describe("runtime log tails on the polled read", () => {
 
 class DetailController {
   readonly stateChanged = new Signal<this, IRuntimeUiState>(this);
-  readonly createLike = vi.fn(async () => undefined);
+  readonly runAgain = vi.fn(async () => undefined);
   readonly stop = vi.fn(async () => undefined);
   readonly connect = vi.fn(async () => undefined);
   currentRuntimeId: string | undefined;
@@ -254,6 +254,16 @@ describe("runtime detail modal body", () => {
         (button) => button.textContent,
       ),
     ).toEqual(expected);
+    detail.dispose();
+  });
+
+  it("runs a finished runtime again on the runtime it is showing", () => {
+    const finished = runtimeInState("STOPPED");
+    const { detail, controller } = runtimeDetail(finished);
+    detail.node
+      .querySelector<HTMLButtonElement>('[data-runtime-action="Run again"]')!
+      .click();
+    expect(controller.runAgain).toHaveBeenCalledWith(finished.id);
     detail.dispose();
   });
 
