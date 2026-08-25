@@ -552,9 +552,6 @@ export class CyberShuttlePanel extends StackedPanel {
     }
   }
 
-  // A finished Slurm allocation cannot be restarted, so running one again is a
-  // new allocation submitted onto the card that already exists: same runtime,
-  // same workspace and settings, new job and generation.
   async runAgain(runtimeId: string): Promise<void> {
     await this._act(runtimeId, (id) => this._api.startRuntime(id));
   }
@@ -563,8 +560,6 @@ export class CyberShuttlePanel extends StackedPanel {
     await this._act(runtimeId, (id) => this._api.stopRuntime(id));
   }
 
-  // Starting and stopping are the same move: end the browser's session with the
-  // allocation on the card, ask cs-control, and report a refusal on the card.
   private async _act(
     runtimeId: string,
     act: (id: string) => Promise<IRuntime>,

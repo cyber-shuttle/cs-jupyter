@@ -99,9 +99,8 @@ export class RuntimeDetail extends Widget {
     const actions = element("div", "", "csRuntimeDetailActions");
     const busy = this._state.busyRuntimeIds.has(runtime.id);
     if (isTerminal(runtime.state)) {
-      // A terminal allocation cannot resume: its job, tunnel, and generation are
-      // gone. Running it again submits a fresh one onto this same card, so the
-      // runtime being watched is the one that comes back.
+      // A terminal allocation cannot resume: cs-control submits a new one onto
+      // this same card.
       actions.appendChild(
         this._button(
           "Run again",

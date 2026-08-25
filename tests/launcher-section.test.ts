@@ -4,8 +4,6 @@ import { Widget } from "@lumino/widgets";
 import { describe, expect, it, vi } from "vitest";
 import { runtimeUiPlugin } from "../src/runtime-ui";
 
-// The shape the section is mounted into: JupyterLab's launcher renders its own
-// content, and our section joins the node that content lives in.
 class LauncherContent extends Widget {
   constructor() {
     super();

@@ -59,8 +59,6 @@ describe("runtime stop action", () => {
     panel.dispose();
   });
 
-  // The dead allocation cannot resume, but the card it left behind is the one
-  // that runs again: no wizard, no second entry, same runtime.
   it("runs a terminal runtime again in place", async () => {
     const api = {
       signIn: vi.fn(async () => undefined),

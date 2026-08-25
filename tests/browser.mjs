@@ -244,8 +244,6 @@ const controlServer = createServer((request, response) => {
     url.pathname,
   );
   if (startMatch && request.method === "POST") {
-    // cs-control runs the card again: same identity, new generation, no second
-    // entry in the inventory.
     const item = runtimes.find(({ id }) => id === startMatch[1]);
     item.state = "QUEUED";
     item.generation = "g-fedcba9876543210";
@@ -571,9 +569,6 @@ try {
   );
   await runtimeDialog.getByText("startup warning", { exact: true }).waitFor();
   assert.equal(await runtimeDialog.locator(".csRuntimeLogLine").count(), 1);
-  // A finished allocation cannot resume, so running it again submits a new one
-  // onto this same card: the runtime being watched turns over, and no second
-  // entry appears beside it.
   const cardsBeforeRunAgain = await page.locator(".csRuntimeCard").count();
   await runtimeDialog.getByRole("button", { name: "Run again" }).click();
   await runtimeDialog.getByText("QUEUED", { exact: true }).waitFor();
@@ -672,9 +667,7 @@ try {
   await page.getByRole("menuitem", { name: "File", exact: true }).click();
   await page.getByText("New Launcher", { exact: true }).click();
   await page.locator(".jp-Launcher").waitFor();
-  // Launching anything disposes the launcher it was launched from, so the next
-  // launcher has to receive the runtimes section and its header rather than
-  // opening with JupyterLab's own cards alone.
+  // Launching anything disposes the launcher it was launched from.
   await page
     .locator(
       ".jp-MainAreaWidget:has(.jp-Launcher):has(#cybershuttle-runtime-panel)",

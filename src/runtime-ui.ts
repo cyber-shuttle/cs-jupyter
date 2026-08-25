@@ -103,11 +103,9 @@ export const runtimeUiPlugin: JupyterFrontEndPlugin<void> = {
       }
     };
 
-    // JupyterLab disposes a launcher the moment anything is launched from it,
-    // and both of our widgets are guests in that tree: the header is a child of
-    // a panel about to be disposed, and the section is attached to a node about
-    // to leave the page. Leaving on our own while the tree is still whole is
-    // what lets the next launcher receive them.
+    // JupyterLab disposes a launcher as soon as anything is launched from it,
+    // and both widgets are guests in that tree: leave it while its DOM is whole
+    // or the header dies with it and the section is stranded off-page.
     const releaseFrom = (launcher: MainWidget): void => {
       if (!panel || !launcher.node.contains(panel.node)) {
         return;
