@@ -281,18 +281,22 @@ export class ControlClient {
     );
   }
 
+  async startRuntime(id: string): Promise<IRuntime> {
+    return this._runtimeAction(id, "start", "POST", "started");
+  }
+
   async stopRuntime(id: string): Promise<IRuntime> {
-    return this._retireRuntime(id, "stop", "POST", "stopped");
+    return this._runtimeAction(id, "stop", "POST", "stopped");
   }
 
   async deleteRuntime(id: string): Promise<IRuntime> {
-    return this._retireRuntime(id, "", "DELETE", "deleted");
+    return this._runtimeAction(id, "", "DELETE", "deleted");
   }
 
-  // Stop and delete differ only in the route and the word for what came back.
-  // Both must answer with the runtime they were asked about, and both end the
-  // browser's session with it.
-  private async _retireRuntime(
+  // Start, stop, and delete differ only in the route and the word for what came
+  // back. All three must answer with the runtime they were asked about, and all
+  // three end the browser's session with the allocation it had.
+  private async _runtimeAction(
     id: string,
     suffix: string,
     method: string,

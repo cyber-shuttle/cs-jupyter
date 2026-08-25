@@ -59,13 +59,12 @@ describe("runtime stop action", () => {
     panel.dispose();
   });
 
-  // A terminal allocation is gone, so the only way to run it again is to create
-  // another like it. The card must not offer to resume the dead one.
-  it("offers no resume action on a terminal runtime", async () => {
+  it("runs a terminal runtime again in place", async () => {
     const api = {
       signIn: vi.fn(async () => undefined),
       listRuntimes: vi.fn(async () => runtimeListFixture([base])),
       listSshHosts: vi.fn(async () => []),
+      startRuntime: vi.fn(async () => ({ ...base, state: "QUEUED" as const })),
     };
     const panel = new CyberShuttlePanel(
       api as any,
@@ -74,7 +73,11 @@ describe("runtime stop action", () => {
     await loaded(panel);
     expect(card(panel).textContent).toContain("delta");
     expect(card(panel).textContent).not.toContain("Start");
-    expect((api as any).startRuntime).toBeUndefined();
+
+    await panel.runAgain(base.id);
+    expect(api.startRuntime).toHaveBeenCalledWith(base.id);
+    expect(document.querySelector(".jp-Dialog")).toBeNull();
+    expect(panel.state.runtimes.map((each) => each.id)).toEqual([base.id]);
     panel.dispose();
   });
 });

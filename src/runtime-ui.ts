@@ -103,6 +103,19 @@ export const runtimeUiPlugin: JupyterFrontEndPlugin<void> = {
       }
     };
 
+    // JupyterLab disposes a launcher as soon as anything is launched from it,
+    // and both widgets are guests in that tree: leave it while its DOM is whole
+    // or the header dies with it and the section is stranded off-page.
+    const releaseFrom = (launcher: MainWidget): void => {
+      if (!panel || !launcher.node.contains(panel.node)) {
+        return;
+      }
+      if (panel.header.parent === launcher.contentHeader) {
+        panel.header.parent = null;
+      }
+      Widget.detach(panel);
+    };
+
     const attachLauncher = (launcher: MainWidget): void => {
       if (!panel || panel.isDisposed) {
         panel = new CyberShuttlePanel(api, controller);
@@ -113,6 +126,7 @@ export const runtimeUiPlugin: JupyterFrontEndPlugin<void> = {
         // widget inside it are given the row's height.
         BoxPanel.setSizeBasis(panel.header, launcherHeaderHeight);
         BoxPanel.setSizeBasis(launcher.contentHeader, launcherHeaderHeight);
+        launcher.disposed.connect(() => releaseFrom(launcher));
       }
       void mountSection(launcher);
       const lockTitle = () => (launcher.title.closable = false);

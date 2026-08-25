@@ -240,6 +240,16 @@ const controlServer = createServer((request, response) => {
       jupyter: { uri: `${directOrigin}/`, token: jupyterToken },
     });
   }
+  const startMatch = /^\/api\/v1\/runtimes\/(rt-[a-f0-9]{12})\/start$/.exec(
+    url.pathname,
+  );
+  if (startMatch && request.method === "POST") {
+    const item = runtimes.find(({ id }) => id === startMatch[1]);
+    item.state = "QUEUED";
+    item.generation = "g-fedcba9876543210";
+    item.error = undefined;
+    return json(response, item);
+  }
   const runtimeMatch = /^\/api\/v1\/runtimes\/(rt-[a-f0-9]{12})$/.exec(
     url.pathname,
   );
@@ -559,18 +569,25 @@ try {
   );
   await runtimeDialog.getByText("startup warning", { exact: true }).waitFor();
   assert.equal(await runtimeDialog.locator(".csRuntimeLogLine").count(), 1);
-  // A finished allocation cannot resume, so the detail offers to create another
-  // like it and hands the wizard the finished runtime's configuration.
+  const cardsBeforeRunAgain = await page.locator(".csRuntimeCard").count();
   await runtimeDialog.getByRole("button", { name: "Run again" }).click();
-  await page.getByText("Add Runtime", { exact: true }).first().waitFor();
-  assert.equal(
-    await page.locator("input[name=rootFolder]").inputValue(),
-    "projects/restart",
-    "Run again must seed the finished runtime's root folder",
+  await runtimeDialog.getByText("QUEUED", { exact: true }).waitFor();
+  assert.ok(
+    controlRequests.includes(`POST /api/v1/runtimes/${restartId}/start`),
+    "Run again must run the finished runtime rather than create another",
   );
-  // Seeding the host starts discovery immediately, and this host wants
-  // interactive authentication first, so the console opens here rather than on
-  // a later selection.
+  assert.equal(
+    await page.locator(".csRuntimeCard").count(),
+    cardsBeforeRunAgain,
+    "Run again must not add a card",
+  );
+  await runtimeDialog.getByRole("button", { name: "Close" }).click();
+
+  await page.getByRole("button", { name: "Add Runtime" }).click();
+  // The host is a labelled select now, not a button.
+  await page.getByLabel("SSH Host").selectOption("cluster");
+  // Selecting the host starts discovery immediately, and this host wants
+  // interactive authentication first, so the console opens here.
   await page
     .locator(".csSshOperationTerminal .xterm-rows")
     .getByText("Password:", { exact: true })
@@ -578,20 +595,13 @@ try {
   await page.locator(".csSshOperationTerminal .xterm-helper-textarea").focus();
   await page.keyboard.type("password");
   await page.keyboard.press("Control+M");
-  await page.getByLabel("Workspace folder").waitFor({ state: "visible" });
+  const workspace = page.getByLabel("Workspace folder");
+  await workspace.waitFor({ state: "visible" });
   assert.equal(
     discoveryCount,
     2,
     "discovery must resume once after interactive auth",
   );
-  // The create dialog carries JupyterLab's close affordance, not a labelled button.
-  await page.locator(".jp-Dialog-close-button").click();
-
-  await page.getByRole("button", { name: "Add Runtime" }).click();
-  // The host is a labelled select now, not a button.
-  await page.getByLabel("SSH Host").selectOption("cluster");
-  const workspace = page.getByLabel("Workspace folder");
-  await workspace.waitFor({ state: "visible" });
   await workspace.fill("projects/browser-created");
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await page.getByRole("heading", { name: "Review Slurm job" }).waitFor();
@@ -657,6 +667,20 @@ try {
   await page.getByRole("menuitem", { name: "File", exact: true }).click();
   await page.getByText("New Launcher", { exact: true }).click();
   await page.locator(".jp-Launcher").waitFor();
+  // Launching anything disposes the launcher it was launched from.
+  await page
+    .locator(
+      ".jp-MainAreaWidget:has(.jp-Launcher):has(#cybershuttle-runtime-panel)",
+    )
+    .waitFor();
+  assert.deepEqual(
+    [
+      await page.locator("#cybershuttle-runtime-panel").count(),
+      await page.getByRole("button", { name: account, exact: true }).count(),
+    ],
+    [1, 1],
+    "the section and its header must move to the launcher, not multiply or die with the old one",
+  );
   await page
     .locator('.jp-LauncherCard[title="Start a new terminal session"]')
     .click();
@@ -736,14 +760,13 @@ try {
     "connecting must not stop the allocation",
   );
 
-  // Three messages are expected rather than faults, so they are named here and
+  // Two messages are expected rather than faults, so they are named here and
   // everything else still fails the run:
   //   - the 409 is the interactive-auth handshake the flow above drives on purpose;
-  //   - the other two are Lumino/xterm teardown races from reloading the page
-  //     while a terminal is still attached, which is what the reload check does.
+  //   - the other is an xterm teardown race from reloading the page while a
+  //     terminal is still attached, which is what the reload check does.
   const EXPECTED_BROWSER_NOISE = [
     "Failed to load resource: the server responded with a status of 409 (Conflict)",
-    "Widget is not attached.",
     "Cannot read properties of undefined (reading 'dimensions')",
   ];
   assert.deepEqual(
