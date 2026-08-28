@@ -23,15 +23,12 @@ export function isTerminal(state: RuntimeState): boolean {
   return state === "STOPPED" || state === "FAILED";
 }
 
-// A card is starting from the click rather than from the poll that first sees
-// it, and only while that request is in flight: a relaunch that answers without
-// starting must show what the allocation did, not what it was asked to do.
-export function shownState(
+// Starting from the click rather than from the poll that first sees it, and
+// only while the request is in flight.
+export const shownState = (
   runtime: IRuntime,
   starting: ReadonlySet<string>,
-): RuntimeState {
-  return starting.has(runtime.id) ? "SUBMITTING" : runtime.state;
-}
+): RuntimeState => (starting.has(runtime.id) ? "SUBMITTING" : runtime.state);
 
 export interface IResources {
   cores: number;

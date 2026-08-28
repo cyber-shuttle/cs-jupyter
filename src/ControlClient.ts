@@ -76,14 +76,8 @@ export class ControlError extends Error {
   }
 }
 
-// cs-control answers every SSH-backed call this way when a host wants an
-// interactive login, so the one code lives beside the error that carries it.
-export function needsSshLogin(error: unknown): boolean {
-  return (
-    error instanceof ControlError &&
-    error.code === "ssh_authentication_required"
-  );
-}
+export const needsSshLogin = (error: unknown): boolean =>
+  error instanceof ControlError && error.code === "ssh_authentication_required";
 
 export { validControlApiUrl } from "./AuthClient";
 

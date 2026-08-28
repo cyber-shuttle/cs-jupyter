@@ -7,21 +7,13 @@ import {
   SshOperationConsoleFactory,
 } from "./SshOperationConsole";
 
-interface IPendingLogin {
-  resolve: () => void;
-  reject: (reason: Error) => void;
-}
-
-// The console has to outlive the view it is answering for: RuntimeDetail
-// rebuilds its whole subtree several times a second on the poll, which would
-// take the terminal's focus away from whoever is typing a password. The dock is
-// its sibling in the dialog body instead, so nothing rebuilds it.
+// The console outlives the view it answers for: RuntimeDetail rebuilds its
+// subtree several times a second on the poll, which would take the terminal out
+// of the document and the caret with it. The dock is its sibling instead.
 export class SshLoginDock extends Widget {
   private _console: ISshOperationConsole | undefined;
-  private _pending: IPendingLogin | undefined;
+  private _pending: ((reason: Error) => void) | undefined;
   private _status = element("div", "", "csSshAuthStatus");
-  private _title = element("strong", "Interactive SSH login");
-  private _host = element("div", "", "csSshAuthHost");
 
   constructor(
     private _consoleFactory: SshOperationConsoleFactory = createSshOperationConsole,
@@ -30,59 +22,41 @@ export class SshLoginDock extends Widget {
     this.addClass("csSshAuth");
     this.addClass("csLoginDock");
     this._status.setAttribute("role", "status");
-    const header = element("div", "", "csSshAuthHeader");
-    const cancel = element("button", "Cancel", "csTextButton");
-    (cancel as HTMLButtonElement).type = "button";
-    cancel.onclick = () => this.cancel();
-    header.append(this._title, cancel);
-    this.node.append(header, this._status, this._host);
+    this.node.appendChild(this._status);
     this.hide();
   }
 
-  // Resolves once the host has authenticated, so the caller can run the action
-  // the host refused. Rejects on a failed, cancelled or dismissed login: the
-  // console reports nothing after cancel(), so an unsettled caller would leave
-  // its card spinning for good.
+  // Resolves once the host has authenticated. It must reject on every other
+  // ending: the console reports nothing once its generation moves on, so an
+  // unsettled caller would leave its card spinning for good.
   login(alias: string, connect: OAuthWebSocketConnector): Promise<void> {
     this._settle(new Error("Superseded by another SSH login."));
-    this._title.textContent = `Interactive SSH login — ${alias}`;
     this._status.textContent = `${alias} is asking for credentials.`;
     this.show();
-    const console = this._ensureConsole();
+    const session = this._console ?? this._openConsole();
     return new Promise<void>((resolve, reject) => {
-      const pending: IPendingLogin = { resolve, reject };
-      this._pending = pending;
-      console.start(connect, {
-        ready: () => {
-          if (this._pending !== pending) return;
-          this._pending = undefined;
-          this._status.textContent = `Signed in to ${alias}.`;
-          console.complete(`Signed in to ${alias}.`);
-          resolve();
-        },
-        failed: (message) => {
-          if (this._pending !== pending) return;
-          this._pending = undefined;
-          this._status.textContent = message;
-          console.complete(message, false);
-          reject(new Error(message));
-        },
+      this._pending = reject;
+      const current = (): boolean => this._pending === reject;
+      const done = (message: string, collapse: boolean): boolean => {
+        if (!current()) return false;
+        this._pending = undefined;
+        this._status.textContent = message;
+        session.complete(message, collapse);
+        return true;
+      };
+      session.start(connect, {
+        ready: () => done(`Signed in to ${alias}.`, true) && resolve(),
+        failed: (message) => done(message, false) && reject(new Error(message)),
         status: (message) => {
-          if (this._pending === pending) this._status.textContent = message;
+          if (current()) this._status.textContent = message;
         },
       });
       requestAnimationFrame(() => {
-        if (this._pending !== pending) return;
+        if (!current()) return;
         this.node.scrollIntoView?.({ block: "nearest" });
-        console.focus();
+        session.focus();
       });
     });
-  }
-
-  cancel(): void {
-    this._console?.cancel();
-    this._settle(new Error("SSH login cancelled."));
-    this.hide();
   }
 
   dispose(): void {
@@ -94,17 +68,16 @@ export class SshLoginDock extends Widget {
     super.dispose();
   }
 
-  private _ensureConsole(): ISshOperationConsole {
-    if (!this._console) {
-      this._console = this._consoleFactory();
-      this._host.appendChild(this._console.node);
-    }
+  // Built on first use: most modals never need one, and it owns a terminal.
+  private _openConsole(): ISshOperationConsole {
+    this._console = this._consoleFactory();
+    this.node.appendChild(this._console.node);
     return this._console;
   }
 
   private _settle(reason: Error): void {
-    const pending = this._pending;
+    const reject = this._pending;
     this._pending = undefined;
-    pending?.reject(reason);
+    reject?.(reason);
   }
 }

@@ -3,7 +3,6 @@ import type { IRuntime } from "../src/Common";
 import { ControlError } from "../src/ControlClient";
 import { CyberShuttlePanel } from "../src/CyberShuttlePanel";
 import { SshLoginDock } from "../src/SshLoginDock";
-import { withSshLogin } from "../src/ssh-login";
 import {
   FakeOperation,
   pollPanel,
@@ -58,38 +57,6 @@ async function openModal(
   };
 }
 
-describe("withSshLogin", () => {
-  it("logs in once and carries the refused action forward", async () => {
-    const action = vi
-      .fn()
-      .mockRejectedValueOnce(refused())
-      .mockResolvedValueOnce("done");
-    const login = vi.fn(async () => undefined);
-    await expect(withSshLogin(action, login)).resolves.toBe("done");
-    expect(login).toHaveBeenCalledTimes(1);
-    expect(action).toHaveBeenCalledTimes(2);
-  });
-
-  // The retry sits outside the try, so a host that refuses again reports that
-  // refusal instead of opening a second login.
-  it("does not loop when the host refuses again", async () => {
-    const action = vi.fn().mockRejectedValue(refused());
-    const login = vi.fn(async () => undefined);
-    await expect(withSshLogin(action, login)).rejects.toThrow(
-      "SSH authentication is required",
-    );
-    expect(login).toHaveBeenCalledTimes(1);
-    expect(action).toHaveBeenCalledTimes(2);
-  });
-
-  it("leaves every other failure alone", async () => {
-    const action = vi.fn().mockRejectedValue(new Error("Slurm said no."));
-    const login = vi.fn(async () => undefined);
-    await expect(withSshLogin(action, login)).rejects.toThrow("Slurm said no.");
-    expect(login).not.toHaveBeenCalled();
-  });
-});
-
 describe("a runtime action a host refuses for a login", () => {
   it("offers the login and runs the action again once it is done", async () => {
     const operation = new FakeOperation();
@@ -120,6 +87,47 @@ describe("a runtime action a host refuses for a login", () => {
     expect(api.startRuntime).toHaveBeenCalledTimes(2);
     expect(panel.state.runtimes[0].state).toBe("QUEUED");
     expect(panel.state.error).toBe("");
+    await close();
+  });
+
+  // The retry sits outside the try, so a host that refuses again reports that
+  // refusal rather than starting a second login.
+  it("does not offer a second login when the host refuses again", async () => {
+    const operation = new FakeOperation();
+    const api = {
+      signIn: vi.fn(async () => undefined),
+      listRuntimes: vi.fn(async () => runtimeListFixture([base])),
+      listSshHosts: vi.fn(async () => []),
+      sshAuthWebSocket: vi.fn(() => vi.fn()),
+      startRuntime: vi.fn().mockRejectedValue(refused()),
+    };
+    const panel = panelWith(api, operation);
+    const close = await openModal(panel);
+
+    const running = panel.runAgain(base.id);
+    await vi.waitFor(() => expect(operation.starts.length).toBe(1));
+    operation.starts[0].callbacks.ready();
+    await running;
+    expect(api.startRuntime).toHaveBeenCalledTimes(2);
+    expect(operation.starts.length).toBe(1);
+    expect(panel.state.error).toContain("SSH authentication is required");
+    await close();
+  });
+
+  it("leaves a failure that is not a login refusal alone", async () => {
+    const operation = new FakeOperation();
+    const api = {
+      signIn: vi.fn(async () => undefined),
+      listRuntimes: vi.fn(async () => runtimeListFixture([base])),
+      listSshHosts: vi.fn(async () => []),
+      sshAuthWebSocket: vi.fn(() => vi.fn()),
+      startRuntime: vi.fn().mockRejectedValue(new Error("Slurm said no.")),
+    };
+    const panel = panelWith(api, operation);
+    const close = await openModal(panel);
+    await panel.runAgain(base.id);
+    expect(operation.starts).toHaveLength(0);
+    expect(panel.state.error).toBe("Slurm said no.");
     await close();
   });
 

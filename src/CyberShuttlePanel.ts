@@ -9,13 +9,17 @@ import {
   ISshHost,
   isTerminal,
 } from "./Common";
-import { ControlClient, errorMessage, IRuntimeLogTail } from "./ControlClient";
+import {
+  ControlClient,
+  errorMessage,
+  IRuntimeLogTail,
+  needsSshLogin,
+} from "./ControlClient";
 import { SshLoginDock } from "./SshLoginDock";
 import {
   createSshOperationConsole,
   SshOperationConsoleFactory,
 } from "./SshOperationConsole";
-import { withSshLogin } from "./ssh-login";
 import { RuntimeController } from "./RuntimeController";
 import { RuntimeDetail } from "./RuntimeDetail";
 import {
@@ -265,9 +269,8 @@ export class CyberShuttlePanel extends StackedPanel {
     }
   }
 
-  // Only the Jupyter operation's own busy flag is cleared here: releasing a
-  // terminal card's access happens on every poll, and it used to take the
-  // spinner off an action still running against that same card.
+  // Clears only the busy flag this operation set: the poll releases a terminal
+  // card's access, and used to take an unrelated action's spinner with it.
   private _abortJupyter(runtimeId: string): void {
     const operation = this._jupyterOperations.get(runtimeId);
     if (!operation) {
@@ -494,9 +497,8 @@ export class CyberShuttlePanel extends StackedPanel {
     }
   }
 
-  // The dock belongs to whichever modal is open, so an action refused for a
-  // login has somewhere to hold the terminal, and disposing it settles a login
-  // nobody is waiting for any more.
+  // The open modal owns the dock, so a refused action has somewhere to hold the
+  // terminal and dismissing the modal settles a login nobody is waiting for.
   private async _withLoginDock<T>(
     body: Panel,
     run: () => Promise<T>,
@@ -507,21 +509,27 @@ export class CyberShuttlePanel extends StackedPanel {
     try {
       return await run();
     } finally {
-      if (this._loginDock === dock) this._loginDock = undefined;
+      this._loginDock = undefined;
       dock.dispose();
     }
   }
 
-  // Runs an action that talks to a host over SSH, giving the person a login when
-  // the host asks for one rather than reporting the refusal as a failure.
-  private _overSsh<T>(alias: string, action: () => Promise<T>): Promise<T> {
-    const dock = this._loginDock;
-    if (!dock) {
+  // A host asking for an interactive login has refused the action, not failed
+  // it. The retry sits outside the try, so a host that refuses again reports
+  // that refusal rather than starting a second login.
+  private async _overSsh<T>(
+    alias: string,
+    action: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await action();
+    } catch (error) {
+      if (!this._loginDock || !needsSshLogin(error)) {
+        throw error;
+      }
+      await this._loginDock.login(alias, this._api.sshAuthWebSocket(alias));
       return action();
     }
-    return withSshLogin(action, () =>
-      dock.login(alias, this._api.sshAuthWebSocket(alias)),
-    );
   }
 
   // A READY runtime already runs Jupyter, so "refresh" only means fetching the owner-scoped
