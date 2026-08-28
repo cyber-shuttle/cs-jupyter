@@ -916,6 +916,14 @@ where the rest of the form is. */
 .csSshAuthStatus:empty {
   display: none;
 }
+.csLoginDock {
+  margin-top: 12px;
+}
+
+.csLoginDock .csSshOperationTerminal {
+  height: min(30vh, 260px);
+}
+
 .csSshOperationTerminal {
   box-sizing: border-box;
   min-height: 280px;

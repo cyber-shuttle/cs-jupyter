@@ -7,7 +7,7 @@ import {
   ISlurmInfo,
   ISshHost,
 } from "./Common";
-import { ControlClient, ControlError, errorMessage } from "./ControlClient";
+import { ControlClient, errorMessage, needsSshLogin } from "./ControlClient";
 import {
   createSshOperationConsole,
   ISshOperationConsole,
@@ -717,10 +717,7 @@ export class CreateRuntimeForm extends Widget {
           if (!current(generation, alias) || abort.signal.aborted) {
             return;
           }
-          if (
-            !(reason instanceof ControlError) ||
-            reason.code !== "ssh_authentication_required"
-          ) {
+          if (!needsSshLogin(reason)) {
             showFailure(errorMessage(reason));
             return;
           }
