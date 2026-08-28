@@ -1,5 +1,10 @@
 import { Widget } from "@lumino/widgets";
-import { isTerminal, type IRuntime, type RuntimeState } from "./Common";
+import {
+  isTerminal,
+  shownState,
+  type IRuntime,
+  type RuntimeState,
+} from "./Common";
 import type { CyberShuttlePanel, IRuntimeUiState } from "./CyberShuttlePanel";
 import type { IRuntimeLogTail } from "./ControlClient";
 import { button, element, keepingFocus, statePill } from "./dom";
@@ -83,6 +88,7 @@ export class RuntimeDetail extends Widget {
   }
 
   private _buildRuntime(runtime: IRuntime): HTMLElement {
+    const state = shownState(runtime, this._state.startingRuntimeIds);
     const root = element("div", "", "csRoot");
 
     const header = element("div", "", "csRuntimeDetailHeader");
@@ -94,11 +100,11 @@ export class RuntimeDetail extends Widget {
         runtime.account || "(no project)",
         "csRuntimeDetailAccount",
       ),
-      statePill(runtime.state),
+      statePill(state),
     );
     const actions = element("div", "", "csRuntimeDetailActions");
     const busy = this._state.busyRuntimeIds.has(runtime.id);
-    if (isTerminal(runtime.state)) {
+    if (isTerminal(state)) {
       // A terminal allocation cannot resume: cs-control submits a new one onto
       // this same card.
       actions.appendChild(
@@ -110,7 +116,7 @@ export class RuntimeDetail extends Widget {
         ),
       );
     }
-    if (STOPPABLE_STATES.has(runtime.state)) {
+    if (STOPPABLE_STATES.has(state)) {
       actions.appendChild(
         this._button(
           "Stop",
@@ -120,10 +126,7 @@ export class RuntimeDetail extends Widget {
         ),
       );
     }
-    if (
-      runtime.state === "READY" &&
-      this._state.jupyterReady?.has(runtime.id)
-    ) {
+    if (state === "READY" && this._state.jupyterReady?.has(runtime.id)) {
       if (runtime.id === this._controller.currentRuntimeId) {
         actions.appendChild(element("span", "Connected", "csPill"));
       } else {

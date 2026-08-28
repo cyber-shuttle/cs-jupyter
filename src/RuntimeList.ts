@@ -1,6 +1,6 @@
 import { Signal } from "@lumino/signaling";
 import { Widget } from "@lumino/widgets";
-import type { IRuntime } from "./Common";
+import { shownState, type IRuntime } from "./Common";
 import type { IRuntimeUiState } from "./CyberShuttlePanel";
 import { button, element, keepingFocus, statePill } from "./dom";
 
@@ -11,6 +11,7 @@ export const emptyState = (): IRuntimeUiState => ({
   updatesStatus: "",
   error: "",
   busyRuntimeIds: new Set(),
+  startingRuntimeIds: new Set(),
   connectingRuntimeId: undefined,
   jupyterReady: new Set(),
   signedIn: false,
@@ -222,12 +223,13 @@ export class RuntimeList extends Widget {
   }
 
   private _runtimeCard(runtime: IRuntime): HTMLButtonElement {
+    const state = shownState(runtime, this._state.startingRuntimeIds);
     const current = runtime.id === this._currentRuntimeId;
     const card = button(
       "",
       `jp-LauncherCard csRuntimeCard${current ? " csRuntimeCardCurrent" : ""}`,
     );
-    card.ariaLabel = `${runtime.sshHost}, ${runtime.state}${current ? ", current session" : ""}`;
+    card.ariaLabel = `${runtime.sshHost}, ${state}${current ? ", current session" : ""}`;
     card.title = card.ariaLabel;
     card.dataset.category = "Cybershuttle Runtimes";
     card.dataset.runtimeAction = runtime.id;
@@ -249,7 +251,7 @@ export class RuntimeList extends Widget {
     }
     label.append(
       identity,
-      statePill(runtime.state),
+      statePill(state),
       ...(current ? [element("span", "Current", "csCurrentPill")] : []),
       runtimeResourceRow(runtime),
     );

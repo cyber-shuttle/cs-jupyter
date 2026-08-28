@@ -267,6 +267,22 @@ describe("runtime detail modal body", () => {
     detail.dispose();
   });
 
+  // The card is starting from the click, so the modal offers no second Run
+  // again over a request already in flight.
+  it("shows a card being run again as starting, with no Run again", () => {
+    const stopped = runtimeInState("STOPPED");
+    const controller = new DetailController(
+      uiState({
+        runtimes: [stopped],
+        startingRuntimeIds: new Set([stopped.id]),
+      }),
+    );
+    const detail = new RuntimeDetail(controller as any, stopped.id);
+    expect(detail.node.textContent).toContain("SUBMITTING");
+    expect(detail.node.textContent).not.toContain("Run again");
+    detail.dispose();
+  });
+
   it("hides Connect until Linkspan Jupyter state is ready", () => {
     const ready = runtimeInState("READY");
     const controller = new DetailController(

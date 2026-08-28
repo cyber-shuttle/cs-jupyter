@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { IRuntime } from "../src/Common";
 import { CyberShuttlePanel } from "../src/CyberShuttlePanel";
-import { runtimeFixture, runtimeListFixture } from "./fakes";
+import { pollPanel, runtimeFixture, runtimeListFixture } from "./fakes";
 
 const base = runtimeFixture({
   id: "rt-111111111111",
@@ -78,6 +78,97 @@ describe("runtime stop action", () => {
     expect(api.startRuntime).toHaveBeenCalledWith(base.id);
     expect(document.querySelector(".jp-Dialog")).toBeNull();
     expect(panel.state.runtimes.map((each) => each.id)).toEqual([base.id]);
+    panel.dispose();
+  });
+
+  // The card is starting from the click, not from the poll that first sees it,
+  // so it never offers a second Run again over a request already in flight.
+  it("shows a card being run again as starting for the whole request", async () => {
+    const pending = Promise.withResolvers<IRuntime>();
+    const api = {
+      signIn: vi.fn(async () => undefined),
+      listRuntimes: vi.fn(async () => runtimeListFixture([base])),
+      listSshHosts: vi.fn(async () => []),
+      startRuntime: vi.fn(() => pending.promise),
+    };
+    const panel = new CyberShuttlePanel(
+      api as any,
+      { currentRuntimeId: undefined, select: vi.fn() } as any,
+    );
+    await loaded(panel);
+    expect(card(panel).textContent).toContain("STOPPED");
+
+    const running = panel.runAgain(base.id);
+    await vi.waitFor(() =>
+      expect(api.startRuntime).toHaveBeenCalledWith(base.id),
+    );
+    expect(panel.state.startingRuntimeIds.has(base.id)).toBe(true);
+    expect(card(panel).textContent).toContain("SUBMITTING");
+    expect(card(panel).textContent).not.toContain("STOPPED");
+
+    pending.resolve({ ...base, state: "QUEUED" });
+    await running;
+    expect(panel.state.startingRuntimeIds.has(base.id)).toBe(false);
+    // The action answered later than the last read, so the card follows the
+    // answer rather than offering Run again again until the next poll.
+    expect(card(panel).textContent).toContain("QUEUED");
+    panel.dispose();
+  });
+
+  // Releasing a terminal card's Jupyter access happens on every poll, and used
+  // to take the spinner off an action still running against that same card.
+  it("keeps a relaunch busy across the polls that run during it", async () => {
+    const pending = Promise.withResolvers<IRuntime>();
+    const api = {
+      signIn: vi.fn(async () => undefined),
+      listRuntimes: vi.fn(async () => runtimeListFixture([base])),
+      listSshHosts: vi.fn(async () => []),
+      startRuntime: vi.fn(() => pending.promise),
+    };
+    const panel = new CyberShuttlePanel(
+      api as any,
+      { currentRuntimeId: undefined, select: vi.fn() } as any,
+    );
+    await loaded(panel);
+
+    const running = panel.runAgain(base.id);
+    await vi.waitFor(() => expect(api.startRuntime).toHaveBeenCalled());
+    await pollPanel(panel);
+    await pollPanel(panel);
+    expect(panel.state.busyRuntimeIds.has(base.id)).toBe(true);
+    expect(card(panel).textContent).toContain("SUBMITTING");
+
+    // A button the poll re-armed is a second allocation, so the guard is on the
+    // action rather than on whatever a view happens to render.
+    await panel.runAgain(base.id);
+    expect(api.startRuntime).toHaveBeenCalledTimes(1);
+
+    pending.resolve({ ...base, state: "QUEUED" });
+    await running;
+    panel.dispose();
+  });
+
+  // A read that succeeded says nothing about an action that failed, and the
+  // poll used to erase the reason within a second of it appearing.
+  it("keeps a failed relaunch's reason on screen across a poll", async () => {
+    const api = {
+      signIn: vi.fn(async () => undefined),
+      listRuntimes: vi.fn(async () => runtimeListFixture([base])),
+      listSshHosts: vi.fn(async () => []),
+      startRuntime: vi.fn(async () => {
+        throw new Error("Slurm validation failed.");
+      }),
+    };
+    const panel = new CyberShuttlePanel(
+      api as any,
+      { currentRuntimeId: undefined, select: vi.fn() } as any,
+    );
+    await loaded(panel);
+
+    await panel.runAgain(base.id);
+    expect(panel.state.error).toBe("Slurm validation failed.");
+    await pollPanel(panel);
+    expect(panel.state.error).toBe("Slurm validation failed.");
     panel.dispose();
   });
 });
