@@ -76,6 +76,9 @@ export class ControlError extends Error {
   }
 }
 
+export const needsSshLogin = (error: unknown): boolean =>
+  error instanceof ControlError && error.code === "ssh_authentication_required";
+
 export { validControlApiUrl } from "./AuthClient";
 
 export function safeControlFetch(

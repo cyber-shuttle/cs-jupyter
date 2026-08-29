@@ -51,8 +51,10 @@ traffic.
 2. One authenticated read of `GET /api/v1/runtimes`, polled once a second,
    supplies the runtime state (`SUBMITTING`, `QUEUED`, `STARTING`, `READY`,
    `STOPPING`, `STOPPED`, `FAILED`) and the startup tails.
-3. A `STOPPED` or `FAILED` allocation is gone. "Run again" opens the create
-   form seeded from it rather than resuming a dead job.
+3. A `STOPPED` or `FAILED` allocation is gone. "Run again" submits a new one
+   under the same card and settings rather than resuming a dead job, and the
+   card reads `SUBMITTING` from the click until that request answers, so it
+   never offers a second run over one already in flight.
 4. Connect is available once the runtime state is `READY` and an access
    response has been fetched for it. Lite directly
    requests the separate owner-authenticated runtime-access response; no Dev

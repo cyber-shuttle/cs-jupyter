@@ -9,7 +9,13 @@ import {
   ISshHost,
   isTerminal,
 } from "./Common";
-import { ControlClient, errorMessage, IRuntimeLogTail } from "./ControlClient";
+import {
+  ControlClient,
+  errorMessage,
+  IRuntimeLogTail,
+  needsSshLogin,
+} from "./ControlClient";
+import { SshLoginDock } from "./SshLoginDock";
 import { RuntimeController } from "./RuntimeController";
 import { RuntimeDetail } from "./RuntimeDetail";
 import {
@@ -31,6 +37,7 @@ export interface IRuntimeUiState {
   readonly updatesStatus: string;
   readonly error: string;
   readonly busyRuntimeIds: ReadonlySet<string>;
+  readonly startingRuntimeIds: ReadonlySet<string>;
   readonly connectingRuntimeId: string | undefined;
   readonly jupyterReady: ReadonlySet<string>;
   readonly signedIn: boolean;
@@ -59,6 +66,7 @@ export class CyberShuttlePanel extends StackedPanel {
   private _runtimes: IRuntime[] = [];
   private _logs = new Map<string, IRuntimeLogTail>();
   private _busyRuntimeIds = new Set<string>();
+  private _startingRuntimeIds = new Set<string>();
   private _connectingRuntimeId: string | undefined;
   private _jupyterReady = new Set<string>();
   private _jupyterOperations = new Map<string, IJupyterOperation>();
@@ -75,7 +83,9 @@ export class CyberShuttlePanel extends StackedPanel {
   private _createForm = (): CreateRuntimeForm =>
     new CreateRuntimeForm(this._api);
   private _detailDialog: Dialog<unknown> | undefined;
+  private _loginDock: SshLoginDock | undefined;
   private _sshHostsWidget = (): SshHosts => new SshHosts(this._api);
+  private _loginDockWidget = (): SshLoginDock => new SshLoginDock();
 
   constructor(
     private _api: ControlClient,
@@ -119,6 +129,7 @@ export class CyberShuttlePanel extends StackedPanel {
       updatesStatus: this._updatesStatus,
       error: this._error,
       busyRuntimeIds: new Set(this._busyRuntimeIds),
+      startingRuntimeIds: new Set(this._startingRuntimeIds),
       connectingRuntimeId: this._connectingRuntimeId,
       jupyterReady: new Set(this._jupyterReady),
       signedIn: this._signedIn,
@@ -155,7 +166,6 @@ export class CyberShuttlePanel extends StackedPanel {
       }
     }
     this._runtimes = runtimes;
-    this._error = "";
     this._emitState();
   }
 
@@ -254,10 +264,15 @@ export class CyberShuttlePanel extends StackedPanel {
     }
   }
 
+  // Only this operation's busy flag: the poll releases a terminal card's access
+  // and used to take an unrelated action's spinner with it.
   private _abortJupyter(runtimeId: string): void {
     const operation = this._jupyterOperations.get(runtimeId);
-    operation?.controller.abort();
-    if (operation) this._jupyterOperations.delete(runtimeId);
+    if (!operation) {
+      return;
+    }
+    operation.controller.abort();
+    this._jupyterOperations.delete(runtimeId);
     this._busyRuntimeIds.delete(runtimeId);
   }
 
@@ -441,6 +456,7 @@ export class CyberShuttlePanel extends StackedPanel {
     try {
       const hosts = await this._api.listSshHosts();
       this._hosts = hosts;
+      this._error = "";
       this._emitState();
       this._list.setCanCreate(
         hosts.length > 0,
@@ -458,18 +474,41 @@ export class CyberShuttlePanel extends StackedPanel {
   }
 
   async openRuntime(runtimeId: string): Promise<void> {
-    const body = new RuntimeDetail(this, runtimeId);
+    const body = new Panel();
     body.addClass("csWorkspaceModal");
+    body.addWidget(new RuntimeDetail(this, runtimeId));
     const dialog = new Dialog({
       title: "CyberShuttle Runtime",
       body,
       buttons: [Dialog.cancelButton({ label: "Close" })],
     });
     this._detailDialog = dialog;
+    const dock = this._loginDockWidget();
+    body.addWidget(dock);
+    this._loginDock = dock;
     try {
       await dialog.launch().catch(() => undefined);
     } finally {
       this._detailDialog = undefined;
+      this._loginDock = undefined;
+      dock.dispose();
+    }
+  }
+
+  // The retry is outside the try, so a host that refuses again reports that
+  // refusal rather than starting a second login.
+  private async _overSsh<T>(
+    alias: string,
+    action: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await action();
+    } catch (error) {
+      if (!this._loginDock || !needsSshLogin(error)) {
+        throw error;
+      }
+      await this._loginDock.login(alias, this._api.sshAuthWebSocket(alias));
+      return action();
     }
   }
 
@@ -553,7 +592,16 @@ export class CyberShuttlePanel extends StackedPanel {
   }
 
   async runAgain(runtimeId: string): Promise<void> {
-    await this._act(runtimeId, (id) => this._api.startRuntime(id));
+    if (this._startingRuntimeIds.has(runtimeId)) {
+      return;
+    }
+    this._startingRuntimeIds.add(runtimeId);
+    try {
+      await this._act(runtimeId, (id) => this._api.startRuntime(id));
+    } finally {
+      this._startingRuntimeIds.delete(runtimeId);
+      this._emitState();
+    }
   }
 
   async stop(runtimeId: string): Promise<void> {
@@ -572,7 +620,11 @@ export class CyberShuttlePanel extends StackedPanel {
     this._releaseRuntime(runtime.id);
     this._setBusy(runtime.id, true);
     try {
-      await act(runtime.id);
+      // Newer than the last poll, so the card follows it rather than the read.
+      const acted = await this._overSsh(runtime.sshHost, () => act(runtime.id));
+      this._runtimes = this._runtimes.map((each) =>
+        each.id === acted.id ? acted : each,
+      );
     } catch (error) {
       this._setError(errorMessage(error));
     } finally {
