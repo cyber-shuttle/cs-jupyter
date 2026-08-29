@@ -44,7 +44,7 @@ async function opened(startRuntime: unknown, operation: FakeOperation) {
   await vi.waitFor(() => expect(panel.state.runtimes.length).toBe(1));
   const open = panel.openRuntime(base.id);
   await vi.waitFor(() =>
-    expect(document.querySelector(".csLoginDock")).not.toBeNull(),
+    expect(document.querySelector(".csSshAuth")).not.toBeNull(),
   );
   return {
     panel,

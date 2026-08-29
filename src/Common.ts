@@ -23,11 +23,6 @@ export function isTerminal(state: RuntimeState): boolean {
   return state === "STOPPED" || state === "FAILED";
 }
 
-export const shownState = (
-  runtime: IRuntime,
-  starting: ReadonlySet<string>,
-): RuntimeState => (starting.has(runtime.id) ? "SUBMITTING" : runtime.state);
-
 export interface IResources {
   cores: number;
   memoryMb: number;
