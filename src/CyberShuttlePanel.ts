@@ -37,7 +37,6 @@ export interface IRuntimeUiState {
   readonly updatesStatus: string;
   readonly error: string;
   readonly busyRuntimeIds: ReadonlySet<string>;
-  readonly startingRuntimeIds: ReadonlySet<string>;
   readonly connectingRuntimeId: string | undefined;
   readonly jupyterReady: ReadonlySet<string>;
   readonly signedIn: boolean;
@@ -115,8 +114,13 @@ export class CyberShuttlePanel extends StackedPanel {
 
   get state(): IRuntimeUiState {
     return {
+      // A card being run again is starting from the click, not from the poll
+      // that first sees it, and only while that request is in flight.
       runtimes: this._runtimes.map((runtime) => ({
         ...runtime,
+        state: this._startingRuntimeIds.has(runtime.id)
+          ? "SUBMITTING"
+          : runtime.state,
         resources: { ...runtime.resources },
       })),
       logs: new Map(
@@ -129,7 +133,6 @@ export class CyberShuttlePanel extends StackedPanel {
       updatesStatus: this._updatesStatus,
       error: this._error,
       busyRuntimeIds: new Set(this._busyRuntimeIds),
-      startingRuntimeIds: new Set(this._startingRuntimeIds),
       connectingRuntimeId: this._connectingRuntimeId,
       jupyterReady: new Set(this._jupyterReady),
       signedIn: this._signedIn,

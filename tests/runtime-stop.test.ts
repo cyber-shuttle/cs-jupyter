@@ -78,28 +78,6 @@ describe("runtime stop action", () => {
     panel.dispose();
   });
 
-  it("runs a terminal runtime again in place", async () => {
-    const api = {
-      signIn: vi.fn(async () => undefined),
-      listRuntimes: vi.fn(async () => runtimeListFixture([base])),
-      listSshHosts: vi.fn(async () => []),
-      startRuntime: vi.fn(async () => ({ ...base, state: "QUEUED" as const })),
-    };
-    const panel = new CyberShuttlePanel(
-      api as any,
-      { currentRuntimeId: undefined, select: vi.fn() } as any,
-    );
-    await loaded(panel);
-    expect(card(panel).textContent).toContain("delta");
-    expect(card(panel).textContent).not.toContain("Start");
-
-    await panel.runAgain(base.id);
-    expect(api.startRuntime).toHaveBeenCalledWith(base.id);
-    expect(document.querySelector(".jp-Dialog")).toBeNull();
-    expect(panel.state.runtimes.map((each) => each.id)).toEqual([base.id]);
-    panel.dispose();
-  });
-
   // A relaunch is starting from the click rather than from the poll that first
   // sees it: the poll releases a terminal card's Jupyter access and used to take
   // the spinner and the armed button with it, which is a second allocation.
@@ -108,8 +86,13 @@ describe("runtime stop action", () => {
     const { panel, api } = await started(vi.fn(() => pending.promise));
     expect(card(panel).textContent).toContain("STOPPED");
 
+    expect(card(panel).textContent).not.toContain("Start");
+
     const running = panel.runAgain(base.id);
-    await vi.waitFor(() => expect(api.startRuntime).toHaveBeenCalled());
+    await vi.waitFor(() =>
+      expect(api.startRuntime).toHaveBeenCalledWith(base.id),
+    );
+    expect(document.querySelector(".jp-Dialog")).toBeNull();
     await pollPanel(panel);
     await pollPanel(panel);
     expect(panel.state.busyRuntimeIds.has(base.id)).toBe(true);
@@ -123,6 +106,7 @@ describe("runtime stop action", () => {
     await running;
     // The answer arrived later than the last read, so the card follows it.
     expect(card(panel).textContent).toContain("QUEUED");
+    expect(panel.state.runtimes.map((each) => each.id)).toEqual([base.id]);
     panel.dispose();
   });
 
