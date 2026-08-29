@@ -16,10 +16,6 @@ import {
   needsSshLogin,
 } from "./ControlClient";
 import { SshLoginDock } from "./SshLoginDock";
-import {
-  createSshOperationConsole,
-  SshOperationConsoleFactory,
-} from "./SshOperationConsole";
 import { RuntimeController } from "./RuntimeController";
 import { RuntimeDetail } from "./RuntimeDetail";
 import {
@@ -89,8 +85,7 @@ export class CyberShuttlePanel extends StackedPanel {
   private _detailDialog: Dialog<unknown> | undefined;
   private _loginDock: SshLoginDock | undefined;
   private _sshHostsWidget = (): SshHosts => new SshHosts(this._api);
-  private _consoleFactory: SshOperationConsoleFactory =
-    createSshOperationConsole;
+  private _loginDockWidget = (): SshLoginDock => new SshLoginDock();
 
   constructor(
     private _api: ControlClient,
@@ -269,8 +264,8 @@ export class CyberShuttlePanel extends StackedPanel {
     }
   }
 
-  // Clears only the busy flag this operation set: the poll releases a terminal
-  // card's access, and used to take an unrelated action's spinner with it.
+  // Only this operation's busy flag: the poll releases a terminal card's access
+  // and used to take an unrelated action's spinner with it.
   private _abortJupyter(runtimeId: string): void {
     const operation = this._jupyterOperations.get(runtimeId);
     if (!operation) {
@@ -488,35 +483,20 @@ export class CyberShuttlePanel extends StackedPanel {
       buttons: [Dialog.cancelButton({ label: "Close" })],
     });
     this._detailDialog = dialog;
-    try {
-      await this._withLoginDock(body, () =>
-        dialog.launch().catch(() => undefined),
-      );
-    } finally {
-      this._detailDialog = undefined;
-    }
-  }
-
-  // The open modal owns the dock, so a refused action has somewhere to hold the
-  // terminal and dismissing the modal settles a login nobody is waiting for.
-  private async _withLoginDock<T>(
-    body: Panel,
-    run: () => Promise<T>,
-  ): Promise<T> {
-    const dock = new SshLoginDock(this._consoleFactory);
+    const dock = this._loginDockWidget();
     body.addWidget(dock);
     this._loginDock = dock;
     try {
-      return await run();
+      await dialog.launch().catch(() => undefined);
     } finally {
+      this._detailDialog = undefined;
       this._loginDock = undefined;
       dock.dispose();
     }
   }
 
-  // A host asking for an interactive login has refused the action, not failed
-  // it. The retry sits outside the try, so a host that refuses again reports
-  // that refusal rather than starting a second login.
+  // The retry is outside the try, so a host that refuses again reports that
+  // refusal rather than starting a second login.
   private async _overSsh<T>(
     alias: string,
     action: () => Promise<T>,
@@ -640,8 +620,7 @@ export class CyberShuttlePanel extends StackedPanel {
     this._releaseRuntime(runtime.id);
     this._setBusy(runtime.id, true);
     try {
-      // The answer is newer than the last poll, so the card follows it rather
-      // than showing the state it was in until the next read a second later.
+      // Newer than the last poll, so the card follows it rather than the read.
       const acted = await this._overSsh(runtime.sshHost, () => act(runtime.id));
       this._runtimes = this._runtimes.map((each) =>
         each.id === acted.id ? acted : each,
@@ -705,11 +684,8 @@ export class CyberShuttlePanel extends StackedPanel {
       buttons: [],
       hasClose: true,
     });
-    // The dock is not one of the swappable views: it sits under whichever one
-    // is showing, so it must survive a switch rather than be hidden by it.
     const show = (widget: Widget): void => {
       for (const child of body.widgets) {
-        if (child === this._loginDock) continue;
         child === widget ? child.show() : child.hide();
       }
       widget.activate();
@@ -722,9 +698,7 @@ export class CyberShuttlePanel extends StackedPanel {
       void this._createInModal(intent, form, body, show);
     });
     show(form);
-    await this._withLoginDock(body, () =>
-      dialog.launch().catch(() => undefined),
-    );
+    await dialog.launch().catch(() => undefined);
   }
 
   async openSshHosts(): Promise<void> {
@@ -750,9 +724,7 @@ export class CyberShuttlePanel extends StackedPanel {
     form.setError("");
     form.setBusy(true);
     try {
-      const runtime = await this._overSsh(allocation.sshHost, () =>
-        this._api.createRuntime(allocation),
-      );
+      const runtime = await this._api.createRuntime(allocation);
       if (body.isDisposed || form.isDisposed) {
         return;
       }

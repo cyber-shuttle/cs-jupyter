@@ -7,9 +7,8 @@ import {
   SshOperationConsoleFactory,
 } from "./SshOperationConsole";
 
-// The console outlives the view it answers for: RuntimeDetail rebuilds its
-// subtree several times a second on the poll, which would take the terminal out
-// of the document and the caret with it. The dock is its sibling instead.
+// Sibling of the view, never a child: RuntimeDetail rebuilds its subtree several
+// times a second on the poll, which would take the terminal and the caret with it.
 export class SshLoginDock extends Widget {
   private _console: ISshOperationConsole | undefined;
   private _pending: ((reason: Error) => void) | undefined;
@@ -26,14 +25,17 @@ export class SshLoginDock extends Widget {
     this.hide();
   }
 
-  // Resolves once the host has authenticated. It must reject on every other
-  // ending: the console reports nothing once its generation moves on, so an
-  // unsettled caller would leave its card spinning for good.
+  // Must reject on every ending but success: the console reports nothing once
+  // its generation moves on, so an unsettled caller spins for good.
   login(alias: string, connect: OAuthWebSocketConnector): Promise<void> {
     this._settle(new Error("Superseded by another SSH login."));
     this._status.textContent = `${alias} is asking for credentials.`;
     this.show();
-    const session = this._console ?? this._openConsole();
+    if (!this._console) {
+      this._console = this._consoleFactory();
+      this.node.appendChild(this._console.node);
+    }
+    const session = this._console;
     return new Promise<void>((resolve, reject) => {
       this._pending = reject;
       const current = (): boolean => this._pending === reject;
@@ -66,13 +68,6 @@ export class SshLoginDock extends Widget {
     this._settle(new Error("SSH login dismissed."));
     this._console?.dispose();
     super.dispose();
-  }
-
-  // Built on first use: most modals never need one, and it owns a terminal.
-  private _openConsole(): ISshOperationConsole {
-    this._console = this._consoleFactory();
-    this.node.appendChild(this._console.node);
-    return this._console;
   }
 
   private _settle(reason: Error): void {

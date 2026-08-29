@@ -23,8 +23,6 @@ export function isTerminal(state: RuntimeState): boolean {
   return state === "STOPPED" || state === "FAILED";
 }
 
-// Starting from the click rather than from the poll that first sees it, and
-// only while the request is in flight.
 export const shownState = (
   runtime: IRuntime,
   starting: ReadonlySet<string>,
