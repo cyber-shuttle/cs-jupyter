@@ -1,16 +1,16 @@
 import { PageConfig } from "@jupyterlab/coreutils";
-import { assertSecureOrLoopback, exactKeys, isPlainObject } from "./Common";
+import {
+  assertSecureOrLoopback,
+  exactKeys,
+  isPlainObject,
+  parseUrl,
+} from "./Common";
 import { closeButton, element } from "./dom";
 
 const MAX_BROKER_BODY = 64 * 1024;
 const BROKER_REQUEST_TIMEOUT_MS = 15 * 1000;
 
-const abortError = (): DOMException =>
-  new DOMException("Aborted", "AbortError");
-
 export class AuthInteractionRequiredError extends Error {
-  readonly code = "interaction_required";
-
   constructor(message = "Sign in to CyberShuttle to continue.") {
     super(message);
     this.name = "AuthInteractionRequiredError";
@@ -18,8 +18,6 @@ export class AuthInteractionRequiredError extends Error {
 }
 
 export class AuthInteractionCancelledError extends Error {
-  readonly code = "interaction_cancelled";
-
   constructor(message = "Microsoft sign-in was cancelled.") {
     super(message);
     this.name = "AuthInteractionCancelledError";
@@ -38,7 +36,6 @@ export interface IAuthClientOptions {
 export interface IAuthClientDependencies {
   fetch?: typeof globalThis.fetch;
   now?: () => number;
-  storage?: Storage;
   sleep?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
 }
 
@@ -91,29 +88,20 @@ function accountFromIdToken(idToken: string): string | undefined {
 // log. Opening a runtime navigates the page, so a memory-only credential would
 // force a device-code round trip on every navigation.
 function readStoredCredentials(
-  storage: Storage,
   now: number,
 ): { credentials: OAuthCredentials; expiresAt: number } | undefined {
-  const raw = storage.getItem(SESSION_KEY);
+  const raw = sessionStorage.getItem(SESSION_KEY);
   if (!raw) return undefined;
   try {
-    const value: unknown = JSON.parse(raw);
-    if (
-      !isPlainObject(value) ||
-      !exactKeys(value, ["accessToken", "expiresAt", "idToken"]) ||
-      typeof value.accessToken !== "string" ||
-      typeof value.idToken !== "string" ||
-      typeof value.expiresAt !== "number" ||
-      !(value.expiresAt > now)
-    ) {
-      throw new Error("stored credentials are invalid or expired");
-    }
-    return {
-      credentials: { accessToken: value.accessToken, idToken: value.idToken },
-      expiresAt: value.expiresAt,
+    const { accessToken, idToken, expiresAt } = JSON.parse(raw) as {
+      accessToken: string;
+      idToken: string;
+      expiresAt: number;
     };
+    if (!(expiresAt > now)) throw new Error("stored credentials expired");
+    return { credentials: { accessToken, idToken }, expiresAt };
   } catch {
-    storage.removeItem(SESSION_KEY);
+    sessionStorage.removeItem(SESSION_KEY);
     return undefined;
   }
 }
@@ -123,7 +111,6 @@ export class AuthClient {
   private readonly _pollEndpoint: string;
   private readonly _fetch: typeof globalThis.fetch;
   private readonly _now: () => number;
-  private readonly _storage: Storage;
   private readonly _sleep: (
     milliseconds: number,
     signal: AbortSignal,
@@ -146,9 +133,8 @@ export class AuthClient {
     this._pollEndpoint = `${base}/oauth/device/poll/`;
     this._fetch = dependencies.fetch ?? globalThis.fetch.bind(globalThis);
     this._now = dependencies.now ?? Date.now;
-    this._storage = dependencies.storage ?? window.sessionStorage;
     this._sleep = dependencies.sleep ?? abortableSleep;
-    const stored = readStoredCredentials(this._storage, this._now());
+    const stored = readStoredCredentials(this._now());
     if (stored) {
       this._credentials = stored.credentials;
       this._expiresAt = stored.expiresAt;
@@ -170,7 +156,7 @@ export class AuthClient {
   invalidateToken(): void {
     this._credentials = undefined;
     this._expiresAt = 0;
-    this._storage.removeItem(SESSION_KEY);
+    sessionStorage.removeItem(SESSION_KEY);
   }
 
   interactiveLogin(): Promise<OAuthCredentials> {
@@ -189,24 +175,17 @@ export class AuthClient {
   ): Promise<OAuthCredentials> {
     try {
       const authorization = await this._requestDeviceCode(signal);
-      const expiresAt =
-        this._now() + secondsToMilliseconds(authorization.expiresInSeconds);
       const modal = showDeviceCodeModal(authorization, () =>
         this._interaction?.controller.abort(),
       );
       try {
-        const result = await this._pollForToken(
-          authorization,
-          expiresAt,
-          signal,
-        );
+        const result = await this._pollForToken(authorization, signal);
         this._credentials = {
           accessToken: result.accessToken,
           idToken: result.idToken,
         };
-        this._expiresAt =
-          this._now() + secondsToMilliseconds(result.expiresInSeconds);
-        this._storage.setItem(
+        this._expiresAt = this._now() + result.expiresInSeconds * 1000;
+        sessionStorage.setItem(
           SESSION_KEY,
           JSON.stringify({ ...this._credentials, expiresAt: this._expiresAt }),
         );
@@ -258,24 +237,19 @@ export class AuthClient {
     };
   }
 
+  // ponytail: expiry is the broker's (410 authorization_expired); add a client deadline if cs-control ever keeps answering 202 past expiresInSeconds.
   private async _pollForToken(
     authorization: DeviceAuthorization,
-    expiresAt: number,
     signal: AbortSignal,
   ): Promise<TokenResult> {
-    let interval = secondsToMilliseconds(authorization.intervalSeconds);
-    while (this._now() < expiresAt) {
-      await this._sleep(Math.min(interval, expiresAt - this._now()), signal);
-      if (this._now() >= expiresAt) break;
-      const remaining = expiresAt - this._now();
-      const expiresFirst = remaining <= BROKER_REQUEST_TIMEOUT_MS;
+    let interval = authorization.intervalSeconds * 1000;
+    for (;;) {
+      await this._sleep(interval, signal);
       const { response, value } = await this._post(
         `${this._pollEndpoint}${authorization.handle}`,
         signal,
-        Math.min(BROKER_REQUEST_TIMEOUT_MS, remaining),
-        expiresFirst
-          ? "Microsoft device sign-in expired."
-          : "cs-control device poll request timed out.",
+        BROKER_REQUEST_TIMEOUT_MS,
+        "cs-control device poll request timed out.",
       );
       if (!response.ok) throw brokerFailure(response.status, value);
       if (response.status === 202) {
@@ -286,7 +260,7 @@ export class AuthClient {
         ) {
           throw new Error("cs-control returned an invalid pending response.");
         }
-        interval = secondsToMilliseconds(value.intervalSeconds);
+        interval = value.intervalSeconds * 1000;
         continue;
       }
       if (
@@ -312,7 +286,6 @@ export class AuthClient {
         expiresInSeconds: value.expiresInSeconds,
       };
     }
-    throw new Error("Microsoft device sign-in expired.");
   }
 
   private async _post(
@@ -321,33 +294,23 @@ export class AuthClient {
     timeoutMilliseconds: number,
     timeoutMessage: string,
   ): Promise<{ response: Response; value: unknown }> {
-    const controller = new AbortController();
-    let timedOut = false;
-    const cancel = (): void => controller.abort(signal.reason);
-    if (signal.aborted) cancel();
-    else signal.addEventListener("abort", cancel, { once: true });
-    const timer = window.setTimeout(() => {
-      timedOut = true;
-      controller.abort(new DOMException("Timed out", "TimeoutError"));
-    }, timeoutMilliseconds);
+    const timeout = new AbortController();
+    const timer = window.setTimeout(() => timeout.abort(), timeoutMilliseconds);
     try {
-      const response = await rejectOnAbort(
-        this._fetch(endpoint, {
-          method: "POST",
-          cache: "no-store",
-          credentials: "omit",
-          redirect: "error",
-          referrerPolicy: "no-referrer",
-          signal: controller.signal,
-        }),
-        controller.signal,
-      );
+      const response = await this._fetch(endpoint, {
+        method: "POST",
+        cache: "no-store",
+        credentials: "omit",
+        redirect: "error",
+        referrerPolicy: "no-referrer",
+        signal: AbortSignal.any([signal, timeout.signal]),
+      });
       if (response.redirected || !jsonContentType(response)) {
         void response.body?.cancel();
         throw new Error("cs-control returned an invalid device response.");
       }
-      const body = await readBoundedBody(response, controller.signal);
-      if (body.length === 0) {
+      const body = await response.text();
+      if (!body || body.length > MAX_BROKER_BODY) {
         throw new Error("cs-control returned an invalid device response.");
       }
       try {
@@ -356,44 +319,33 @@ export class AuthClient {
         throw new Error("cs-control returned invalid JSON.");
       }
     } catch (error) {
-      if (timedOut && !signal.aborted) throw new Error(timeoutMessage);
+      if (timeout.signal.aborted && !signal.aborted) {
+        throw new Error(timeoutMessage);
+      }
       throw error;
     } finally {
       window.clearTimeout(timer);
-      signal.removeEventListener("abort", cancel);
     }
   }
 }
 
 export function validControlApiUrl(configured: string): string {
-  let url: URL;
-  try {
-    url = new URL(configured);
-  } catch {
-    throw new Error(
-      "cybershuttleControlApiUrl must be an absolute control API URL.",
-    );
-  }
-  const invalid =
-    "cybershuttleControlApiUrl is invalid; it must use HTTPS or loopback HTTP without credentials, query, or fragment.";
-  if (!configured) {
-    throw new Error(invalid);
-  }
-  assertSecureOrLoopback(url, "https:", "http:", invalid);
+  const url = parseUrl(
+    configured,
+    "cybershuttleControlApiUrl must be an absolute control API URL.",
+  );
+  assertSecureOrLoopback(
+    url,
+    "https:",
+    "http:",
+    "cybershuttleControlApiUrl is invalid; it must use HTTPS or loopback HTTP without credentials, query, or fragment.",
+  );
   url.pathname = url.pathname.replace(/\/+$/, "");
   return url.toString().replace(/\/$/, "");
 }
 
 function brokerFailure(status: number, value: unknown): Error {
-  if (
-    !exactKeys(value, ["error"]) ||
-    !exactKeys(value.error, ["code", "message"]) ||
-    typeof value.error.code !== "string" ||
-    typeof value.error.message !== "string"
-  ) {
-    return new Error(`cs-control device authorization failed (${status}).`);
-  }
-  switch (value.error.code) {
+  switch ((value as any)?.error?.code) {
     case "authorization_denied":
       return new Error("Microsoft sign-in was denied.");
     case "authorization_expired":
@@ -404,14 +356,10 @@ function brokerFailure(status: number, value: unknown): Error {
 }
 
 function safeVerificationUri(value: string): string {
-  let uri: URL;
-  try {
-    uri = new URL(value);
-  } catch {
-    throw new Error("Microsoft returned an invalid verification URI.");
-  }
+  const invalid = "Microsoft returned an invalid verification URI.";
+  const uri = parseUrl(value, invalid);
   if (uri.protocol !== "https:" || uri.username || uri.password || uri.hash) {
-    throw new Error("Microsoft returned an invalid verification URI.");
+    throw new Error(invalid);
   }
   return uri.toString();
 }
@@ -429,14 +377,6 @@ function boundedInteger(
   );
 }
 
-function secondsToMilliseconds(seconds: number): number {
-  const milliseconds = seconds * 1000;
-  if (!Number.isSafeInteger(milliseconds)) {
-    throw new Error("cs-control returned an invalid device response.");
-  }
-  return milliseconds;
-}
-
 function jsonContentType(response: Response): boolean {
   const contentType = response.headers.get("content-type");
   return (
@@ -444,103 +384,23 @@ function jsonContentType(response: Response): boolean {
   );
 }
 
-async function readBoundedBody(
-  response: Response,
-  signal: AbortSignal,
-): Promise<string> {
-  const reader = response.body?.getReader();
-  if (!reader) {
-    throw new Error("cs-control returned an invalid device response.");
-  }
-  const decoder = new TextDecoder("utf-8", { fatal: true });
-  let body = "";
-  let size = 0;
-  let rejectAborted: ((reason: DOMException) => void) | undefined;
-  const aborted = new Promise<never>((_resolve, reject) => {
-    rejectAborted = reject;
-  });
-  const onAbort = (): void => {
-    void reader.cancel(signal.reason).catch(() => undefined);
-    rejectAborted?.(abortError());
-  };
-  if (signal.aborted) onAbort();
-  else signal.addEventListener("abort", onAbort, { once: true });
-  try {
-    while (true) {
-      const { done, value } = await Promise.race([reader.read(), aborted]);
-      if (done) break;
-      size += value.byteLength;
-      if (size > MAX_BROKER_BODY) {
-        void reader
-          .cancel("response body exceeded limit")
-          .catch(() => undefined);
-        throw new Error("cs-control returned an invalid device response.");
-      }
-      body += decoder.decode(value, { stream: true });
-    }
-    return body + decoder.decode();
-  } catch (error) {
-    if (error instanceof TypeError) {
-      throw new Error("cs-control returned invalid JSON.");
-    }
-    throw error;
-  } finally {
-    signal.removeEventListener("abort", onAbort);
-    try {
-      reader.releaseLock();
-    } catch {
-      // A canceled read can still be settling after the abort race completes.
-    }
-  }
-}
-
-function rejectOnAbort<T>(
-  promise: Promise<T>,
-  signal: AbortSignal,
-): Promise<T> {
-  if (signal.aborted) {
-    return Promise.reject(abortError());
-  }
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = (): void => {
-      reject(abortError());
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-    promise.then(
-      (value) => {
-        signal.removeEventListener("abort", onAbort);
-        resolve(value);
-      },
-      (error: unknown) => {
-        signal.removeEventListener("abort", onAbort);
-        reject(error);
-      },
-    );
-  });
-}
-
 function showDeviceCodeModal(
   authorization: DeviceAuthorization,
   cancel: () => void,
 ): { close(): void } {
   const activeElement = document.activeElement;
-  const overlay = element("div", "", "csDeviceCodeOverlay");
-  const dialog = document.createElement("section");
-  dialog.className = "csDeviceCodeDialog";
-  dialog.setAttribute("role", "dialog");
-  dialog.setAttribute("aria-modal", "true");
-  const title = document.createElement("h2");
+  const overlay = element("dialog", "", "csDeviceCodeOverlay");
+  const dialog = element("section", "", "csDeviceCodeDialog");
+  const title = element("h2", "Sign in to Microsoft");
   title.id = `cs-device-code-title-${crypto.randomUUID()}`;
-  title.textContent = "Sign in to Microsoft";
-  dialog.setAttribute("aria-labelledby", title.id);
-  const instructions = document.createElement("p");
+  overlay.setAttribute("aria-labelledby", title.id);
+  const instructions = element(
+    "p",
+    "Open the Microsoft sign-in page and enter this one-time code:",
+  );
   instructions.id = `cs-device-code-instructions-${crypto.randomUUID()}`;
-  instructions.textContent =
-    "Open the Microsoft sign-in page and enter this one-time code:";
-  dialog.setAttribute("aria-describedby", instructions.id);
-  const code = document.createElement("code");
-  code.className = "csDeviceCode";
-  code.textContent = authorization.userCode;
+  overlay.setAttribute("aria-describedby", instructions.id);
+  const code = element("code", authorization.userCode, "csDeviceCode");
   code.setAttribute("aria-label", `Device code ${authorization.userCode}`);
 
   // The copy control answers in place: a checkmark where the icon was says the
@@ -548,8 +408,6 @@ function showDeviceCodeModal(
   const copy = document.createElement("button");
   copy.type = "button";
   copy.className = "csDeviceCodeCopy";
-  copy.title = "Copy code";
-  copy.setAttribute("aria-label", "Copy code");
   copy.innerHTML = COPY_GLYPH;
   // The label and the tooltip say the same thing, so a failed attempt cannot
   // leave a stale explanation behind a later success.
@@ -557,6 +415,7 @@ function showDeviceCodeModal(
     copy.title = text;
     copy.setAttribute("aria-label", text);
   };
+  describeCopy("Copy code");
   let copyReset: ReturnType<typeof setTimeout> | undefined;
   copy.onclick = async () => {
     clearTimeout(copyReset);
@@ -576,11 +435,8 @@ function showDeviceCodeModal(
       describeCopy("Could not copy the code");
     }
   };
-  const codeRow = document.createElement("div");
-  codeRow.className = "csDeviceCodeRow";
+  const codeRow = element("div", "", "csDeviceCodeRow");
   codeRow.append(code, copy);
-
-  const close = closeButton(cancel);
 
   const actions = element("div", "", "csDeviceCodeActions");
   const open = document.createElement("a");
@@ -602,36 +458,17 @@ function showDeviceCodeModal(
   };
   actions.appendChild(open);
 
-  dialog.append(close, title, instructions, codeRow, actions);
+  dialog.append(closeButton(cancel), title, instructions, codeRow, actions);
   overlay.appendChild(dialog);
+  // Modal semantics, focus containment, Escape and an inert backdrop come from
+  // showModal; the overlay stays on document.body so no themed container clips it.
   document.body.appendChild(overlay);
-
-  const focusable = [open, copy, close];
-  const onKeyDown = (event: KeyboardEvent): void => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      cancel();
-    } else if (event.key === "Tab") {
-      const current = focusable.indexOf(
-        document.activeElement as HTMLAnchorElement | HTMLButtonElement,
-      );
-      const next = event.shiftKey
-        ? current <= 0
-          ? focusable.length - 1
-          : current - 1
-        : current >= focusable.length - 1
-          ? 0
-          : current + 1;
-      event.preventDefault();
-      focusable[next].focus();
-    }
-  };
-  dialog.addEventListener("keydown", onKeyDown);
+  overlay.addEventListener("cancel", cancel);
+  overlay.showModal();
   open.focus();
 
   return {
     close: () => {
-      dialog.removeEventListener("keydown", onKeyDown);
       overlay.remove();
       if (activeElement instanceof HTMLElement && activeElement.isConnected) {
         activeElement.focus();
@@ -644,7 +481,15 @@ const abortableSleep = (
   milliseconds: number,
   signal: AbortSignal,
 ): Promise<void> =>
-  rejectOnAbort(
-    new Promise((resolve) => window.setTimeout(resolve, milliseconds)),
-    signal,
-  );
+  new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(signal.reason);
+    const timer = window.setTimeout(resolve, milliseconds);
+    signal.addEventListener(
+      "abort",
+      () => {
+        window.clearTimeout(timer);
+        reject(signal.reason);
+      },
+      { once: true },
+    );
+  });

@@ -23,7 +23,6 @@ describe("checked narrow cs-control runtime JSON contract", () => {
       runtimes: [runtime],
     } = await clientFor({
       runtimes: [providerFixture],
-      refreshing: false,
       logs: [],
     }).listRuntimes();
     expect(runtime).toEqual(providerFixture);
@@ -39,7 +38,6 @@ describe("checked narrow cs-control runtime JSON contract", () => {
       await expect(
         clientFor({
           runtimes: [{ ...providerFixture, [forbidden]: {} }],
-          refreshing: false,
           logs: [],
         }).listRuntimes(),
       ).rejects.toThrow("invalid runtime");
@@ -47,7 +45,6 @@ describe("checked narrow cs-control runtime JSON contract", () => {
     await expect(
       clientFor({
         runtimes: [{ ...providerFixture, state: "ready" }],
-        refreshing: false,
         logs: [],
       }).listRuntimes(),
     ).rejects.toThrow("invalid runtime");

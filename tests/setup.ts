@@ -39,14 +39,13 @@ Object.defineProperty(globalThis, "DragEvent", {
   configurable: true,
 });
 
-Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
-  configurable: true,
-  value: () => ({
-    createLinearGradient: () => ({ addColorStop: () => undefined }),
-    fillRect: () => undefined,
-    getImageData: () => ({ data: new Uint8ClampedArray(4) }),
-  }),
-});
+// jsdom 26 declares HTMLDialogElement but implements neither modal method.
+HTMLDialogElement.prototype.showModal = function () {
+  this.open = true;
+};
+HTMLDialogElement.prototype.close = function () {
+  this.open = false;
+};
 
 globalThis.requestIdleCallback = (callback) =>
   window.setTimeout(
@@ -54,11 +53,6 @@ globalThis.requestIdleCallback = (callback) =>
     0,
   );
 globalThis.cancelIdleCallback = (handle) => window.clearTimeout(handle);
-
-Object.defineProperty(window, "open", {
-  configurable: true,
-  value: () => null,
-});
 
 Object.defineProperty(window, "matchMedia", {
   configurable: true,

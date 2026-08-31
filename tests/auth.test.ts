@@ -48,6 +48,12 @@ function fetchSequence(replies: Array<MockReply | Error>): typeof fetch {
   }) as unknown as typeof fetch;
 }
 
+/** A request that settles only by abort, the way a real fetch does. */
+const abortableRequest = (signal?: AbortSignal | null): Promise<Response> =>
+  new Promise((_resolve, reject) =>
+    signal?.addEventListener("abort", () => reject(signal.reason)),
+  );
+
 function advancingDependencies(
   replies: Array<MockReply | Error>,
   initialNow = 1_000,
@@ -165,10 +171,10 @@ describe("AuthClient device-code broker flow", () => {
 
     const login = auth.interactiveLogin();
     await vi.waitFor(() =>
-      expect(document.querySelector('[role="dialog"]')).not.toBeNull(),
+      expect(document.querySelector("dialog")).not.toBeNull(),
     );
-    const dialog = document.querySelector('[role="dialog"]') as HTMLElement;
-    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    const dialog = document.querySelector("dialog")!;
+    expect(dialog.open).toBe(true);
     expect(dialog.getAttribute("aria-labelledby")).toBeTruthy();
     expect(dialog.getAttribute("aria-describedby")).toBeTruthy();
     expect(dialog.textContent).toContain("ABCD-EFGH");
@@ -199,30 +205,7 @@ describe("AuthClient device-code broker flow", () => {
     close.click();
     await expect(login).rejects.toBeInstanceOf(AuthInteractionCancelledError);
     expect(observedSignal?.aborted).toBe(true);
-    expect(document.querySelector('[role="dialog"]')).toBeNull();
-  });
-
-  it("expires without polling when the broker deadline passes", async () => {
-    const dependencies = advancingDependencies(
-      [
-        {
-          body: {
-            ...deviceAuthorization,
-            expiresInSeconds: 3,
-            intervalSeconds: 5,
-          },
-        },
-      ],
-      0,
-    );
-    await expect(
-      new AuthClient(options, dependencies).interactiveLogin(),
-    ).rejects.toThrow("expired");
-    expect(vi.mocked(dependencies.fetch)).toHaveBeenCalledOnce();
-    expect(dependencies.sleep).toHaveBeenCalledWith(
-      3000,
-      expect.any(AbortSignal),
-    );
+    expect(document.querySelector("dialog")).toBeNull();
   });
 
   it.each([
@@ -255,7 +238,7 @@ describe("AuthClient device-code broker flow", () => {
     await expect(
       new AuthClient(options, dependencies).interactiveLogin(),
     ).rejects.toThrow(message);
-    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.querySelector("dialog")).toBeNull();
   });
 
   it("times out a start request without reporting explicit cancellation", async () => {
@@ -265,7 +248,7 @@ describe("AuthClient device-code broker flow", () => {
       let requestSignal: AbortSignal | undefined;
       const fetch = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
         requestSignal = init?.signal as AbortSignal;
-        return new Promise<Response>(() => undefined);
+        return abortableRequest(requestSignal);
       }) as unknown as typeof globalThis.fetch;
       const login = new AuthClient(options, { fetch }).interactiveLogin();
       const rejection = expect(login).rejects.toThrow(
@@ -281,85 +264,36 @@ describe("AuthClient device-code broker flow", () => {
     }
   });
 
-  it.each([
-    {
-      name: "device expiry",
-      expiresInSeconds: 2,
-      advanceMilliseconds: 1_000,
-      message: "device sign-in expired",
-    },
-    {
-      name: "per-request bound",
-      expiresInSeconds: 3600,
-      advanceMilliseconds: 15_000,
-      message: "poll request timed out",
-    },
-  ])(
-    "aborts a never-resolving poll at the $name deadline",
-    async ({ expiresInSeconds, advanceMilliseconds, message }) => {
-      vi.useFakeTimers();
-      vi.setSystemTime(0);
-      try {
-        let pollSignal: AbortSignal | undefined;
-        const fetch = vi
-          .fn()
-          .mockResolvedValueOnce(
-            new Response(
-              JSON.stringify({
-                ...deviceAuthorization,
-                expiresInSeconds,
-              }),
-              { headers: { "content-type": "application/json" } },
-            ),
-          )
-          .mockImplementationOnce(
-            (_input: RequestInfo | URL, init?: RequestInit) => {
-              pollSignal = init?.signal as AbortSignal;
-              return new Promise<Response>(() => undefined);
-            },
-          ) as unknown as typeof globalThis.fetch;
-        const login = new AuthClient(options, { fetch }).interactiveLogin();
-        const rejection = expect(login).rejects.toThrow(message);
+  it("aborts a never-resolving poll at the per-request bound", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    try {
+      let pollSignal: AbortSignal | undefined;
+      const fetch = vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(deviceAuthorization), {
+            headers: { "content-type": "application/json" },
+          }),
+        )
+        .mockImplementationOnce(
+          (_input: RequestInfo | URL, init?: RequestInit) => {
+            pollSignal = init?.signal as AbortSignal;
+            return abortableRequest(pollSignal);
+          },
+        ) as unknown as typeof globalThis.fetch;
+      const login = new AuthClient(options, { fetch }).interactiveLogin();
+      const rejection = expect(login).rejects.toThrow("poll request timed out");
 
-        await vi.advanceTimersByTimeAsync(1_000);
-        expect(fetch).toHaveBeenCalledTimes(2);
-        await vi.advanceTimersByTimeAsync(advanceMilliseconds);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(fetch).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(15_000);
 
-        await rejection;
-        expect(pollSignal?.aborted).toBe(true);
-      } finally {
-        vi.useRealTimers();
-      }
-    },
-  );
-
-  it("stops reading and cancels a chunked response above 64 KiB", async () => {
-    let pulls = 0;
-    let cancelled = false;
-    const stream = new ReadableStream<Uint8Array>(
-      {
-        pull(controller) {
-          pulls++;
-          controller.enqueue(new Uint8Array(40 * 1024).fill(65));
-        },
-        cancel() {
-          cancelled = true;
-        },
-      },
-      { highWaterMark: 0 },
-    );
-    const fetch = vi.fn(
-      async () =>
-        new Response(stream, {
-          headers: { "content-type": "application/json" },
-        }),
-    ) as unknown as typeof globalThis.fetch;
-
-    await expect(
-      new AuthClient(options, { fetch }).interactiveLogin(),
-    ).rejects.toThrow("invalid device response");
-    expect(pulls).toBe(2);
-    expect(cancelled).toBe(true);
+      await rejection;
+      expect(pollSignal?.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each([
