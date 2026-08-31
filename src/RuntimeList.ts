@@ -2,7 +2,7 @@ import { Signal } from "@lumino/signaling";
 import { Widget } from "@lumino/widgets";
 import type { IRuntime } from "./Common";
 import type { IRuntimeUiState } from "./CyberShuttlePanel";
-import { button, element, keepingFocus, statePill } from "./dom";
+import { button, element, keepingFocus, notes, statePill } from "./dom";
 
 export const emptyState = (): IRuntimeUiState => ({
   runtimes: [],
@@ -112,11 +112,10 @@ export class RuntimeList extends Widget {
   readonly sshHostsRequested = new Signal<this, void>(this);
 
   private _state = emptyState();
-  private _currentRuntimeId: string | undefined;
   private _canCreate = false;
   private _createUnavailableReason = "";
 
-  constructor() {
+  constructor(private _currentRuntimeId?: string) {
     super();
     this.id = "cybershuttle-runtime-list";
     this.addClass("csRuntimePanel");
@@ -125,11 +124,6 @@ export class RuntimeList extends Widget {
 
   setControllerState(state: IRuntimeUiState): void {
     this._state = state;
-    this._render();
-  }
-
-  setCurrentRuntimeId(id: string | undefined): void {
-    this._currentRuntimeId = id;
     this._render();
   }
 
@@ -167,19 +161,13 @@ export class RuntimeList extends Widget {
     );
     section.appendChild(sectionHeader);
 
-    for (const message of [
-      this._createUnavailableReason,
-      this._state.error,
-      this._state.updatesStatus,
-    ]) {
-      if (message) {
-        const status = document.createElement("div");
-        status.className =
-          message === this._state.error ? "csError" : "csStatus";
-        status.textContent = message;
-        section.appendChild(status);
-      }
-    }
+    section.append(
+      ...notes([
+        [this._createUnavailableReason, "csStatus"],
+        [this._state.error, "csError"],
+        [this._state.updatesStatus, "csStatus"],
+      ]),
+    );
     if (this._state.loading && this._state.runtimes.length === 0) {
       const status = element("div", "Loading runtimes…", "csStatus");
       section.appendChild(status);

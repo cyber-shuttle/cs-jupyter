@@ -16,7 +16,6 @@ import {
   validDevTunnelRoot,
 } from "./runtime-access";
 import {
-  GENERATION,
   IRuntime,
   IRuntimeCreateRequest,
   IRuntimeValidation,
@@ -29,14 +28,12 @@ import {
   RuntimeValidationStatus,
   VALIDATION_STATUSES,
   exactKeys,
+  isPlainObject,
   onlyKeys,
+  requestUrl,
 } from "./Common";
-import { isPlainObject } from "./Common";
 
 const RUNTIME_LOG_CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
-const MAX_CORES = 4096;
-const MAX_MEMORY_MB = 100_000_000;
-const MAX_WALL_MINUTES = 525_600;
 
 export type RuntimeLogStream = "status" | "stdout" | "stderr";
 
@@ -51,9 +48,12 @@ export interface IRuntimeLogTail {
   lines: IRuntimeLogLine[];
 }
 
+// cs-control answers 304 while the owner-filtered list and its tails are
+// byte-identical to the last poll, so there is nothing to parse or re-render.
+export const UNCHANGED = Symbol("cs-control runtime list unchanged");
+
 export interface IRuntimeList {
   runtimes: IRuntime[];
-  refreshing: boolean;
   logs: IRuntimeLogTail[];
 }
 
@@ -88,10 +88,8 @@ export function safeControlFetch(
 ): typeof globalThis.fetch {
   const controlOrigin = new URL(validControlApiUrl(controlApiUrl)).origin;
   return async (input, init = {}) => {
-    const url = new URL(
-      typeof input === "string" || input instanceof URL ? input : input.url,
-    );
-    if (url.origin !== controlOrigin || !/^https?:$/.test(url.protocol)) {
+    const url = new URL(requestUrl(input));
+    if (url.origin !== controlOrigin) {
       throw new Error(
         "CyberShuttle blocked a request outside the configured control origin.",
       );
@@ -102,7 +100,6 @@ export function safeControlFetch(
     const credentials = await auth.acquireToken();
     headers.set("Authorization", `Bearer ${credentials.accessToken}`);
     headers.set("X-CyberShuttle-Identity", credentials.idToken);
-    headers.delete("X-XSRFToken");
     const response = await fetch(input, {
       ...init,
       headers,
@@ -113,13 +110,6 @@ export function safeControlFetch(
     if (response.status === 401 || response.status === 403) {
       auth.invalidateToken?.();
     }
-    if (
-      response.redirected ||
-      response.type === "opaqueredirect" ||
-      (response.status >= 300 && response.status < 400) ||
-      (response.url && new URL(response.url).origin !== controlOrigin)
-    )
-      throw new Error("CyberShuttle service redirects are not allowed.");
     return response;
   };
 }
@@ -129,6 +119,10 @@ export class ControlClient {
   private _fetch: typeof globalThis.fetch;
   private _webSockets: OAuthWebSocketFactory;
   private _auth: IControlAuth;
+  // Describes the list its holder already has, so every entry into or exit from
+  // a session drops it: the panel behind a fresh session holds no list to
+  // revalidate against, and a 304 would leave it empty.
+  private _runtimesTag: string | undefined;
 
   constructor(
     base = PageConfig.getOption("cybershuttleControlApiUrl"),
@@ -144,12 +138,14 @@ export class ControlClient {
   }
 
   async signIn(): Promise<void> {
+    this._runtimesTag = undefined;
     await this._auth.interactiveLogin();
   }
 
   // Succeeds only on a credential that is still valid, so callers can tell a
   // resumable session from one that needs the device-code round trip.
   async resumeSession(): Promise<void> {
+    this._runtimesTag = undefined;
     await this._auth.acquireToken();
   }
 
@@ -158,6 +154,7 @@ export class ControlClient {
   }
 
   signOut(): void {
+    this._runtimesTag = undefined;
     this._auth.invalidateToken?.();
   }
 
@@ -187,13 +184,9 @@ export class ControlClient {
     });
   }
 
-  async testSshHost(
-    alias: string,
-    signal?: AbortSignal,
-  ): Promise<ISshHostTest> {
+  async testSshHost(alias: string): Promise<ISshHostTest> {
     const value = await this._request(`ssh/${encodeURIComponent(alias)}/test`, {
       method: "POST",
-      signal,
     });
     if (
       !isPlainObject(value) ||
@@ -219,19 +212,35 @@ export class ControlClient {
     return this._webSocketConnector(`ssh/${encodeURIComponent(alias)}/auth`);
   }
 
-  async listRuntimes(): Promise<IRuntimeList> {
-    const value = await this._request("runtimes");
+  // Answers UNCHANGED while cs-control's reply is byte-identical to the last
+  // one. The poll runs once a second for as long as a job sits in a queue, so
+  // most of its life is spent re-reading a list that has not moved. `cache:
+  // "no-store"` means the browser will not revalidate on its own, so the
+  // conditional request is made here.
+  async listRuntimes(): Promise<IRuntimeList | typeof UNCHANGED> {
+    const response = await this._fetch(
+      URLExt.join(this._base, "runtimes"),
+      this._runtimesTag
+        ? { headers: { "If-None-Match": this._runtimesTag } }
+        : {},
+    );
+    if (response.status === 304) {
+      return UNCHANGED;
+    }
+    if (!response.ok) {
+      await this._fail(response);
+    }
+    const value = await this._json(response);
     if (
       !isPlainObject(value) ||
       !Array.isArray(value.runtimes) ||
-      typeof value.refreshing !== "boolean" ||
       !(value.logs === undefined || Array.isArray(value.logs))
     ) {
       throw new Error("cs-control returned an invalid runtime list.");
     }
+    this._runtimesTag = response.headers.get("ETag") ?? undefined;
     return {
       runtimes: value.runtimes.map(validateRuntime),
-      refreshing: value.refreshing,
       logs: (value.logs ?? []).map(validateRuntimeLogTail),
     };
   }
@@ -280,7 +289,7 @@ export class ControlClient {
 
   async getRuntime(id: string): Promise<IRuntime> {
     return validateRuntime(
-      await this._request(`runtimes/${encodeURIComponent(validRuntimeId(id))}`),
+      await this._request(`runtimes/${encodeURIComponent(id)}`),
     );
   }
 
@@ -306,30 +315,20 @@ export class ControlClient {
     past: string,
   ): Promise<IRuntime> {
     const runtimeId = validRuntimeId(id);
-    const invalid = `cs-control returned an invalid ${past} runtime.`;
     const path = `runtimes/${encodeURIComponent(runtimeId)}${suffix ? `/${suffix}` : ""}`;
-    let runtime: IRuntime;
-    try {
-      runtime = validateRuntime(await this._request(path, { method }));
-    } catch (error) {
-      if (error instanceof ControlError) {
-        throw error;
-      }
-      throw new Error(invalid);
-    }
+    const runtime = validateRuntime(await this._request(path, { method }));
     if (runtime.id !== runtimeId) {
-      throw new Error(invalid);
+      throw new Error(`cs-control returned an invalid ${past} runtime.`);
     }
     clearRuntimeAccess(runtimeId);
     return runtime;
   }
 
   async getRuntimeAccess(id: string): Promise<IRuntimeAccess> {
-    const runtimeId = validRuntimeId(id);
     const access = validateRuntimeAccess(
-      await this._request(`runtimes/${encodeURIComponent(runtimeId)}/access`),
+      await this._request(`runtimes/${encodeURIComponent(id)}/access`),
     );
-    if (access.runtimeId !== runtimeId) {
+    if (access.runtimeId !== id) {
       throw new Error("cs-control returned access for a different runtime.");
     }
     return access;
@@ -342,34 +341,42 @@ export class ControlClient {
     return () => this._webSockets.open(endpoint);
   }
 
+  private async _fail(response: Response): Promise<never> {
+    let message = `cs-control returned ${response.status}`;
+    let code = "request_failed";
+    try {
+      const value = await response.json();
+      if (isPlainObject(value) && isPlainObject(value.error)) {
+        if (typeof value.error.code === "string") {
+          code = value.error.code;
+        }
+        if (typeof value.error.message === "string") {
+          message = value.error.message;
+        }
+      }
+    } catch {
+      // Keep the status-only error.
+    }
+    throw new ControlError(code, message);
+  }
+
+  private async _json(response: Response): Promise<unknown> {
+    try {
+      return await response.json();
+    } catch {
+      throw new Error("cs-control returned invalid JSON.");
+    }
+  }
+
   private async _request(
     path: string,
     init: RequestInit = {},
   ): Promise<unknown> {
     const response = await this._fetch(URLExt.join(this._base, path), init);
     if (!response.ok) {
-      let message = `cs-control returned ${response.status}`;
-      let code = "request_failed";
-      try {
-        const value = await response.json();
-        if (isPlainObject(value) && isPlainObject(value.error)) {
-          if (typeof value.error.code === "string") {
-            code = value.error.code;
-          }
-          if (typeof value.error.message === "string") {
-            message = value.error.message;
-          }
-        }
-      } catch {
-        // Keep the status-only error.
-      }
-      throw new ControlError(code, message);
+      await this._fail(response);
     }
-    try {
-      return await response.json();
-    } catch {
-      throw new Error("cs-control returned invalid JSON.");
-    }
+    return this._json(response);
   }
 }
 
@@ -405,8 +412,7 @@ export function createRuntimeServerSettings(
   options: { fetch?: typeof globalThis.fetch } = {},
 ): ServerConnection.ISettings {
   const access = validateRuntimeAccess(descriptor);
-  const baseUrl =
-    validDevTunnelRoot(access.jupyter.uri, "Jupyter URI").origin + "/";
+  const baseUrl = validDevTunnelRoot(access.jupyter.uri).origin + "/";
   const browserFetch = options.fetch ?? globalThis.fetch.bind(globalThis);
   const invalidatingFetch: typeof globalThis.fetch = async (input, init) => {
     const response = await browserFetch(input, init);
@@ -414,13 +420,7 @@ export function createRuntimeServerSettings(
       clearRuntimeAccess(access.runtimeId);
       return response;
     }
-    const url =
-      typeof input === "string"
-        ? input
-        : input instanceof URL
-          ? input.toString()
-          : input.url;
-    if (response.ok && url.includes("/api/kernelspecs")) {
+    if (response.ok && requestUrl(input).includes("/api/kernelspecs")) {
       return withoutUnreachableKernelSpecLogos(response);
     }
     return response;
@@ -443,26 +443,15 @@ export function validRuntimeId(value: string): string {
 
 function validateRuntimeValidation(value: unknown): IRuntimeValidation {
   if (
-    !isPlainObject(value) ||
-    typeof value.runtimeId !== "string" ||
-    !RUNTIME_ID.test(value.runtimeId) ||
-    !VALIDATION_STATUSES.includes(value.status as RuntimeValidationStatus) ||
-    typeof value.script !== "string" ||
-    !value.script ||
-    typeof value.message !== "string" ||
-    !optionalString(value.stdout) ||
-    !optionalString(value.stderr) ||
-    Object.keys(value).some(
-      (key) =>
-        ![
-          "runtimeId",
-          "status",
-          "script",
-          "message",
-          "stdout",
-          "stderr",
-        ].includes(key),
-    )
+    !onlyKeys(value, [
+      "runtimeId",
+      "status",
+      "script",
+      "message",
+      "stdout",
+      "stderr",
+    ]) ||
+    !VALIDATION_STATUSES.includes(value.status as RuntimeValidationStatus)
   ) {
     throw new Error("cs-control returned an invalid runtime validation.");
   }
@@ -490,7 +479,6 @@ function validateRuntimeLogTail(value: unknown): IRuntimeLogTail {
       typeof line.text !== "string" ||
       RUNTIME_LOG_CONTROL.test(line.text) ||
       typeof line.at !== "string" ||
-      !Number.isFinite(Date.parse(line.at)) ||
       !exactKeys(line, ["stream", "text", "at"])
     ) {
       throw new Error("cs-control returned an invalid runtime log line.");
@@ -510,39 +498,22 @@ function validateRuntimeLogTail(value: unknown): IRuntimeLogTail {
 }
 
 function validateRuntime(value: unknown): IRuntime {
-  const allowed = [
-    "id",
-    "generation",
-    "state",
-    "sshHost",
-    "account",
-    "partition",
-    "rootFolder",
-    "resources",
-    "error",
-    "createdAt",
-    "updatedAt",
-  ];
   if (
-    !isPlainObject(value) ||
-    !onlyKeys(value, allowed) ||
-    typeof value.id !== "string" ||
-    !RUNTIME_ID.test(value.id) ||
-    typeof value.generation !== "string" ||
-    !GENERATION.test(value.generation) ||
-    typeof value.state !== "string" ||
+    !onlyKeys(value, [
+      "id",
+      "generation",
+      "state",
+      "sshHost",
+      "account",
+      "partition",
+      "rootFolder",
+      "resources",
+      "error",
+      "createdAt",
+      "updatedAt",
+    ]) ||
     !RUNTIME_STATES.includes(value.state as RuntimeState) ||
-    typeof value.sshHost !== "string" ||
-    !value.sshHost ||
-    typeof value.partition !== "string" ||
-    !value.partition ||
-    typeof value.rootFolder !== "string" ||
-    !value.rootFolder ||
-    !resources(value.resources) ||
-    !optionalString(value.account) ||
-    !optionalString(value.error) ||
-    !date(value.createdAt) ||
-    !date(value.updatedAt)
+    !isPlainObject(value.resources)
   ) {
     throw new Error("cs-control returned an invalid runtime.");
   }
@@ -553,15 +524,7 @@ function validateHost(value: unknown): ISshHost {
   if (
     !isPlainObject(value) ||
     typeof value.name !== "string" ||
-    !optionalString(value.hostname) ||
-    !optionalString(value.user) ||
-    !(
-      value.port === undefined ||
-      (Number.isInteger(value.port) && value.port >= 1 && value.port <= 65535)
-    ) ||
-    !optionalString(value.identityFile) ||
-    !Array.isArray(value.extraDirectives) ||
-    !value.extraDirectives.every((item) => typeof item === "string")
+    !Array.isArray(value.extraDirectives)
   ) {
     throw new Error("cs-control returned an invalid SSH host.");
   }
@@ -571,24 +534,10 @@ function validateHost(value: unknown): ISshHost {
 export function validateSlurmResource(value: unknown): ISlurmInfo {
   if (
     !isPlainObject(value) ||
-    typeof value.host !== "string" ||
-    typeof value.homeDir !== "string" ||
     !Array.isArray(value.accounts) ||
-    !value.accounts.every((item) => typeof item === "string") ||
     !Array.isArray(value.partitions) ||
     !value.partitions.every(
-      (part) =>
-        isPlainObject(part) &&
-        typeof part.name === "string" &&
-        positiveInteger(part.cpuCount, MAX_CORES) &&
-        positiveInteger(part.memoryMb, MAX_MEMORY_MB) &&
-        Array.isArray(part.gres) &&
-        part.gres.every(
-          (item) =>
-            isPlainObject(item) &&
-            typeof item.name === "string" &&
-            positiveInteger(item.count),
-        ),
+      (part) => isPlainObject(part) && Array.isArray(part.gres),
     )
   ) {
     throw new Error("cs-control returned invalid SLURM discovery.");
@@ -596,40 +545,6 @@ export function validateSlurmResource(value: unknown): ISlurmInfo {
   return value as unknown as ISlurmInfo;
 }
 
-function resources(value: unknown): boolean {
-  if (
-    !isPlainObject(value) ||
-    !positiveInteger(value.cores, MAX_CORES) ||
-    !positiveInteger(value.memoryMb, MAX_MEMORY_MB) ||
-    !positiveInteger(value.wallMinutes, MAX_WALL_MINUTES)
-  ) {
-    return false;
-  }
-  const hasGpuType = typeof value.gpuType === "string" && value.gpuType !== "";
-  const hasGpuCount = positiveInteger(value.gpuCount);
-  return (
-    (value.gpuType === undefined && value.gpuCount === undefined) ||
-    (hasGpuType && hasGpuCount)
-  );
-}
-
-function positiveInteger(
-  value: unknown,
-  maximum = Number.MAX_SAFE_INTEGER,
-): boolean {
-  return (
-    Number.isSafeInteger(value) &&
-    Number(value) >= 1 &&
-    Number(value) <= maximum
-  );
-}
-
-function date(value: unknown): boolean {
-  return typeof value === "string" && !Number.isNaN(Date.parse(value));
-}
-function optionalString(value: unknown): boolean {
-  return value === undefined || typeof value === "string";
-}
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }

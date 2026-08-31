@@ -27,22 +27,32 @@ verification URI and one-time user code in an
 accessible dialog with explicit copy, open, and cancel actions. No redirect
 URI, SPA registration, popup authorization, or automatic interaction is used.
 App restore, panel construction, cached direct-runtime restore, and polling
-never start OAuth. If the in-memory credentials expire, polling suspends without
-retrying and the Sign in action is enabled again. Each successful token response
-supplies both the opaque Dev Tunnels access token and its signed Microsoft ID
-token. Those credentials remain in Lite memory only; cs-control discards any returned
-refresh token before responding. Device broker calls use `credentials: omit`,
-reject redirects and malformed response bodies, and never place access or ID
-tokens in URLs. Control HTTP requests send them as
-`Authorization: Bearer <access-token>` and
-`X-CyberShuttle-Identity: <ID-token>`; they do not use cookies, XSRF headers,
-or a same-origin proxy. Interactive SSH authentication sends exactly three
-WebSocket subprotocols:
-`cybershuttle.v1`, `bearer.<base64url-utf8-access-token>`, and
-`identity.<base64url-utf8-ID-token>`. Tokens are never put in a WebSocket URL
-or storage, and the client fails closed unless the server negotiates exactly
-`cybershuttle.v1`. cs-control does not serve the Lite application or runtime
-traffic.
+never start OAuth. Each successful token response supplies both the opaque Dev
+Tunnels access token and its signed Microsoft ID token; cs-control discards any
+returned refresh token before responding.
+
+Those credentials live in per-tab `sessionStorage` under
+`cybershuttle.oauth.v1`, so the reload that opens a runtime does not repeat the
+device-code round trip. They are never written to `localStorage`, a URL, a log
+or an error. When they expire, polling suspends without retrying and the Sign
+in action is enabled again.
+
+Every credential this app carries, and where it goes:
+
+| Hop                | Route                                        | Credential                                                           |
+| ------------------ | -------------------------------------------- | -------------------------------------------------------------------- |
+| Device sign-in     | `POST /oauth/device/start`, `/poll/{handle}` | none (`credentials: omit`, `redirect: "error"`)                      |
+| Control API        | `/api/v1/*`                                  | `Authorization: Bearer <access>` and `X-CyberShuttle-Identity: <ID>` |
+| SSH authentication | `WS /api/v1/ssh/{alias}/auth`                | the two tokens as `bearer.` and `identity.` subprotocols             |
+| Jupyter            | the allocation's Dev Tunnel origin           | the generation-bound Jupyter token                                   |
+
+The control API uses no cookies, XSRF header or same-origin proxy. The SSH
+socket offers exactly `cybershuttle.v1` plus the two credential subprotocols
+and fails closed unless the server negotiates `cybershuttle.v1`; tokens never
+appear in a WebSocket URL. The routes and their trust boundaries are
+cs-control's, and its [README](https://github.com/cyber-shuttle/cs-control) is
+the canonical description of them. cs-control does not serve the Lite
+application or runtime traffic.
 
 ## Runtime flow
 
@@ -63,44 +73,30 @@ traffic.
    `sessionStorage`, reloads with the nonsecret runtime ID and generation in its
    static query, and configures Contents, Kernel, KernelSpec, Session, and
    Terminal managers directly against the Jupyter HTTPS/WSS Dev Tunnel URI.
-   HTTP sends `Authorization: Bearer <capability>` with `credentials: omit`;
-   WebSockets carry the capability in the CyberShuttle subprotocol.
+   Those managers use JupyterLab's own `ServerConnection` token handling:
+   `Authorization: token <capability>` on REST and `?token=` on the Jupyter
+   WebSocket URLs.
 
 The session cache intentionally keeps the capability across same-tab reloads so
 an active runtime remains usable while cs-control is unavailable. It is never
-written to localStorage, URLs, logs, errors, or runtime cards. Expired,
-stale, malformed, and unrelated-origin entries are rejected.
-There is no local kernel fallback; the Launcher and all compute managers remain
-fail-closed until a valid READY generation is selected.
+written to localStorage, the page URL, logs, errors, or runtime cards. An entry
+for another runtime or generation, or one whose expiry has passed, is discarded
+on read, and the Dev Tunnel URI it names must be a bare `*.devtunnels.ms`
+origin. There is no local kernel fallback; the Launcher and all compute managers
+remain fail-closed until a valid READY generation is selected.
 
 ## Remote compute environment
 
-Provision each compute host with uv and a site-approved Python 3.10 or newer:
-
-```bash
-UV="$HOME/.local/bin/uv"
-JUPYTER_ENV="$HOME/.cybershuttle/jupyter-env"
-PYTHON_VERSION=3.13 # Replace with a site-approved version >=3.10.
-"$UV" venv --clear --python "$PYTHON_VERSION" "$JUPYTER_ENV"
-"$UV" pip install --python "$JUPYTER_ENV/bin/python" \
-  jupyter-server ipykernel jupyter-server-terminals
-"$JUPYTER_ENV/bin/python" -c \
-  'import ipykernel, jupyter_server, jupyter_server_terminals'
-```
-
-Do not add JupyterLab, a `cs-jupyterlab` wheel, conda, or standalone pip.
-Recreating the environment must not copy or remove separately stored
-credentials.
+Nothing is provisioned by hand. cs-control installs uv and the Jupyter
+environment on the compute host when it creates an allocation, and the
+allocation builds it under `$HOME/.cybershuttle/jupyter-env`.
 
 ## Build and test
 
 ```bash
 bun install --frozen-lockfile
 uv sync --frozen
-bun run typecheck
-bun run lint
-bun run test
-bun run build:lite
-bun run test:dist
-bun run test:browser
+bun run lint      # typecheck + prettier --check
+bun run build     # clean + build:lib + build:lite
+bun run test:all  # vitest + test:dist + test:browser
 ```

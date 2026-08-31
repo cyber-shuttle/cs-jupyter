@@ -1,4 +1,3 @@
-import { GENERATION } from "./Common";
 import type { JupyterFrontEndPlugin } from "@jupyterlab/application";
 import { PageConfig } from "@jupyterlab/coreutils";
 import type {
@@ -36,19 +35,13 @@ import { Token } from "@lumino/coreutils";
 import { ControlClient, createRuntimeServerSettings } from "./ControlClient.js";
 import { cacheRuntimeAccess, loadRuntimeAccess } from "./runtime-access.js";
 
-import { setActiveRuntimeId } from "./runtime-state.js";
-import { resolveRuntimeId, runtimeUiPlugin } from "./runtime-ui.js";
+import { getActiveRuntimeId, setActiveRuntimeId } from "./runtime-state.js";
+import { runtimeUiPlugin, selectedRuntime } from "./runtime-ui.js";
 
 export const IRemoteServerSettings = new Token<ServerConnection.ISettings>(
   "@cybershuttle/jupyter:IRemoteServerSettings",
   "Server settings for the selected READY CyberShuttle runtime.",
 );
-
-const failClosedSettings = new WeakSet<ServerConnection.ISettings>();
-
-function isFailClosed(settings: ServerConnection.ISettings): boolean {
-  return failClosedSettings.has(settings);
-}
 
 function failClosedServerSettings(): ServerConnection.ISettings {
   const baseUrl = new URL(PageConfig.getBaseUrl(), window.location.origin);
@@ -96,7 +89,6 @@ function failClosedServerSettings(): ServerConnection.ISettings {
     token: "",
     wsUrl: baseUrl.toString().replace(/^http/, "ws"),
   });
-  failClosedSettings.add(settings);
   return settings;
 }
 
@@ -118,14 +110,11 @@ const remoteServerSettingsPlugin: ServiceManagerPlugin<
   activate: async () => {
     const controlApiUrl = PageConfig.getOption("cybershuttleControlApiUrl");
     try {
-      const runtimeId = resolveRuntimeId();
-      if (!runtimeId) {
+      const selected = selectedRuntime();
+      if (!selected) {
         throw new Error("No runtime selected.");
       }
-      const generation =
-        new URLSearchParams(window.location.search).get("generation") ?? "";
-      if (!GENERATION.test(generation))
-        throw new Error("Invalid runtime generation.");
+      const { runtimeId, generation } = selected;
       // A READY runtime is a running Jupyter Server: cs-control only issues access once the
       // allocation is up, so its response is the readiness signal.
       let access = loadRuntimeAccess(runtimeId, generation);
@@ -203,10 +192,12 @@ const terminalManagerPlugin: ServiceManagerPlugin<
   autoStart: true,
   provides: ITerminalManager,
   requires: [IRemoteServerSettings],
+  // ponytail: the active runtime id is the fail-closed signal; tag the settings
+  // object only if a second settings producer ever appears.
   activate: (_app, serverSettings) =>
-    isFailClosed(serverSettings)
-      ? new TerminalManager.NoopManager({ serverSettings })
-      : new TerminalManager({ serverSettings }),
+    getActiveRuntimeId()
+      ? new TerminalManager({ serverSettings })
+      : new TerminalManager.NoopManager({ serverSettings }),
 };
 
 const remoteTerminalUiPlugin: JupyterFrontEndPlugin<void> = {
@@ -245,7 +236,7 @@ const serviceManagerPlugin: ServiceManagerPlugin<ServiceManagerType.IManager> =
     activate: (
       _app,
       shellServerSettings,
-      remoteServerSettings,
+      _remoteServerSettings,
       contents,
       kernels,
       kernelspecs,
@@ -269,17 +260,11 @@ const serviceManagerPlugin: ServiceManagerPlugin<ServiceManagerType.IManager> =
         terminals,
         user,
         workspaces,
-        standby: isFailClosed(remoteServerSettings)
-          ? () => true
-          : "when-hidden",
+        standby: getActiveRuntimeId() ? "when-hidden" : () => true,
       }),
   };
 
-export {
-  resolveRuntimeId,
-  runtimeLiteUrl,
-  SELECT_RUNTIME_COMMAND,
-} from "./runtime-ui.js";
+export { runtimeLiteUrl, SELECT_RUNTIME_COMMAND } from "./runtime-ui.js";
 
 export const remoteServicePlugins = [
   remoteServerSettingsPlugin,

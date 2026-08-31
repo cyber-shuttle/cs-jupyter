@@ -5,19 +5,13 @@
   "license": "Apache-2.0",
   "private": true,
   "main": "lib/index.js",
-  "types": "lib/index.d.ts",
-  "files": [
-    "lib",
-    "labextension",
-    "style"
-  ],
   "style": "style/index.css",
   "scripts": {
     "build": "bun run clean && bun run build:lib && bun run build:lite",
     "build:lib": "tsc -b",
     "build:extension": "uv run jupyter-builder build",
     "build:lite": "bun run build:extension && uv run jupyter lite build --config jupyter_lite_config.json",
-    "clean": "rimraf lib labextension dist .jupyterlite.doit.db tsconfig.tsbuildinfo",
+    "clean": "rm -rf lib labextension dist .jupyterlite.doit.db tsconfig.tsbuildinfo",
     "dev": "bun run build:lib && bun run build:extension && uv run jupyter lite serve --config jupyter_lite_config.json",
     "lint": "bun run typecheck && prettier --check .",
     "typecheck": "tsc -b --pretty false && tsc -p tsconfig.tests.json --pretty false",
@@ -27,10 +21,10 @@
     "test:all": "bun run test && bun run test:dist && bun run test:browser"
   },
   "dependencies": {
-    "@jupyterlab/application": "4.6.0",
-    "@jupyterlab/apputils": "4.6.0",
-    "@jupyterlab/coreutils": "6.6.0",
-    "@jupyterlab/services": "7.6.0",
+    "@jupyterlab/application": "~4.6.3",
+    "@jupyterlab/apputils": "~4.7.3",
+    "@jupyterlab/coreutils": "~6.6.3",
+    "@jupyterlab/services": "~7.6.3",
     "@jupyterlab/ui-components": "4.6.3",
     "@lumino/coreutils": "2.2.3",
     "@lumino/signaling": "2.1.6",
@@ -42,50 +36,30 @@
   "devDependencies": {
     "@jupyter/builder": "1.2.2",
     "@types/node": "24.10.0",
-    "@types/react": "19.2.18",
-    "css-loader": "6.11.0",
     "jsdom": "26.1.0",
     "playwright": "1.52.0",
     "prettier": "3.6.2",
-    "rimraf": "6.0.1",
-    "style-loader": "3.3.4",
     "typescript": "5.9.3",
-    "vitest": "4.1.10",
-    "ws": "^8.18.0"
+    "vitest": "4.1.10"
   },
   "jupyterlab": {
     "extension": true,
     "outputDir": "labextension",
     "sharedPackages": {
-      "@jupyterlab/application": {
-        "bundled": false,
-        "requiredVersion": "^4.6.0",
-        "singleton": true
-      },
       "@jupyterlab/apputils": {
-        "bundled": false,
-        "requiredVersion": "^4.6.0",
-        "singleton": true
+        "requiredVersion": "^4.6.0"
       },
       "@jupyterlab/coreutils": {
-        "bundled": false,
-        "requiredVersion": "^6.6.0",
-        "singleton": true
+        "requiredVersion": "^6.6.0"
       },
       "@jupyterlab/services": {
-        "bundled": false,
-        "requiredVersion": "^7.6.0",
-        "singleton": true
+        "requiredVersion": "^7.6.0"
       },
       "@lumino/signaling": {
-        "bundled": false,
-        "requiredVersion": "^2.1.6",
-        "singleton": true
+        "requiredVersion": "^2.1.5"
       },
       "@lumino/widgets": {
-        "bundled": false,
-        "requiredVersion": "^2.9.0",
-        "singleton": true
+        "requiredVersion": "^2.8.0"
       }
     }
   }

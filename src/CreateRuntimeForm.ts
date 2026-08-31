@@ -30,42 +30,23 @@ const MIN_MEMORY_MB = 4096;
 interface IRuntimeDraft {
   sshHost: string;
   resourceType: ResourceType | "";
-  account: string;
-  partitionKey: string;
   rootFolder: string;
-  cores: number;
-  memoryMb: number;
   wallMinutes: number;
-  gpuType: string;
-  gpuCount: number;
 }
 
 function freshDraft(sshHost = ""): IRuntimeDraft {
-  return {
-    sshHost,
-    resourceType: "",
-    account: "",
-    partitionKey: "",
-    rootFolder: "",
-    cores: MIN_CORES,
-    memoryMb: MIN_MEMORY_MB,
-    wallMinutes: 60,
-    gpuType: "",
-    gpuCount: 1,
-  };
+  return { sshHost, resourceType: "", rootFolder: "", wallMinutes: 60 };
 }
 
 export class CreateRuntimeForm extends Widget {
   readonly sshHostsRequested = new Signal<this, void>(this);
   readonly createRequested = new Signal<this, IRuntimeCreateRequest>(this);
   private _hosts: ISshHost[] = [];
-  private _hostsKey = "";
   private _slurm: ISlurmInfo | undefined;
   private _busy = false;
   private _error = "";
   private _key = crypto.randomUUID();
   private _payload = "";
-  private _operationGeneration = 0;
   private _discoveryAbort: AbortController | undefined;
   private _operation: ISshOperationConsole | undefined;
   private _create: HTMLButtonElement | undefined;
@@ -78,11 +59,11 @@ export class CreateRuntimeForm extends Widget {
   private _script = "";
   private _validationError = "";
   private _validating = false;
-  private _validationGeneration = 0;
   private _reviewAbort: AbortController | undefined;
   private _reviewSubmit: HTMLButtonElement | undefined;
   private _reviewStatus: HTMLElement | undefined;
   private _reviewError: HTMLElement | undefined;
+  private _reviewSync: (() => void) | undefined;
 
   constructor(
     private _api: ControlClient,
@@ -95,13 +76,10 @@ export class CreateRuntimeForm extends Widget {
     this._render();
   }
 
+  // ponytail: setHosts is called once per form; restore compare-and-skip if
+  // host polling returns.
   setHosts(hosts: ISshHost[]): void {
-    const key = JSON.stringify(hosts);
-    if (key === this._hostsKey) {
-      return;
-    }
     this._hosts = hosts;
-    this._hostsKey = key;
     if (
       this._draft.sshHost &&
       !hosts.some((host) => host.name === this._draft.sshHost)
@@ -168,7 +146,6 @@ export class CreateRuntimeForm extends Widget {
   }
 
   private _stopOperation(): void {
-    this._operationGeneration++;
     this._discoveryAbort?.abort();
     this._discoveryAbort = undefined;
     this._operation?.cancel();
@@ -177,7 +154,6 @@ export class CreateRuntimeForm extends Widget {
   }
 
   private _cancelReviewOperation(): void {
-    this._validationGeneration++;
     this._reviewAbort?.abort();
     this._reviewAbort = undefined;
     this._validating = false;
@@ -192,6 +168,7 @@ export class CreateRuntimeForm extends Widget {
     this._reviewSubmit = undefined;
     this._reviewStatus = undefined;
     this._reviewError = undefined;
+    this._reviewSync = undefined;
   }
 
   private _syncStatus(): void {
@@ -213,9 +190,7 @@ export class CreateRuntimeForm extends Widget {
     }
     if (this._reviewStatus) {
       const state = this._validating
-        ? this._script
-          ? "Validating with Slurm…"
-          : "Building the Slurm script…"
+        ? "Validating with Slurm…"
         : this._validation?.status === "PASSED"
           ? `Validation passed. ${this._validation.message}`
           : this._validation?.status === "FAILED"
@@ -248,6 +223,7 @@ export class CreateRuntimeForm extends Widget {
       this._reviewError.hidden = !detail;
       this._reviewError.className = `csValidationError${failed ? "" : " csValidationDetail"}`;
     }
+    this._reviewSync?.();
   }
 
   private _render(): void {
@@ -259,6 +235,7 @@ export class CreateRuntimeForm extends Widget {
     this._reviewSubmit = undefined;
     this._reviewStatus = undefined;
     this._reviewError = undefined;
+    this._reviewSync = undefined;
     const root = element("div", "", "csRoot");
     root.append(
       element("hr", "", "csModalRule"),
@@ -286,21 +263,16 @@ export class CreateRuntimeForm extends Widget {
     const scriptHeader = element("div", "", "csScriptHeader");
     const scriptLabel = element("label", "Generated Slurm script", "csLabel");
     scriptLabel.htmlFor = "cybershuttle-slurm-script";
-    const shown = this._script;
     const copy = button("Copy script", "csSecondaryButton", () => {
-      if (shown) {
-        void navigator.clipboard?.writeText(shown);
+      if (this._script) {
+        void navigator.clipboard?.writeText(this._script);
       }
     });
-    copy.disabled = !shown;
     scriptHeader.append(scriptLabel, copy);
     const script = document.createElement("pre");
     script.id = "cybershuttle-slurm-script";
     script.className = "csSlurmScript";
     script.setAttribute("tabindex", "0");
-    // The status line below says what is happening; the script area stays empty
-    // until there is a script to show rather than repeating it.
-    script.textContent = this._script;
 
     const status = element("div", "", "csValidationStatus");
     status.setAttribute("role", "status");
@@ -312,9 +284,13 @@ export class CreateRuntimeForm extends Widget {
     const retry = button("Retry validation", "csSecondaryButton", () => {
       void this._retryValidation();
     });
-    retry.hidden =
-      this._validating ||
-      (!this._validationError && this._validation?.status !== "FAILED");
+    this._reviewSync = () => {
+      script.textContent = this._script;
+      copy.disabled = !this._script;
+      retry.hidden =
+        this._validating ||
+        (!this._validationError && this._validation?.status !== "FAILED");
+    };
 
     const footer = element("div", "", "csFormFooter");
     const back = button("Back", "csSecondaryButton", () => {
@@ -328,7 +304,7 @@ export class CreateRuntimeForm extends Widget {
         this._validation?.status === "PASSED" &&
         this._reviewRequest
       ) {
-        this.createRequested.emit(cloneRequest(this._reviewRequest));
+        this.createRequested.emit(this._reviewRequest);
       }
     });
     this._reviewSubmit = submit;
@@ -348,59 +324,36 @@ export class CreateRuntimeForm extends Widget {
     return container;
   }
 
-  private _currentReview(
-    request: IRuntimeCreateRequest,
-    generation: number,
-  ): boolean {
-    return (
-      !this.isDisposed &&
-      generation === this._validationGeneration &&
-      this._reviewRequest === request
-    );
-  }
-
   private async _retryValidation(): Promise<void> {
     const request = this._reviewRequest;
     if (!request || this.isDisposed) return;
     this._cancelReviewOperation();
-    const generation = this._validationGeneration;
     const abort = new AbortController();
     this._reviewAbort = abort;
+    const live = (): boolean =>
+      !abort.signal.aborted &&
+      this._reviewRequest === request &&
+      !this.isDisposed;
     this._validation = undefined;
     this._script = "";
     this._validationError = "";
     this._validating = true;
-    this._render();
+    this._syncStatus();
     try {
-      // The script comes first and on its own, so what Slurm is being asked
-      // about is readable while it is being asked.
-      const script = await this._api.previewRuntimeScript(
-        cloneRequest(request),
-        abort.signal,
-      );
-      if (this._currentReview(request, generation)) {
-        this._script = script;
-        this._render();
-      }
-      const validation = await this._api.validateRuntime(
-        cloneRequest(request),
-        abort.signal,
-      );
-      if (this._currentReview(request, generation)) {
-        // Validation returns the same text it was asked about; keeping one copy
-        // means the review cannot show one script and validate another.
+      const validation = await this._api.validateRuntime(request, abort.signal);
+      if (live()) {
         this._validation = validation;
         this._script = validation.script;
       }
     } catch (error) {
-      if (!abort.signal.aborted && this._currentReview(request, generation)) {
+      if (live()) {
         this._validationError = errorMessage(error);
       }
     }
-    if (this._currentReview(request, generation)) {
+    if (live()) {
       this._validating = false;
       this._reviewAbort = undefined;
-      this._render();
+      this._syncStatus();
     }
   }
 
@@ -461,8 +414,7 @@ export class CreateRuntimeForm extends Widget {
     resourceLegend.className = "csLabel";
     const resourceChoices = element("div", "", "csResourceTypeChoices");
     resourceType.append(resourceLegend, resourceChoices);
-    const account = select("account", []);
-    account.required = false;
+    const account = select("account", [], false);
     const partition = select("partition", []);
     this._partition = partition;
     const rootFolder = input(
@@ -480,11 +432,11 @@ export class CreateRuntimeForm extends Widget {
     rootFolder.setAttribute("aria-describedby", workspaceHelp.id);
     const workspaceField = field("Workspace folder", rootFolder);
     workspaceField.appendChild(workspaceHelp);
-    const cores = number("cores", this._draft.cores, MIN_CORES);
-    const memory = number("memoryMb", this._draft.memoryMb, MIN_MEMORY_MB);
+    const cores = number("cores", MIN_CORES, MIN_CORES);
+    const memory = number("memoryMb", MIN_MEMORY_MB, MIN_MEMORY_MB);
     const wall = number("wallMinutes", this._draft.wallMinutes);
     const gpuType = select("gpuType", []);
-    const gpuCount = number("gpuCount", this._draft.gpuCount);
+    const gpuCount = number("gpuCount", 1);
     const gpuTypeField = field("GPU type", gpuType);
     const gpuCountField = field("GPUs", gpuCount);
     options.append(
@@ -526,29 +478,21 @@ export class CreateRuntimeForm extends Widget {
       );
       const maximum = gpu?.count ?? 1;
       gpuCount.max = String(maximum);
-      this._draft.gpuType = gpuType.value;
-      this._draft.gpuCount = Math.min(
-        Math.max(this._draft.gpuCount, 1),
-        maximum,
+      gpuCount.value = String(
+        Math.min(Math.max(Number(gpuCount.value) || 1, 1), maximum),
       );
-      gpuCount.value = String(this._draft.gpuCount);
     };
     const resetPartitionResources = (selected?: IPartition): void => {
-      this._draft.cores = Math.min(MIN_CORES, selected?.cpuCount ?? MIN_CORES);
-      this._draft.memoryMb = Math.min(
-        MIN_MEMORY_MB,
-        selected?.memoryMb ?? MIN_MEMORY_MB,
+      cores.value = String(
+        Math.min(MIN_CORES, selected?.cpuCount ?? MIN_CORES),
       );
-      this._draft.gpuType = "";
-      this._draft.gpuCount = 1;
-      cores.value = String(this._draft.cores);
-      memory.value = String(this._draft.memoryMb);
+      memory.value = String(
+        Math.min(MIN_MEMORY_MB, selected?.memoryMb ?? MIN_MEMORY_MB),
+      );
       gpuCount.value = "1";
     };
     const updatePartition = (reset = false): void => {
-      const choice = selectedChoice();
-      this._draft.partitionKey = choice?.key ?? "";
-      const selected = choice?.partition;
+      const selected = selectedChoice()?.partition;
       if (reset) {
         resetPartitionResources(selected);
       }
@@ -560,12 +504,13 @@ export class CreateRuntimeForm extends Widget {
         this._draft.resourceType === "gpu"
           ? (selected?.gres.filter(isGpuGres) ?? [])
           : [];
-      replaceOptions(
+      fillOptions(
         gpuType,
-        gpus.map((item) => [gpuTypeValue(item.name), gpuTypeLabel(item.name)]),
+        gpus.map((item): [string, string] => [
+          gpuTypeValue(item.name),
+          gpuTypeLabel(item.name),
+        ]),
       );
-      this._draft.gpuType = gpus[0] ? gpuTypeValue(gpus[0].name) : "";
-      gpuType.value = this._draft.gpuType;
       const gpuSelected = this._draft.resourceType === "gpu";
       gpuTypeField.hidden = !gpuSelected;
       gpuCountField.hidden = !gpuSelected;
@@ -577,22 +522,13 @@ export class CreateRuntimeForm extends Widget {
     const selectResourceType = (type: ResourceType, reset = true): void => {
       this._draft.resourceType = type;
       this._partitionChoices = choicesFor(type);
-      replaceOptions(
+      fillOptions(
         partition,
-        this._partitionChoices.map((choice) => [
+        this._partitionChoices.map((choice): [string, string] => [
           choice.key,
           partitionLabel(choice.partition),
         ]),
       );
-      this._draft.partitionKey = this._partitionChoices[0]?.key ?? "";
-      partition.value = this._draft.partitionKey;
-      for (const input of Array.from(
-        resourceChoices.querySelectorAll<HTMLInputElement>(
-          'input[name="resourceType"]',
-        ),
-      )) {
-        input.checked = input.value === type;
-      }
       updatePartition(reset);
     };
     const buildResourceTypes = (): void => {
@@ -600,17 +536,6 @@ export class CreateRuntimeForm extends Widget {
       const types = (["cpu", "gpu"] as ResourceType[]).filter(
         (type) => choicesFor(type).length > 0,
       );
-      for (const type of types) {
-        const label = element("label", "", "csResourceTypeOption");
-        const radio = document.createElement("input");
-        radio.type = "radio";
-        radio.name = "resourceType";
-        radio.value = type;
-        radio.checked = this._draft.resourceType === type;
-        radio.onchange = () => radio.checked && selectResourceType(type);
-        label.append(radio, element("span", type.toUpperCase()));
-        resourceChoices.appendChild(label);
-      }
       const remembered = types.includes(
         this._draft.resourceType as ResourceType,
       )
@@ -623,17 +548,30 @@ export class CreateRuntimeForm extends Widget {
           `No CPU or GPU SLURM partitions were discovered for ${this._draft.sshHost}.`,
         );
       }
+      for (const type of types) {
+        const label = element("label", "", "csResourceTypeOption");
+        const radio = document.createElement("input");
+        radio.type = "radio";
+        radio.name = "resourceType";
+        radio.value = type;
+        radio.checked = type === remembered;
+        radio.onchange = () => radio.checked && selectResourceType(type);
+        label.append(radio, element("span", type.toUpperCase()));
+        resourceChoices.appendChild(label);
+      }
       selectResourceType(remembered);
       resourceType.hidden = types.length < 2;
     };
     const applyDiscovery = (value: ISlurmInfo): void => {
       this._slurm = value;
-      replaceOptions(account, [
-        ["", "(No allocation account)"],
-        ...value.accounts.map((item) => [item, item] as [string, string]),
-      ]);
-      this._draft.account = value.accounts[0] ?? "";
-      account.value = this._draft.account;
+      fillOptions(
+        account,
+        [
+          ["", "(No allocation account)"],
+          ...value.accounts.map((item): [string, string] => [item, item]),
+        ],
+        value.accounts[0] ?? "",
+      );
       buildResourceTypes();
       options.hidden = false;
       // The expanded form is the result, so the query's own progress row and any
@@ -642,20 +580,18 @@ export class CreateRuntimeForm extends Widget {
       consoleHost.textContent = "";
       operationArea.hidden = true;
     };
+    // The options are refilled before they are shown again, so hiding them is
+    // the whole reset.
     const clearDependentState = (): void => {
       this._slurm = undefined;
       this._partitionChoices = [];
       options.hidden = true;
-      resourceChoices.textContent = "";
-      replaceOptions(account, []);
-      replaceOptions(partition, []);
-      replaceOptions(gpuType, []);
       this._syncStatus();
     };
-    const current = (generation: number, alias: string): boolean =>
-      generation === this._operationGeneration &&
-      this._draft.sshHost === alias &&
-      !this.isDisposed;
+    const running = (on: boolean): void => {
+      retry.hidden = on;
+      cancelOperation.hidden = spinner.hidden = !on;
+    };
     const ensureConsole = (): ISshOperationConsole => {
       if (!this._operation) {
         this._operation = this._operationFactory();
@@ -672,9 +608,7 @@ export class CreateRuntimeForm extends Widget {
       if (options.title) {
         operationTitle.textContent = options.title;
       }
-      retry.hidden = false;
-      cancelOperation.hidden = true;
-      spinner.hidden = true;
+      running(false);
       clearDependentState();
       operationStatus.textContent = message;
       this._operation?.complete(message, options.collapse ?? true);
@@ -691,18 +625,20 @@ export class CreateRuntimeForm extends Widget {
     };
     const startDiscovery = (afterAuthentication = false): void => {
       const alias = this._draft.sshHost;
-      const generation = ++this._operationGeneration;
       clearDependentState();
       operationTitle.textContent = "Querying SLURM…";
       operationStatus.textContent = `Connecting to ${alias}.`;
-      retry.hidden = true;
-      cancelOperation.hidden = false;
-      spinner.hidden = false;
+      running(true);
+      this._discoveryAbort?.abort();
       const abort = new AbortController();
       this._discoveryAbort = abort;
+      const current = (): boolean =>
+        !abort.signal.aborted &&
+        this._draft.sshHost === alias &&
+        !this.isDisposed;
       void this._api.discoverSlurm(alias, abort.signal).then(
         (value) => {
-          if (!current(generation, alias)) {
+          if (!current()) {
             return;
           }
           if (value.host !== alias) {
@@ -714,7 +650,7 @@ export class CreateRuntimeForm extends Widget {
           applyDiscovery(value);
         },
         (reason) => {
-          if (!current(generation, alias) || abort.signal.aborted) {
+          if (!current()) {
             return;
           }
           if (!needsSshLogin(reason)) {
@@ -734,35 +670,27 @@ export class CreateRuntimeForm extends Widget {
           const operation = ensureConsole();
           operation.start(this._api.sshAuthWebSocket(alias), {
             ready: () => {
-              if (current(generation, alias)) {
+              if (current()) {
                 operationTitle.textContent = `SSH login ready — ${alias}`;
                 startDiscovery(true);
               }
             },
-            failed: (message) =>
-              current(generation, alias) && showFailure(message),
+            failed: (message) => current() && showFailure(message),
             status: (message) => {
-              if (current(generation, alias)) {
+              if (current()) {
                 operationStatus.textContent = message;
               }
             },
           });
-          requestAnimationFrame(
-            () => current(generation, alias) && operation.focus(),
-          );
+          requestAnimationFrame(() => current() && operation.focus());
         },
       );
     };
 
     retry.onclick = () => startDiscovery();
     cancelOperation.onclick = () => {
-      this._operationGeneration++;
-      this._discoveryAbort?.abort();
-      this._operation?.cancel();
+      this._stopOperation();
       endOperation("Operation cancelled. Select Retry to continue.");
-    };
-    account.onchange = () => {
-      this._draft.account = account.value;
     };
     partition.onchange = () => updatePartition(true);
     gpuType.onchange = updateGpuCount;
@@ -773,18 +701,7 @@ export class CreateRuntimeForm extends Widget {
         this._syncStatus();
       }
     };
-    for (const [control, key] of [
-      [cores, "cores"],
-      [memory, "memoryMb"],
-      [wall, "wallMinutes"],
-      [gpuCount, "gpuCount"],
-    ] as Array<
-      [HTMLInputElement, "cores" | "memoryMb" | "wallMinutes" | "gpuCount"]
-    >) {
-      control.oninput = () => {
-        this._draft[key] = Number(control.value);
-      };
-    }
+    wall.oninput = () => (this._draft.wallMinutes = Number(wall.value));
 
     if (this._slurm?.host === this._draft.sshHost) {
       applyDiscovery(this._slurm);
@@ -798,11 +715,6 @@ export class CreateRuntimeForm extends Widget {
       if (!form.reportValidity() || create.disabled) {
         return;
       }
-      const rootError = rootFolderValidationMessage(rootFolder.value);
-      if (rootError) {
-        this.setError(rootError);
-        return;
-      }
       const choice = selectedChoice();
       if (!choice) {
         return;
@@ -812,22 +724,11 @@ export class CreateRuntimeForm extends Widget {
         this._draft.resourceType === "gpu"
           ? { gpuType: gpuType.value, gpuCount: Number(gpuCount.value) }
           : {};
-      const workspace = rootFolder.value.trim();
-      const resolvedRoot = resolveLinkspanRoot(
-        workspace,
-        this._slurm?.homeDir ?? "",
-      );
-      if (!resolvedRoot) {
-        this.setError(
-          "Workspace folder must resolve from an absolute path, ~, or $HOME for managed Jupyter.",
-        );
-        return;
-      }
       const payload = {
         sshHost: this._draft.sshHost,
         ...(account.value ? { account: account.value } : {}),
         partition: choice.partition.name,
-        rootFolder: workspace,
+        rootFolder: rootFolder.value.trim(),
         resources: {
           cores: Number(cores.value),
           memoryMb: Number(memory.value),
@@ -841,11 +742,9 @@ export class CreateRuntimeForm extends Widget {
       }
       this._payload = serialized;
       this._cancelReviewOperation();
-      const request = cloneRequest({
-        idempotencyKey: this._key,
-        ...payload,
-      });
-      this._reviewRequest = request;
+      // ponytail: requests are treated as immutable; clone if a consumer ever
+      // edits one in place.
+      this._reviewRequest = { idempotencyKey: this._key, ...payload };
       this._validation = undefined;
       this._validationError = "";
       this._render();
@@ -854,87 +753,6 @@ export class CreateRuntimeForm extends Widget {
     container.appendChild(form);
     return container;
   }
-}
-
-function resolveLinkspanRoot(root: string, home: string): string | undefined {
-  if (!home.startsWith("/")) return undefined;
-  if (root.startsWith("/")) return root;
-  if ([".", "~", "$HOME", "${HOME}"].includes(root)) return home;
-  if (!root.startsWith("$") && !root.startsWith("~"))
-    return `${home.replace(/\/$/, "")}/${root}`;
-  for (const prefix of ["~/", "$HOME/", "${HOME}/"]) {
-    if (root.startsWith(prefix))
-      return `${home.replace(/\/$/, "")}/${root.slice(prefix.length)}`;
-  }
-  return undefined;
-}
-
-const WORKSPACE_SEGMENT = /^[A-Za-z0-9._-]+$/;
-const WORKSPACE_VARIABLE = /^[A-Za-z_][A-Za-z0-9_]*$/;
-
-export function rootFolderValidationMessage(value: string): string {
-  const root = value.trim();
-  if (!root) {
-    return "Workspace folder is required.";
-  }
-  if (
-    root.includes("\\") ||
-    root.includes("\0") ||
-    root.includes("\n") ||
-    root.includes("\r") ||
-    root.includes("`") ||
-    root.includes("$(")
-  ) {
-    return "Workspace folder contains unsupported shell syntax.";
-  }
-  if (root === "." || root === "~" || root === "$HOME" || root === "${HOME}") {
-    return "";
-  }
-  if (root === "/") {
-    return "Workspace folder cannot be the filesystem root.";
-  }
-
-  let suffix = root;
-  if (root.startsWith("/")) {
-    suffix = root.slice(1);
-  } else if (root.startsWith("~/")) {
-    suffix = root.slice(2);
-  } else if (root.startsWith("$")) {
-    const braced = /^\$\{([^}]+)\}(?:\/(.*))?$/.exec(root);
-    const plain = /^\$([A-Za-z_][A-Za-z0-9_]*)(?:\/(.*))?$/.exec(root);
-    const variable = braced?.[1] ?? plain?.[1];
-    suffix = braced?.[2] ?? plain?.[2] ?? "";
-    if (!variable || !WORKSPACE_VARIABLE.test(variable)) {
-      return "Workspace folder must use one environment variable at the start.";
-    }
-    if (variable !== "HOME") {
-      return "Managed Jupyter workspace variables are limited to $HOME.";
-    }
-    if (suffix === "" && root.endsWith("/")) {
-      return "Workspace folder contains an invalid segment.";
-    }
-  } else if (root.includes("$") || root.includes("~")) {
-    return "Workspace folder variables and ~ are allowed only at the start.";
-  }
-
-  if (
-    !suffix ||
-    suffix.split("/").some((part) => {
-      return (
-        !part || part === "." || part === ".." || !WORKSPACE_SEGMENT.test(part)
-      );
-    })
-  ) {
-    return "Workspace folder contains an invalid segment.";
-  }
-  return "";
-}
-
-function cloneRequest(request: IRuntimeCreateRequest): IRuntimeCreateRequest {
-  return {
-    ...request,
-    resources: { ...request.resources },
-  };
 }
 
 function isGpuGres(item: { name: string }): boolean {
@@ -982,23 +800,22 @@ function number(name: string, value: number, min = 1): HTMLInputElement {
 function select(
   name: string,
   options: Array<[string, string]>,
+  required = true,
 ): HTMLSelectElement {
   const value = element("select", "", "csSelect");
   value.name = name;
-  value.required = true;
-  replaceOptions(value, options);
+  value.required = required;
+  fillOptions(value, options);
   return value;
 }
 
-function replaceOptions(
+function fillOptions(
   control: HTMLSelectElement,
   options: Array<[string, string]>,
+  chosen = options[0]?.[0] ?? "",
 ): void {
-  control.textContent = "";
-  for (const [value, label] of options) {
-    const option = document.createElement("option");
-    option.value = value;
-    option.textContent = label;
-    control.appendChild(option);
-  }
+  control.replaceChildren(
+    ...options.map(([value, label]) => new Option(label, value)),
+  );
+  control.value = chosen;
 }

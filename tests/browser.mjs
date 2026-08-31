@@ -422,7 +422,7 @@ try {
     0,
     "device authorization must not open automatically",
   );
-  assert.equal(await deviceDialog.getAttribute("aria-modal"), "true");
+  assert.notEqual(await deviceDialog.getAttribute("open"), null);
   await deviceDialog.getByText("ABCD-EFGH", { exact: true }).waitFor();
   const openSignIn = deviceDialog.getByRole("link", {
     name: "Open sign-in page",
@@ -643,8 +643,8 @@ try {
     afterConnect.filter((entry) =>
       entry.endsWith(`/api/v1/runtimes/${createdId}`),
     ),
-    [`GET /api/v1/runtimes/${createdId}`, `GET /api/v1/runtimes/${createdId}`],
-    "Connect must validate the runtime, then recheck it live",
+    [`GET /api/v1/runtimes/${createdId}`],
+    "Connect validates the runtime once; the live recheck is only for a switch that awaited save-all",
   );
   assert.deepEqual(
     afterConnect.filter(

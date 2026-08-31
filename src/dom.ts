@@ -24,6 +24,12 @@ export function button(
   return value;
 }
 
+// A message row is rendered only when there is a message to render.
+export const notes = (rows: Array<[string, string]>): HTMLElement[] =>
+  rows
+    .filter(([message]) => message)
+    .map(([message, className]) => element("div", message, className));
+
 export function field(label: string, control: HTMLElement): HTMLElement {
   const value = element("label", "", "csField");
   value.append(element("span", label, "csLabel"), control);

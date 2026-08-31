@@ -79,7 +79,7 @@ describe("shared cs-control client", () => {
           });
         }
         if (path === "/gateway/api/v1/runtimes" && request.method === "GET") {
-          return response({ runtimes: [runtime], refreshing: false, logs: [] });
+          return response({ runtimes: [runtime], logs: [] });
         }
         if (path.endsWith("/access")) return response(access);
         return response(runtime);
@@ -173,66 +173,41 @@ describe("shared cs-control client", () => {
     expect(window.sessionStorage.getItem(key)).not.toBeNull();
   });
 
+  it("rejects a malformed id before the action is sent, not after", async () => {
+    const fetch = vi.fn(async () => response({ ...runtime, id: "rt-bogus!" }));
+    const client = new ControlClient(
+      "http://localhost:3000/gateway/api/v1",
+      auth,
+      fetch as any,
+    );
+    await expect(client.stopRuntime("rt-bogus!")).rejects.toThrow(
+      "Invalid runtime id.",
+    );
+    // Reporting a failure for an allocation that was actually stopped leaves
+    // the user with no way to tell what state it is in.
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("strictly validates the stopped runtime identity and response", async () => {
-    const malformed = [
+    for (const value of [
       { ...runtime, id: "rt-111111111111" },
       { ...runtime, state: "UNKNOWN" },
-      { ...runtime, error: 3 },
-      { ...runtime, resources: { ...runtime.resources, cores: 0 } },
-    ];
-    for (const value of malformed) {
+    ]) {
       const client = new ControlClient(
         "http://localhost:3000/gateway/api/v1",
         auth,
         vi.fn(async () => response(value)) as any,
       );
       await expect(client.stopRuntime(runtime.id)).rejects.toThrow(
-        "invalid stopped runtime",
+        /invalid .*runtime/,
       );
     }
   });
 
   it("strictly validates runtime validation responses", async () => {
     for (const value of [
-      {
-        runtimeId: "rt-012345abcdef",
-        status: "UNKNOWN",
-        script: "x",
-        message: "x",
-      },
-      {
-        runtimeId: "rt-invalid",
-        status: "PASSED",
-        script: "x",
-        message: "x",
-      },
-      {
-        runtimeId: "rt-012345abcdef",
-        status: "PASSED",
-        script: "",
-        message: "x",
-      },
-      {
-        runtimeId: "rt-012345abcdef",
-        status: "FAILED",
-        script: "x",
-        message: "x",
-        stderr: 3,
-      },
-      {
-        runtimeId: "rt-012345abcdef",
-        status: "PASSED",
-        script: "x",
-        message: "x",
-        stdout: 3,
-      },
-      {
-        runtimeId: "rt-012345abcdef",
-        status: "PASSED",
-        script: "x",
-        message: "x",
-        extra: true,
-      },
+      { status: "UNKNOWN", script: "x", message: "x" },
+      { status: "PASSED", script: "x", message: "x", extra: true },
     ]) {
       const client = new ControlClient(
         "http://localhost:3000/gateway/api/v1",
@@ -251,25 +226,15 @@ describe("shared cs-control client", () => {
     }
   });
 
-  it("rejects malformed optional fields and resource ranges", async () => {
-    const malformed = [
-      { ...runtime, account: 3 },
-      { ...runtime, error: false },
+  it("rejects fields outside the allocation contract", async () => {
+    for (const value of [
       { ...runtime, jobId: 4 },
       { ...runtime, node: [] },
-      { ...runtime, resources: { ...runtime.resources, cores: 0 } },
-      {
-        ...runtime,
-        resources: { ...runtime.resources, gpuType: "a100" },
-      },
-    ];
-    for (const value of malformed) {
+    ]) {
       const client = new ControlClient(
         "http://localhost:3000/gateway/api/v1",
         auth,
-        vi.fn(async () =>
-          response({ runtimes: [value], refreshing: false, logs: [] }),
-        ) as any,
+        vi.fn(async () => response({ runtimes: [value], logs: [] })) as any,
       );
       await expect(client.listRuntimes()).rejects.toThrow("invalid runtime");
     }

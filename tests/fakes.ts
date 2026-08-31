@@ -63,9 +63,8 @@ export function uiState(
 export function runtimeListFixture(
   runtimes: IRuntime[] = [],
   logs: IRuntimeLogTail[] = [],
-  refreshing = false,
 ): IRuntimeList {
-  return { runtimes, refreshing, logs };
+  return { runtimes, logs };
 }
 
 /** The token provider a ControlClient needs, stubbed. */

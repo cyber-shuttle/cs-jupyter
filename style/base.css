@@ -6,6 +6,15 @@
   position: fixed;
   z-index: 10000;
   inset: 0;
+  /* A <dialog> carries a UA box — fit-content sizing, auto margins, a solid
+     border and a max-width — that would shrink the scrim to a bordered card. */
+  box-sizing: border-box;
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
   display: grid;
   place-items: center;
   padding: 16px;
@@ -58,17 +67,6 @@ so they sit together
   color: var(--jp-ui-font-color2);
   cursor: pointer;
 }
-
-/* JupyterLab paints the dialog's title row; the close control belongs on it,
-not on a row of its own inside the body. */
-.jp-Dialog-content:has(.csModalClose) {
-  position: relative;
-}
-.jp-Dialog-content .csModalClose {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-}
 .csDeviceCodeCopy svg,
 .csModalClose svg {
   width: 18px;
@@ -102,7 +100,8 @@ not on a row of its own inside the body. */
 
 /* Every row reads label on the left,
 control on the right. */
-.csForm .csField {
+.csForm .csField,
+.csForm .csResourceType {
   display: grid;
   grid-template-columns: 11rem minmax(0, 1fr);
   gap: 12px;
@@ -111,22 +110,11 @@ control on the right. */
 .csForm .csField .csFieldHelp {
   grid-column: 2;
 }
-.csForm .csResourceType {
-  display: grid;
-  grid-template-columns: 11rem minmax(0, 1fr);
-  gap: 12px;
-  align-items: center;
-}
 
 /* The query is one line: it turns,
 it says what it is doing,
 and it can be
    stopped without leaving the form. */
-.csSshAuthHeader {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
 .csDiscoveryCancel {
   margin-left: auto;
 }
@@ -137,7 +125,10 @@ and it can be
   margin: 12px 0;
 }
 .csDeviceCodeOpen {
+  display: inline-flex;
+  align-items: center;
   gap: 8px;
+  text-decoration: none;
 }
 .csDeviceCodeWaiting {
   pointer-events: none;
@@ -149,17 +140,6 @@ and it can be
   justify-content: flex-end;
   gap: 8px;
   margin-top: 16px;
-}
-
-/* JupyterLab resets anchor colour with `.jp-ThemedContainer a`,
-which outranks
-   a single class,
-so the anchor form of the primary button restates it here. */
-.csDeviceCodeActions a.csPrimaryButton {
-  display: inline-flex;
-  align-items: center;
-  color: #fff;
-  text-decoration: none;
 }
 
 /* Inside the launcher's content the panel is laid out by the page,
@@ -179,13 +159,6 @@ so both levels are
 .csRuntimePanel [hidden] {
   display: none !important;
 }
-.csRoot {
-  box-sizing: border-box;
-  background: var(--jp-layout-color1);
-  color: var(--jp-ui-font-color1);
-  font-family: var(--jp-ui-font-family);
-  font-size: var(--jp-ui-font-size1);
-}
 
 /* The dialog is as tall as what it holds and no taller; only content longer
    than the viewport scrolls,
@@ -202,17 +175,7 @@ and then inside the body rather than the page. */
   display: none;
 }
 .jp-Dialog-content:has(.csWorkspaceModal) .jp-Dialog-body {
-  display: flex;
   flex: 0 1 auto;
-  flex-direction: column;
-  min-height: 0;
-  overflow: auto;
-}
-.csWorkspaceModal {
-  display: flex;
-  flex: 0 1 auto;
-  flex-direction: column;
-  width: 100%;
   min-height: 0;
 }
 
@@ -241,9 +204,6 @@ and then inside the body rather than the page. */
   color: var(--jp-error-color1);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-.csRuntimeLauncher {
-  width: 100%;
 }
 .csRuntimeHeaderWidget {
   /* The same ground the side rails stand on, so the row reads as chrome rather
@@ -368,8 +328,6 @@ still reads on one line. */
 }
 .csRuntimeCardAccount {
   overflow: hidden;
-  margin: 0;
-  line-height: 1.2;
   color: var(--jp-ui-font-color3);
   font-size: var(--jp-ui-font-size0);
   text-overflow: ellipsis;
@@ -388,7 +346,6 @@ and that reserve is the gap that separated it from the allocation beneath. */
 .jp-LauncherCard-label p.csRuntimeCardTitle {
   min-height: 0;
   margin: 0;
-  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -417,7 +374,9 @@ and that reserve is the gap that separated it from the allocation beneath. */
 .csResourceSeparator {
   color: var(--jp-ui-font-color3);
 }
-.csRuntimeState {
+.csPill,
+.csRuntimeState,
+.csCurrentPill {
   align-self: center;
   padding: 2px 7px;
   border-radius: 999px;
@@ -446,13 +405,8 @@ and that reserve is the gap that separated it from the allocation beneath. */
 so it reads as an
    identity rather than a scheduler state. */
 .csCurrentPill {
-  align-self: center;
-  padding: 2px 7px;
-  border-radius: 999px;
   background: var(--jp-brand-color1);
   color: var(--jp-ui-inverse-font-color1);
-  font-size: var(--jp-ui-font-size0);
-  font-weight: 700;
 }
 .csRuntimeCardCurrent {
   border-color: var(--jp-brand-color1);
@@ -483,9 +437,6 @@ so it reads as an
   background-size: contain;
 }
 .csRuntimeCardIcon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
   color: var(--jp-ui-font-color3);
 }
 .csRuntimeCardIcon svg {
@@ -589,7 +540,6 @@ so it sits between the two. */
   color: var(--jp-error-color1);
 }
 .csCardTitle {
-  grid-area: title;
   min-width: 0;
   margin: 0;
   overflow: hidden;
@@ -619,10 +569,6 @@ so it sits between the two. */
 /* The brand fill stays blue in both themes,
 so the text on it is white in both
    themes; the theme's inverse font colour follows the theme and goes black. */
-/* Element-qualified so an ancestor rule like `.jp-ThemedContainer a` -- which
-   already took this colour once -- cannot outrank it. */
-button.csPrimaryButton,
-a.csPrimaryButton,
 .csPrimaryButton {
   border: 1px solid var(--jp-brand-color1);
   background: var(--jp-brand-color1);
@@ -656,11 +602,6 @@ a.csPrimaryButton,
 .csPill {
   display: inline-flex;
   padding: 4px 8px;
-  border-radius: 999px;
-  background: var(--jp-layout-color3);
-  color: var(--jp-ui-font-color2);
-  font-size: var(--jp-ui-font-size0);
-  font-weight: 700;
 }
 .csForm,
 .csRuntimeReview {
@@ -778,11 +719,9 @@ not as
   outline-offset: 2px;
 }
 .csField {
-  display: block;
   margin-bottom: 14px;
 }
 .csLabel {
-  display: block;
   margin-bottom: 6px;
   color: var(--jp-ui-font-color2);
   font-weight: 600;
@@ -852,7 +791,6 @@ and the target keeps to
 }
 .csSshArgValue {
   overflow-wrap: anywhere;
-  color: var(--jp-ui-font-color1);
 }
 .csSshHostStatus {
   margin-top: 8px;
@@ -868,7 +806,6 @@ and the target keeps to
   margin-top: 6px;
   color: var(--jp-ui-font-color2);
   font-size: var(--jp-ui-font-size0);
-  font-weight: 400;
 }
 .csInput,
 .csSelect {
@@ -895,7 +832,6 @@ and the target keeps to
   gap: 12px;
   padding: 9px 10px;
   background: var(--jp-layout-color2);
-  color: var(--jp-ui-font-color1);
 }
 
 /* The transcript is the only thing on the terminal's own ground; everything
