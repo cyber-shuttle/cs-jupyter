@@ -1,12 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { resolveRuntimeId, runtimeLiteUrl } from "../src/runtime-ui";
+import { runtimeLiteUrl, selectedRuntime } from "../src/runtime-ui";
 
 const id = "rt-012345abcdef";
+const generation = "g-0123456789abcdef";
 
 describe("native Lite runtime routing", () => {
-  it("treats a malformed runtime query as unselected", () => {
-    expect(resolveRuntimeId("?runtime=not-a-runtime")).toBeUndefined();
-    expect(resolveRuntimeId(`?runtime=${id}`)).toBe(id);
+  it("selects only on a valid runtime and generation pair", () => {
+    expect(
+      selectedRuntime(`?runtime=not-a-runtime&generation=${generation}`),
+    ).toBeUndefined();
+    expect(selectedRuntime(`?runtime=${id}`)).toBeUndefined();
+    expect(selectedRuntime(`?runtime=${id}&generation=${generation}`)).toEqual({
+      runtimeId: id,
+      generation,
+    });
   });
 
   it("keeps runtime selection within the current Lite application URL", () => {

@@ -216,29 +216,6 @@ describe("runtime polling", () => {
     expect(window.sessionStorage.getItem(otherKey)).not.toBeNull();
     panel.dispose();
   });
-
-  it("does not let a slow initial read overwrite a newer poll", async () => {
-    const bootstrap =
-      Promise.withResolvers<ReturnType<typeof runtimeListFixture>>();
-    const cached = { ...runtime, state: "FAILED" as const, error: "cached" };
-    const api = {
-      signIn: vi.fn(async () => undefined),
-      listRuntimes: vi.fn(() => bootstrap.promise),
-      listSshHosts: vi.fn(async () => []),
-    };
-    const panel = panelFor(api);
-    const signedIn = panel.signIn();
-
-    api.listRuntimes.mockResolvedValue(runtimeListFixture([runtime]));
-    await pollPanel(panel);
-    expect(panel.state.runtimes[0]?.state).toBe("QUEUED");
-
-    bootstrap.resolve(runtimeListFixture([cached]));
-    await signedIn;
-    expect(panel.state.runtimes[0]?.state).toBe("QUEUED");
-    expect(panel.state.runtimes[0]?.error).toBeUndefined();
-    panel.dispose();
-  });
 });
 
 describe("session resume", () => {

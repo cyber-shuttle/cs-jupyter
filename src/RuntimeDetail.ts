@@ -1,15 +1,8 @@
 import { Widget } from "@lumino/widgets";
-import { isTerminal, type IRuntime, type RuntimeState } from "./Common";
+import { isTerminal, type IRuntime } from "./Common";
 import type { CyberShuttlePanel, IRuntimeUiState } from "./CyberShuttlePanel";
 import type { IRuntimeLogTail } from "./ControlClient";
-import { button, element, keepingFocus, statePill } from "./dom";
-
-const STOPPABLE_STATES = new Set<RuntimeState>([
-  "SUBMITTING",
-  "QUEUED",
-  "STARTING",
-  "READY",
-]);
+import { button, element, keepingFocus, notes, statePill } from "./dom";
 
 // Where the status log was scrolled, so a re-render does not throw the reader
 // back to the top. The log is always on screen, so there is no open state.
@@ -110,7 +103,7 @@ export class RuntimeDetail extends Widget {
         ),
       );
     }
-    if (STOPPABLE_STATES.has(runtime.state)) {
+    if (!isTerminal(runtime.state) && runtime.state !== "STOPPING") {
       actions.appendChild(
         this._button(
           "Stop",
@@ -172,13 +165,12 @@ export class RuntimeDetail extends Widget {
     }
     root.appendChild(details);
 
-    const error = runtime.error || this._state.error;
-    if (error) {
-      root.appendChild(element("div", error, "csError"));
-    }
-    if (this._state.updatesStatus) {
-      root.appendChild(element("div", this._state.updatesStatus, "csStatus"));
-    }
+    root.append(
+      ...notes([
+        [runtime.error || this._state.error, "csError"],
+        [this._state.updatesStatus, "csStatus"],
+      ]),
+    );
     const tail = this._state.logs.get(runtime.id);
     if (tail) {
       root.appendChild(this._runtimeLog(runtime, tail));
@@ -199,11 +191,9 @@ export class RuntimeDetail extends Widget {
   private _runtimeLog(runtime: IRuntime, tail: IRuntimeLogTail): HTMLElement {
     const view = this._logView ?? this._defaultLogView();
     this._logView = view;
-    const section = document.createElement("section");
-    section.className = "csRuntimeLog";
+    const section = element("section", "", "csRuntimeLog");
     section.appendChild(element("h4", "Status", "csRuntimeLogTitle"));
-    const scroller = document.createElement("div");
-    scroller.className = "csRuntimeLogScroll";
+    const scroller = element("div", "", "csRuntimeLogScroll");
     scroller.dataset.runtimeId = runtime.id;
     scroller.role = "log";
     scroller.ariaLabel = `Status for ${runtime.sshHost}`;
