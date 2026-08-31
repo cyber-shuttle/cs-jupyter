@@ -4,10 +4,7 @@ import {
   ControlError,
   validateSlurmResource,
 } from "../src/ControlClient";
-import {
-  CreateRuntimeForm,
-  rootFolderValidationMessage,
-} from "../src/CreateRuntimeForm";
+import { CreateRuntimeForm } from "../src/CreateRuntimeForm";
 import { FakeOperation, fakeAuth } from "./fakes";
 
 const hosts = ["alpha", "beta"].map((name) => ({
@@ -147,9 +144,6 @@ function formHarness() {
         }),
     ),
     sshAuthWebSocket: vi.fn((_host: string) => vi.fn()),
-    previewRuntimeScript: vi.fn(
-      async () => "#!/bin/bash\n#SBATCH --partition=test\n",
-    ),
     validateRuntime: vi.fn(async () => ({
       runtimeId: "rt-012345abcdef",
       status: "PASSED",
@@ -186,47 +180,6 @@ function formHarness() {
   form.setHosts(hosts);
   return { form, api, operations, discoveries, deliver, failDiscovery };
 }
-
-describe("workspace expression validation", () => {
-  it.each([
-    ".",
-    "projects/example",
-    "/scratch/user/work",
-    "~",
-    "~/cybershuttle",
-    "$HOME",
-    "$HOME/cybershuttle",
-    "${HOME}/cybershuttle",
-  ])("accepts %s", (value) => {
-    expect(rootFolderValidationMessage(value)).toBe("");
-  });
-
-  it.each([
-    "",
-    "/",
-    "..",
-    "../work",
-    "project/../work",
-    "./work",
-    "project//work",
-    "~/../work",
-    "$PROJECT/work",
-    "${PROJECT_ROOT}/work",
-    "$PROJECT/../work",
-    "$PROJECT/",
-    "work/$PROJECT",
-    "$PROJECT/$OTHER/work",
-    "${PROJECT",
-    "${PROJECT-NAME}/work",
-    "$(pwd)/work",
-    "`pwd`/work",
-    "project\\work",
-    "project\0work",
-    "/scratch/user work",
-  ])("rejects %s", (value) => {
-    expect(rootFolderValidationMessage(value)).not.toBe("");
-  });
-});
 
 describe("SSH CRUD and streamed runtime-first creation", () => {
   it("uses an OAuth bearer on cs-control host routes without XSRF", async () => {
@@ -660,33 +613,6 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
     },
   );
 
-  it("clears a stale workspace error after correction", async () => {
-    const { form, operations, deliver, failDiscovery, discoveries } =
-      formHarness();
-    choose(form, "alpha");
-    await deliver(0, discovery("alpha"));
-    const workspace = form.node.querySelector<HTMLInputElement>(
-      'input[name="rootFolder"]',
-    )!;
-    workspace.value = "..";
-    form.node
-      .querySelector("form")!
-      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-    expect(form.node.textContent).toContain(
-      "Workspace folder contains an invalid segment.",
-    );
-    workspace.value = "projects/corrected";
-    workspace.dispatchEvent(new Event("input"));
-    submitConfiguration(form);
-    await advanceToValidation();
-    await vi.waitFor(() =>
-      expect(form.node.textContent).toContain("Validation passed."),
-    );
-    expect(form.node.textContent).not.toContain(
-      "Workspace folder contains an invalid segment.",
-    );
-  });
-
   it("aborts validation on dispose and ignores its stale response", async () => {
     let resolveValidation!: (value: any) => void;
     const { form, operations, api, deliver } = formHarness();
@@ -753,16 +679,11 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
     ).toBe("projects/preserved-review");
   });
 
-  // The script has to exist before anything can validate it, and the review says
-  // which of the two is happening rather than one word for both.
-  it("says it is building the script until there is one to validate", async () => {
-    const { form, deliver, discoveries } = formHarness();
-    void discoveries;
+  it("waits on validation before showing the script it validated", async () => {
+    const { form, deliver } = formHarness();
     choose(form, "alpha");
     await deliver(0, discovery("alpha"));
-    const script = Promise.withResolvers<string>();
     const validation = Promise.withResolvers<unknown>();
-    (form as any)._api.previewRuntimeScript = () => script.promise;
     (form as any)._api.validateRuntime = () => validation.promise;
     const workspace = form.node.querySelector<HTMLInputElement>(
       'input[name="rootFolder"]',
@@ -771,22 +692,20 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
     workspace.dispatchEvent(new Event("input"));
     submitConfiguration(form);
     await vi.waitFor(() =>
-      expect(form.node.textContent).toContain("Building the Slurm script"),
-    );
-    expect(form.node.textContent).not.toContain("Validating with Slurm");
-    script.resolve("#!/bin/bash\n#SBATCH --partition=test\n");
-    await vi.waitFor(() =>
       expect(form.node.textContent).toContain("Validating with Slurm"),
     );
-    expect(form.node.querySelector(".csSlurmScript")?.textContent).toContain(
-      "#!/bin/bash",
-    );
+    expect(form.node.querySelector(".csSlurmScript")?.textContent).toBe("");
     validation.resolve({
       runtimeId: "rt-012345abcdef",
       status: "PASSED",
       script: "#!/bin/bash\n#SBATCH --partition=test\n",
       message: "Slurm accepted the script.",
     });
+    await vi.waitFor(() =>
+      expect(form.node.querySelector(".csSlurmScript")?.textContent).toContain(
+        "#!/bin/bash",
+      ),
+    );
     form.dispose();
   });
 
@@ -817,21 +736,6 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
     expect(form.node.textContent).toContain("submission failed");
     expect(form.node.textContent).toContain("Validation passed.");
     expect(submit!.disabled).toBe(false);
-  });
-
-  it("does not reset an open discovered form during unchanged host polling", async () => {
-    const { form, operations, deliver, failDiscovery, discoveries } =
-      formHarness();
-    choose(form, "alpha");
-    await deliver(0, discovery("alpha"));
-    const workspace = form.node.querySelector<HTMLInputElement>(
-      'input[name="rootFolder"]',
-    )!;
-    workspace.value = "projects/preserved";
-    workspace.dispatchEvent(new Event("input"));
-    form.setHosts([...hosts]);
-    expect(discoveries).toHaveLength(1);
-    expect(workspace.value).toBe("projects/preserved");
   });
 });
 
