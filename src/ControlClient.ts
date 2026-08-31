@@ -48,6 +48,10 @@ export interface IRuntimeLogTail {
   lines: IRuntimeLogLine[];
 }
 
+// cs-control answers 304 while the owner-filtered list and its tails are
+// byte-identical to the last poll, so there is nothing to parse or re-render.
+export const UNCHANGED = Symbol("cs-control runtime list unchanged");
+
 export interface IRuntimeList {
   runtimes: IRuntime[];
   logs: IRuntimeLogTail[];
@@ -115,6 +119,7 @@ export class ControlClient {
   private _fetch: typeof globalThis.fetch;
   private _webSockets: OAuthWebSocketFactory;
   private _auth: IControlAuth;
+  private _runtimesTag: string | undefined;
 
   constructor(
     base = PageConfig.getOption("cybershuttleControlApiUrl"),
@@ -201,8 +206,25 @@ export class ControlClient {
     return this._webSocketConnector(`ssh/${encodeURIComponent(alias)}/auth`);
   }
 
-  async listRuntimes(): Promise<IRuntimeList> {
-    const value = await this._request("runtimes");
+  // Answers UNCHANGED while cs-control's reply is byte-identical to the last
+  // one. The poll runs once a second for as long as a job sits in a queue, so
+  // most of its life is spent re-reading a list that has not moved. `cache:
+  // "no-store"` means the browser will not revalidate on its own, so the
+  // conditional request is made here.
+  async listRuntimes(): Promise<IRuntimeList | typeof UNCHANGED> {
+    const response = await this._fetch(
+      URLExt.join(this._base, "runtimes"),
+      this._runtimesTag
+        ? { headers: { "If-None-Match": this._runtimesTag } }
+        : {},
+    );
+    if (response.status === 304) {
+      return UNCHANGED;
+    }
+    if (!response.ok) {
+      await this._fail(response);
+    }
+    const value = await this._json(response);
     if (
       !isPlainObject(value) ||
       !Array.isArray(value.runtimes) ||
@@ -210,6 +232,7 @@ export class ControlClient {
     ) {
       throw new Error("cs-control returned an invalid runtime list.");
     }
+    this._runtimesTag = response.headers.get("ETag") ?? undefined;
     return {
       runtimes: value.runtimes.map(validateRuntime),
       logs: (value.logs ?? []).map(validateRuntimeLogTail),
@@ -311,34 +334,42 @@ export class ControlClient {
     return () => this._webSockets.open(endpoint);
   }
 
+  private async _fail(response: Response): Promise<never> {
+    let message = `cs-control returned ${response.status}`;
+    let code = "request_failed";
+    try {
+      const value = await response.json();
+      if (isPlainObject(value) && isPlainObject(value.error)) {
+        if (typeof value.error.code === "string") {
+          code = value.error.code;
+        }
+        if (typeof value.error.message === "string") {
+          message = value.error.message;
+        }
+      }
+    } catch {
+      // Keep the status-only error.
+    }
+    throw new ControlError(code, message);
+  }
+
+  private async _json(response: Response): Promise<unknown> {
+    try {
+      return await response.json();
+    } catch {
+      throw new Error("cs-control returned invalid JSON.");
+    }
+  }
+
   private async _request(
     path: string,
     init: RequestInit = {},
   ): Promise<unknown> {
     const response = await this._fetch(URLExt.join(this._base, path), init);
     if (!response.ok) {
-      let message = `cs-control returned ${response.status}`;
-      let code = "request_failed";
-      try {
-        const value = await response.json();
-        if (isPlainObject(value) && isPlainObject(value.error)) {
-          if (typeof value.error.code === "string") {
-            code = value.error.code;
-          }
-          if (typeof value.error.message === "string") {
-            message = value.error.message;
-          }
-        }
-      } catch {
-        // Keep the status-only error.
-      }
-      throw new ControlError(code, message);
+      await this._fail(response);
     }
-    try {
-      return await response.json();
-    } catch {
-      throw new Error("cs-control returned invalid JSON.");
-    }
+    return this._json(response);
   }
 }
 

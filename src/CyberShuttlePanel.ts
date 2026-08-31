@@ -14,6 +14,7 @@ import {
   errorMessage,
   IRuntimeLogTail,
   needsSshLogin,
+  UNCHANGED,
 } from "./ControlClient";
 import { SshLoginDock } from "./SshLoginDock";
 import { RuntimeController } from "./RuntimeController";
@@ -308,6 +309,10 @@ export class CyberShuttlePanel extends StackedPanel {
     try {
       const list = await this._api.listRuntimes();
       if (this.isDisposed) {
+        return;
+      }
+      if (list === UNCHANGED) {
+        this._setStreamStatus("");
         return;
       }
       this._setRuntimes(list.runtimes);
