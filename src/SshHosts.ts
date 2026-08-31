@@ -37,28 +37,21 @@ export class SshHosts extends Widget {
   async refresh(): Promise<void> {
     this._busy = true;
     this._error = "";
-    this._render();
+    this._sync();
     try {
-      const hosts = await this._api.listSshHosts();
-      if (!this.isDisposed) {
-        this._hosts = hosts;
-      }
+      this._hosts = await this._api.listSshHosts();
     } catch (error) {
-      if (!this.isDisposed) {
-        this._error = errorMessage(error);
-      }
+      this._error = errorMessage(error);
     } finally {
-      if (!this.isDisposed) {
-        this._busy = false;
-        this._render();
-      }
+      this._busy = false;
+      this._sync();
     }
   }
 
   private async _add(): Promise<void> {
     this._saving = true;
     this._addError = "";
-    this._render();
+    this._sync();
     try {
       await this._api.addSshHost(
         this._draft.name.trim(),
@@ -72,11 +65,9 @@ export class SshHosts extends Widget {
       this._saving = false;
       await this.refresh();
     } catch (error) {
-      if (!this.isDisposed) {
-        this._addError = errorMessage(error);
-        this._saving = false;
-        this._render();
-      }
+      this._addError = errorMessage(error);
+      this._saving = false;
+      this._sync();
     }
   }
 
@@ -84,34 +75,30 @@ export class SshHosts extends Widget {
     this._confirming = "";
     try {
       await this._api.removeSshHost(host.name);
-      if (!this.isDisposed) {
-        await this.refresh();
-      }
+      await this.refresh();
     } catch (error) {
-      if (!this.isDisposed) {
-        this._error = errorMessage(error);
-        this._render();
-      }
+      this._error = errorMessage(error);
+      this._sync();
     }
   }
 
   private async _test(host: ISshHost): Promise<void> {
     this._tests.set(host.name, { busy: true });
-    this._render();
+    this._sync();
     try {
       const result = await this._api.testSshHost(host.name);
-      if (!this.isDisposed) {
-        this._tests.set(host.name, { busy: false, ...result });
-      }
+      this._tests.set(host.name, { busy: false, ...result });
     } catch (error) {
-      if (!this.isDisposed) {
-        this._tests.set(host.name, {
-          busy: false,
-          ok: false,
-          message: errorMessage(error),
-        });
-      }
+      this._tests.set(host.name, {
+        busy: false,
+        ok: false,
+        message: errorMessage(error),
+      });
     }
+    this._sync();
+  }
+
+  private _sync(): void {
     if (!this.isDisposed) {
       this._render();
     }

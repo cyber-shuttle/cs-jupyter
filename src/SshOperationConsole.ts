@@ -140,7 +140,6 @@ export class SshOperationConsole implements ISshOperationConsole {
         this._decoder = new TextDecoder();
         this._socket = socket;
         socket.onopen = () => {
-          if (!this._current(socket, generation)) return;
           if (socket.protocol !== CYBERSHUTTLE_WEBSOCKET_PROTOCOL) {
             socket.close(
               1002,
@@ -157,24 +156,15 @@ export class SshOperationConsole implements ISshOperationConsole {
           this._fitAndReport();
           this.focus();
         };
-        socket.onmessage = (event) => {
-          if (this._current(socket, generation)) this._message(event.data);
-        };
-        socket.onerror = () => {
-          if (this._current(socket, generation) && !this._finished) {
-            this._fail("SSH operation connection failed.");
-          }
-        };
-        socket.onclose = (event) => {
-          if (this._current(socket, generation) && !this._finished) {
-            this._fail(
-              boundedAnnouncement(
-                event.reason,
-                "SSH operation connection closed.",
-              ),
-            );
-          }
-        };
+        socket.onmessage = (event) => this._message(event.data);
+        socket.onerror = () => this._fail("SSH operation connection failed.");
+        socket.onclose = (event) =>
+          this._fail(
+            boundedAnnouncement(
+              event.reason,
+              "SSH operation connection closed.",
+            ),
+          );
       },
       (error) => {
         if (!this._disposed && generation === this._generation) {
@@ -244,7 +234,7 @@ export class SshOperationConsole implements ISshOperationConsole {
   };
 
   private _fail(message: string): void {
-    if (this._disposed || this._finished) {
+    if (this._finished) {
       return;
     }
     this._finished = true;
@@ -264,14 +254,6 @@ export class SshOperationConsole implements ISshOperationConsole {
     socket.onerror = null;
     socket.onclose = null;
     socket.close();
-  }
-
-  private _current(socket: WebSocket, generation: number): boolean {
-    return (
-      !this._disposed &&
-      this._socket === socket &&
-      this._generation === generation
-    );
   }
 
   private _fitAndReport(): void {
