@@ -241,6 +241,93 @@ describe("AuthClient device-code broker flow", () => {
     expect(document.querySelector("dialog")).toBeNull();
   });
 
+  it("gives up when the broker keeps answering pending past the code's life", async () => {
+    let calls = 0;
+    let now = 1_000;
+    const fetch = vi.fn(async () => {
+      // A broker that never stops saying pending would otherwise leave the
+      // cached interaction promise unsettled for the life of the tab.
+      if (++calls > 20) throw new Error("polled past the device code's life");
+      const start = calls === 1;
+      return new Response(
+        JSON.stringify(
+          start
+            ? {
+                ...deviceAuthorization,
+                expiresInSeconds: 10,
+                intervalSeconds: 5,
+              }
+            : { status: "pending", intervalSeconds: 5 },
+        ),
+        {
+          status: start ? 200 : 202,
+          headers: { "content-type": "application/json" },
+        },
+      );
+    }) as unknown as typeof globalThis.fetch;
+
+    await expect(
+      new AuthClient(options, {
+        fetch,
+        now: () => now,
+        sleep: async (milliseconds) => void (now += milliseconds),
+      }).interactiveLogin(),
+    ).rejects.toThrow("expired");
+    expect(calls).toBe(3);
+    expect(document.querySelector("dialog")).toBeNull();
+  });
+
+  it("stops reading a broker body at the cap instead of buffering it whole", async () => {
+    let produced = 0;
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          new ReadableStream({
+            pull(controller) {
+              produced += 64 * 1024;
+              controller.enqueue(new Uint8Array(64 * 1024));
+              if (produced >= 4_000_000) controller.close();
+            },
+          }),
+          { headers: { "content-type": "application/json" } },
+        ),
+    ) as unknown as typeof globalThis.fetch;
+
+    await expect(
+      new AuthClient(options, { fetch }).interactiveLogin(),
+    ).rejects.toThrow("oversized");
+    expect(produced).toBeLessThan(1_000_000);
+  });
+
+  it("leaves no abort listener behind for the intervals it sleeps", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const added = vi.spyOn(AbortSignal.prototype, "addEventListener");
+    const removed = vi.spyOn(AbortSignal.prototype, "removeEventListener");
+    const abortListeners = (spy: typeof added): number =>
+      spy.mock.calls.filter((call) => call[0] === "abort").length;
+    try {
+      const login = new AuthClient(options, {
+        fetch: fetchSequence([
+          { body: deviceAuthorization },
+          { status: 202, body: { status: "pending", intervalSeconds: 1 } },
+          { status: 202, body: { status: "pending", intervalSeconds: 1 } },
+          { body: tokens },
+        ]),
+      }).interactiveLogin();
+      await vi.advanceTimersByTimeAsync(5_000);
+      await login;
+      // One sleep per interval, all on the login's own signal: a listener kept
+      // by every timer that fires normally grows without bound.
+      expect(abortListeners(added)).toBe(3);
+      expect(abortListeners(removed)).toBe(3);
+    } finally {
+      added.mockRestore();
+      removed.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("times out a start request without reporting explicit cancellation", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
@@ -459,6 +546,31 @@ describe("AuthClient device-code broker flow", () => {
 });
 
 describe("AuthClient credential persistence", () => {
+  // A record of another shape is not a session: read as one it throws out of
+  // the account getter mid-render, or puts `Bearer undefined` on the wire.
+  it.each([
+    { name: "no id token", record: { accessToken: "a", expiresAt: 3_600_000 } },
+    {
+      name: "a non-string id token",
+      record: { accessToken: "a", idToken: 12345, expiresAt: 3_600_000 },
+    },
+    {
+      name: "no access token",
+      record: { token: "legacy", expiresAt: 3_600_000 },
+    },
+  ])("refuses a stored record with $name", async ({ record }) => {
+    sessionStorage.setItem("cybershuttle.oauth.v1", JSON.stringify(record));
+    const client = new AuthClient(options, {
+      fetch: fetchSequence([]),
+      now: () => 1_000,
+    });
+    expect(client.account).toBeUndefined();
+    await expect(client.acquireToken()).rejects.toBeInstanceOf(
+      AuthInteractionRequiredError,
+    );
+    expect(sessionStorage.getItem("cybershuttle.oauth.v1")).toBeNull();
+  });
+
   it("restores an unexpired credential into a fresh client and drops it on expiry or sign-out", async () => {
     const dependencies = advancingDependencies([
       { body: deviceAuthorization },

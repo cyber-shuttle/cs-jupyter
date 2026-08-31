@@ -93,12 +93,19 @@ function readStoredCredentials(
   const raw = sessionStorage.getItem(SESSION_KEY);
   if (!raw) return undefined;
   try {
-    const { accessToken, idToken, expiresAt } = JSON.parse(raw) as {
-      accessToken: string;
-      idToken: string;
-      expiresAt: number;
-    };
-    if (!(expiresAt > now)) throw new Error("stored credentials expired");
+    const { accessToken, idToken, expiresAt } = JSON.parse(raw) as Record<
+      string,
+      unknown
+    >;
+    // A record of any other shape is not a session: accepting one puts
+    // `Bearer undefined` on the wire and throws out of the account getter.
+    if (
+      typeof accessToken !== "string" ||
+      typeof idToken !== "string" ||
+      !(typeof expiresAt === "number" && expiresAt > now)
+    ) {
+      throw new Error("stored credentials are unusable");
+    }
     return { credentials: { accessToken, idToken }, expiresAt };
   } catch {
     sessionStorage.removeItem(SESSION_KEY);
@@ -237,13 +244,15 @@ export class AuthClient {
     };
   }
 
-  // ponytail: expiry is the broker's (410 authorization_expired); add a client deadline if cs-control ever keeps answering 202 past expiresInSeconds.
   private async _pollForToken(
     authorization: DeviceAuthorization,
     signal: AbortSignal,
   ): Promise<TokenResult> {
     let interval = authorization.intervalSeconds * 1000;
-    for (;;) {
+    // A broker that keeps answering 202 past the life it advertised would
+    // otherwise leave the cached interaction promise unsettled for the tab.
+    const deadline = this._now() + authorization.expiresInSeconds * 1000;
+    while (this._now() < deadline) {
       await this._sleep(interval, signal);
       const { response, value } = await this._post(
         `${this._pollEndpoint}${authorization.handle}`,
@@ -286,6 +295,7 @@ export class AuthClient {
         expiresInSeconds: value.expiresInSeconds,
       };
     }
+    throw new Error("Microsoft device sign-in expired.");
   }
 
   private async _post(
@@ -309,8 +319,8 @@ export class AuthClient {
         void response.body?.cancel();
         throw new Error("cs-control returned an invalid device response.");
       }
-      const body = await response.text();
-      if (!body || body.length > MAX_BROKER_BODY) {
+      const body = await readBoundedBody(response);
+      if (!body) {
         throw new Error("cs-control returned an invalid device response.");
       }
       try {
@@ -375,6 +385,26 @@ function boundedInteger(
     value >= minimum &&
     value <= maximum
   );
+}
+
+// Bounds the body as it arrives: buffering the whole thing and measuring after
+// lets a broker answering with gigabytes reach memory before the cap is read.
+async function readBoundedBody(response: Response): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const decoder = new TextDecoder();
+  let text = "";
+  let bytes = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return text + decoder.decode();
+    bytes += value.byteLength;
+    if (bytes > MAX_BROKER_BODY) {
+      await reader.cancel();
+      throw new Error("cs-control returned an oversized device response.");
+    }
+    text += decoder.decode(value, { stream: true });
+  }
 }
 
 function jsonContentType(response: Response): boolean {
@@ -483,13 +513,15 @@ const abortableSleep = (
 ): Promise<void> =>
   new Promise((resolve, reject) => {
     if (signal.aborted) return reject(signal.reason);
-    const timer = window.setTimeout(resolve, milliseconds);
-    signal.addEventListener(
-      "abort",
-      () => {
-        window.clearTimeout(timer);
-        reject(signal.reason);
-      },
-      { once: true },
-    );
+    const abort = (): void => {
+      window.clearTimeout(timer);
+      reject(signal.reason);
+    };
+    // The poll sleeps once per interval on one long-lived signal, so a listener
+    // left behind by every timer that fires normally is an unbounded leak.
+    const timer = window.setTimeout(() => {
+      signal.removeEventListener("abort", abort);
+      resolve();
+    }, milliseconds);
+    signal.addEventListener("abort", abort, { once: true });
   });

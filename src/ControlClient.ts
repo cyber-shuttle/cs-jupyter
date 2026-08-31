@@ -119,6 +119,9 @@ export class ControlClient {
   private _fetch: typeof globalThis.fetch;
   private _webSockets: OAuthWebSocketFactory;
   private _auth: IControlAuth;
+  // Describes the list its holder already has, so every entry into or exit from
+  // a session drops it: the panel behind a fresh session holds no list to
+  // revalidate against, and a 304 would leave it empty.
   private _runtimesTag: string | undefined;
 
   constructor(
@@ -135,12 +138,14 @@ export class ControlClient {
   }
 
   async signIn(): Promise<void> {
+    this._runtimesTag = undefined;
     await this._auth.interactiveLogin();
   }
 
   // Succeeds only on a credential that is still valid, so callers can tell a
   // resumable session from one that needs the device-code round trip.
   async resumeSession(): Promise<void> {
+    this._runtimesTag = undefined;
     await this._auth.acquireToken();
   }
 
@@ -149,6 +154,7 @@ export class ControlClient {
   }
 
   signOut(): void {
+    this._runtimesTag = undefined;
     this._auth.invalidateToken?.();
   }
 
@@ -308,12 +314,13 @@ export class ControlClient {
     method: string,
     past: string,
   ): Promise<IRuntime> {
-    const path = `runtimes/${encodeURIComponent(id)}${suffix ? `/${suffix}` : ""}`;
+    const runtimeId = validRuntimeId(id);
+    const path = `runtimes/${encodeURIComponent(runtimeId)}${suffix ? `/${suffix}` : ""}`;
     const runtime = validateRuntime(await this._request(path, { method }));
-    if (runtime.id !== id) {
+    if (runtime.id !== runtimeId) {
       throw new Error(`cs-control returned an invalid ${past} runtime.`);
     }
-    clearRuntimeAccess(id);
+    clearRuntimeAccess(runtimeId);
     return runtime;
   }
 

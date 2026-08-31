@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthInteractionRequiredError } from "../src/AuthClient";
+import { ControlClient, UNCHANGED } from "../src/ControlClient";
 import { CyberShuttlePanel } from "../src/CyberShuttlePanel";
 import { cacheRuntimeAccess } from "../src/runtime-access";
 import { pollPanel, runtimeFixture, runtimeListFixture } from "./fakes";
@@ -215,6 +216,110 @@ describe("runtime polling", () => {
     expect(window.sessionStorage.getItem(key)).toBeNull();
     expect(window.sessionStorage.getItem(otherKey)).not.toBeNull();
     panel.dispose();
+  });
+});
+
+describe("polling an unchanged list", () => {
+  const ready = runtimeFixture();
+  const access = {
+    runtimeId: ready.id,
+    generation: ready.generation,
+    expiresAt: "2030-01-01T00:00:00Z",
+    jupyter: {
+      uri: "https://31002.use.devtunnels.ms/",
+      token: "A".repeat(43),
+    },
+  };
+
+  it("retries an access read that failed while cs-control reports no change", async () => {
+    const api = {
+      signIn: vi.fn(async () => undefined),
+      listRuntimes: vi
+        .fn()
+        .mockResolvedValueOnce(runtimeListFixture([ready]))
+        .mockResolvedValue(UNCHANGED),
+      listSshHosts: vi.fn(async () => []),
+      getRuntimeAccess: vi
+        .fn()
+        .mockRejectedValueOnce(new Error("tunnel not up yet"))
+        .mockResolvedValue(access),
+    };
+    const panel = panelFor(api);
+    await panel.signIn();
+    await vi.waitFor(() =>
+      expect(api.getRuntimeAccess).toHaveBeenCalledTimes(1),
+    );
+    expect(panel.state.jupyterReady.has(ready.id)).toBe(false);
+
+    // A settled runtime keeps the list byte-identical, so a card stranded at
+    // "pending" would never be offered Connect again.
+    await pollPanel(panel);
+    await vi.waitFor(() =>
+      expect(panel.state.jupyterReady.has(ready.id)).toBe(true),
+    );
+    panel.dispose();
+  });
+});
+
+describe("conditional polling across sessions", () => {
+  const etag = '"abc123"';
+  const auth = {
+    acquireToken: vi.fn(async () => ({
+      accessToken: "delegated-token",
+      idToken: "identity-token",
+    })),
+    interactiveLogin: vi.fn(async () => ({
+      accessToken: "delegated-token",
+      idToken: "identity-token",
+    })),
+    invalidateToken: vi.fn(),
+  };
+
+  // cs-control answers 304 for as long as the caller offers the tag it already
+  // has, which for a settled allocation is indefinitely.
+  const conditionalControl = () =>
+    new ControlClient(
+      "https://control.example.edu/api/v1",
+      auth as any,
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (new URL(String(input)).pathname.endsWith("/ssh")) {
+          return new Response(JSON.stringify({ hosts: [] }), {
+            headers: { "content-type": "application/json" },
+          });
+        }
+        if (new Headers(init?.headers).get("If-None-Match") === etag) {
+          return new Response(null, { status: 304 });
+        }
+        return new Response(
+          JSON.stringify({ runtimes: [runtimeFixture()], logs: [] }),
+          { headers: { "content-type": "application/json", ETag: etag } },
+        );
+      }) as any,
+    );
+
+  it("shows the list again after signing out and back in", async () => {
+    const control = conditionalControl();
+    const panel = panelFor(control);
+    await vi.waitFor(() => expect(panel.state.runtimes).toHaveLength(1));
+
+    panel.signOut();
+    expect(panel.state.runtimes).toHaveLength(0);
+    await panel.signIn();
+    expect(panel.state.runtimes.map((item) => item.id)).toEqual([
+      "rt-012345abcdef",
+    ]);
+    panel.dispose();
+  });
+
+  it("shows the list again in a panel rebuilt on the same client", async () => {
+    const control = conditionalControl();
+    const first = panelFor(control);
+    await vi.waitFor(() => expect(first.state.runtimes).toHaveLength(1));
+    first.dispose();
+
+    const second = panelFor(control);
+    await vi.waitFor(() => expect(second.state.runtimes).toHaveLength(1));
+    second.dispose();
   });
 });
 

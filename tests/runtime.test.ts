@@ -173,6 +173,21 @@ describe("shared cs-control client", () => {
     expect(window.sessionStorage.getItem(key)).not.toBeNull();
   });
 
+  it("rejects a malformed id before the action is sent, not after", async () => {
+    const fetch = vi.fn(async () => response({ ...runtime, id: "rt-bogus!" }));
+    const client = new ControlClient(
+      "http://localhost:3000/gateway/api/v1",
+      auth,
+      fetch as any,
+    );
+    await expect(client.stopRuntime("rt-bogus!")).rejects.toThrow(
+      "Invalid runtime id.",
+    );
+    // Reporting a failure for an allocation that was actually stopped leaves
+    // the user with no way to tell what state it is in.
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("strictly validates the stopped runtime identity and response", async () => {
     for (const value of [
       { ...runtime, id: "rt-111111111111" },

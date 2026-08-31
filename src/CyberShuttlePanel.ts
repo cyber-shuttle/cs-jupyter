@@ -311,13 +311,13 @@ export class CyberShuttlePanel extends StackedPanel {
       if (this.isDisposed) {
         return;
       }
-      if (list === UNCHANGED) {
-        this._setStreamStatus("");
-        return;
+      if (list !== UNCHANGED) {
+        this._setRuntimes(list.runtimes);
+        this._setRuntimeLogs(list.logs);
       }
-      this._setRuntimes(list.runtimes);
-      this._setRuntimeLogs(list.logs);
-      for (const runtime of list.runtimes) {
+      // An unchanged list still has to run this: a getRuntimeAccess that failed
+      // once would otherwise never be retried while the list sits settled.
+      for (const runtime of this._runtimes) {
         if (
           runtime.state === "READY" &&
           !this._jupyterReady.has(runtime.id) &&
