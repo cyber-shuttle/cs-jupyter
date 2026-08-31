@@ -4,8 +4,7 @@ import type { CyberShuttlePanel, IRuntimeUiState } from "./CyberShuttlePanel";
 import type { IRuntimeLogTail } from "./ControlClient";
 import { button, element, keepingFocus, notes, statePill } from "./dom";
 
-// Where the status log was scrolled, so a re-render does not throw the reader
-// back to the top. The log is always on screen, so there is no open state.
+// Where the status log was scrolled, so a re-render keeps the reader's place.
 interface IRuntimeLogView {
   scrollTop: number;
   atBottom: boolean;
@@ -92,8 +91,7 @@ export class RuntimeDetail extends Widget {
     const actions = element("div", "", "csRuntimeDetailActions");
     const busy = this._state.busyRuntimeIds.has(runtime.id);
     if (isTerminal(runtime.state)) {
-      // A terminal allocation cannot resume: cs-control submits a new one onto
-      // this same card.
+      // A terminal allocation cannot resume; cs-control submits a new one here.
       actions.appendChild(
         this._button(
           "Run again",
@@ -185,9 +183,8 @@ export class RuntimeDetail extends Widget {
     );
   }
 
-  // The status of a starting allocation is the thing an owner is waiting on, so
-  // it is always on screen rather than behind a disclosure, and each line is
-  // dated: what matters about a stalled runtime is when it last said anything.
+  // What an owner waits on, so it is never behind a disclosure, and dated: what
+  // matters about a stalled runtime is when it last said anything.
   private _runtimeLog(runtime: IRuntime, tail: IRuntimeLogTail): HTMLElement {
     const view = this._logView ?? this._defaultLogView();
     this._logView = view;

@@ -81,27 +81,6 @@ function harness() {
   };
 }
 
-async function openWizard(
-  panel: CyberShuttlePanel,
-  forms: CreateRuntimeForm[],
-): Promise<CreateRuntimeForm> {
-  await vi.waitFor(() => {
-    const create = panel.node.querySelector<HTMLButtonElement>(
-      'button[aria-label="Add Runtime"]',
-    );
-    expect(create?.disabled).toBe(false);
-  });
-  void panel.openCreate();
-  await vi.waitFor(() => expect(forms).toHaveLength(1));
-  const form = forms[0];
-  form.node
-    .querySelector<HTMLButtonElement>(
-      'button[aria-label="Select runtime host alpha"]',
-    )!
-    .click();
-  return form;
-}
-
 describe("host refresh while the runtime wizard is active", () => {
   it("uses fresh create modal widgets and swaps the same dialog to runtime detail", async () => {
     const state = harness();

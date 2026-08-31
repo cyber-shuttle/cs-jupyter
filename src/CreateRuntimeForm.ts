@@ -189,28 +189,12 @@ export class CreateRuntimeForm extends Widget {
         this._busy || this._validating || this._validation?.status !== "PASSED";
     }
     if (this._reviewStatus) {
-      const state = this._validating
-        ? "Validating with Slurm…"
-        : this._validation?.status === "PASSED"
-          ? `Validation passed. ${this._validation.message}`
-          : this._validation?.status === "FAILED"
-            ? `Validation failed. ${this._validation.message}`
-            : this._validationError || "Script unavailable.";
-      const busy = this._validating;
-      this._reviewStatus.textContent = "";
-      if (busy) {
-        this._reviewStatus.appendChild(element("span", "", "csSpinner"));
-      }
-      this._reviewStatus.appendChild(document.createTextNode(state));
-      this._reviewStatus.className = `csValidationStatus${
-        busy
-          ? " csValidationStatusBusy"
-          : this._validation?.status === "PASSED"
-            ? " csValidationPassed"
-            : this._validation?.status === "FAILED" || this._validationError
-              ? " csValidationFailed"
-              : ""
-      }`;
+      const { text, modifier } = this._validationState();
+      this._reviewStatus.replaceChildren(
+        ...(this._validating ? [element("span", "", "csSpinner")] : []),
+        document.createTextNode(text),
+      );
+      this._reviewStatus.className = `csValidationStatus ${modifier}`.trim();
     }
     if (this._reviewError) {
       const failed =
@@ -224,6 +208,27 @@ export class CreateRuntimeForm extends Widget {
       this._reviewError.className = `csValidationError${failed ? "" : " csValidationDetail"}`;
     }
     this._reviewSync?.();
+  }
+
+  private _validationState(): { text: string; modifier: string } {
+    const validation = this._validation;
+    if (this._validating) {
+      return {
+        text: "Validating with Slurm…",
+        modifier: "csValidationStatusBusy",
+      };
+    }
+    if (validation) {
+      const passed = validation.status === "PASSED";
+      return {
+        text: `Validation ${passed ? "passed" : "failed"}. ${validation.message}`,
+        modifier: passed ? "csValidationPassed" : "csValidationFailed",
+      };
+    }
+    return {
+      text: this._validationError || "Script unavailable.",
+      modifier: this._validationError ? "csValidationFailed" : "",
+    };
   }
 
   private _render(): void {
@@ -269,15 +274,15 @@ export class CreateRuntimeForm extends Widget {
       }
     });
     scriptHeader.append(scriptLabel, copy);
-    const script = document.createElement("pre");
-    script.id = "cybershuttle-slurm-script";
-    script.className = "csSlurmScript";
-    script.setAttribute("tabindex", "0");
-
-    const status = element("div", "", "csValidationStatus");
-    status.setAttribute("role", "status");
-    status.setAttribute("aria-live", "polite");
-    status.setAttribute("aria-atomic", "true");
+    const script = element("pre", "", "csSlurmScript", {
+      id: "cybershuttle-slurm-script",
+      tabindex: "0",
+    });
+    const status = element("div", "", "csValidationStatus", {
+      role: "status",
+      "aria-live": "polite",
+      "aria-atomic": "true",
+    });
     this._reviewStatus = status;
     const validationError = element("pre", "", "csValidationError");
     this._reviewError = validationError;
@@ -398,8 +403,9 @@ export class CreateRuntimeForm extends Widget {
     operationHeader.append(spinner, operationTitle, cancelOperation);
     // Discovery is a plain request, so its outcome has to be readable here.
     // The console below only ever holds an interactive login transcript.
-    const operationStatus = element("div", "", "csSshAuthStatus");
-    operationStatus.setAttribute("role", "status");
+    const operationStatus = element("div", "", "csSshAuthStatus", {
+      role: "status",
+    });
     const consoleHost = element("div", "", "csSshAuthHost");
     const retry = button("Retry", "csSecondaryButton", () => undefined);
     retry.hidden = true;
@@ -409,9 +415,7 @@ export class CreateRuntimeForm extends Widget {
     const options = element("div", "", "csRuntimeOptions");
     options.hidden = true;
     const resourceType = element("fieldset", "", "csResourceType");
-    const resourceLegend = document.createElement("legend");
-    resourceLegend.textContent = "Resource type";
-    resourceLegend.className = "csLabel";
+    const resourceLegend = element("legend", "Resource type", "csLabel");
     const resourceChoices = element("div", "", "csResourceTypeChoices");
     resourceType.append(resourceLegend, resourceChoices);
     const account = select("account", [], false);
@@ -427,8 +431,8 @@ export class CreateRuntimeForm extends Widget {
       "div",
       "Examples: . · ~/cybershuttle · $HOME/work · /scratch/user/work",
       "csFieldHelp",
+      { id: "cybershuttle-workspace-help" },
     );
-    workspaceHelp.id = "cybershuttle-workspace-help";
     rootFolder.setAttribute("aria-describedby", workspaceHelp.id);
     const workspaceField = field("Workspace folder", rootFolder);
     workspaceField.appendChild(workspaceHelp);

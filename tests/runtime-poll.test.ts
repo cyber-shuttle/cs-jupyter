@@ -3,7 +3,12 @@ import { AuthInteractionRequiredError } from "../src/AuthClient";
 import { ControlClient, UNCHANGED } from "../src/ControlClient";
 import { CyberShuttlePanel } from "../src/CyberShuttlePanel";
 import { cacheRuntimeAccess } from "../src/runtime-access";
-import { pollPanel, runtimeFixture, runtimeListFixture } from "./fakes";
+import {
+  controlFake,
+  pollPanel,
+  runtimeFixture,
+  runtimeListFixture,
+} from "./fakes";
 
 const runtime = runtimeFixture({ state: "QUEUED" });
 
@@ -38,11 +43,9 @@ beforeEach(() => {
 describe("runtime polling", () => {
   it("waits for an explicit sign-in before reading anything", async () => {
     const login = Promise.withResolvers<void>();
-    const api = {
+    const api = controlFake({
       signIn: vi.fn(() => login.promise),
-      listRuntimes: vi.fn(async () => runtimeListFixture()),
-      listSshHosts: vi.fn(async () => []),
-    };
+    });
     const panel = panelFor(api);
     await Promise.resolve();
     expect(api.signIn).not.toHaveBeenCalled();
@@ -64,14 +67,12 @@ describe("runtime polling", () => {
   });
 
   it("stops polling when the session lapses and resumes after signing in again", async () => {
-    const api = {
-      signIn: vi.fn(async () => undefined),
+    const api = controlFake({
       listRuntimes: vi
         .fn()
         .mockRejectedValueOnce(new AuthInteractionRequiredError("expired"))
         .mockResolvedValue(runtimeListFixture([runtime])),
-      listSshHosts: vi.fn(async () => []),
-    };
+    });
     const panel = panelFor(api);
     // Signing in starts the first poll, and that is the one that lapses.
     await panel.signIn();
@@ -86,14 +87,12 @@ describe("runtime polling", () => {
   });
 
   it("reports a failed poll without discarding what it already showed", async () => {
-    const api = {
-      signIn: vi.fn(async () => undefined),
+    const api = controlFake({
       listRuntimes: vi
         .fn()
         .mockResolvedValueOnce(runtimeListFixture([runtime]))
         .mockRejectedValueOnce(new Error("control unreachable")),
-      listSshHosts: vi.fn(async () => []),
-    };
+    });
     const panel = panelFor(api);
     await panel.signIn();
     await pollPanel(panel);
@@ -106,11 +105,9 @@ describe("runtime polling", () => {
   it("runs one poll at a time and stops on disposal", async () => {
     const inFlight =
       Promise.withResolvers<ReturnType<typeof runtimeListFixture>>();
-    const api = {
-      signIn: vi.fn(async () => undefined),
+    const api = controlFake({
       listRuntimes: vi.fn(() => inFlight.promise),
-      listSshHosts: vi.fn(async () => []),
-    };
+    });
     const panel = panelFor(api);
     const signedIn = panel.signIn();
     await Promise.resolve();
@@ -131,11 +128,7 @@ describe("runtime polling", () => {
 
   it("replaces the whole card set and the whole log set on every read", async () => {
     const other = { ...runtime, id: "rt-111111111111" };
-    const api = {
-      signIn: vi.fn(async () => undefined),
-      listRuntimes: vi.fn(async () => runtimeListFixture()),
-      listSshHosts: vi.fn(async () => []),
-    };
+    const api = controlFake();
     const panel = panelFor(api);
     await panel.signIn();
 
@@ -167,11 +160,7 @@ describe("runtime polling", () => {
 
   it("clears terminal and superseded access without touching other runtimes", async () => {
     const other = { ...runtime, id: "rt-111111111111" };
-    const api = {
-      signIn: vi.fn(async () => undefined),
-      listRuntimes: vi.fn(async () => runtimeListFixture()),
-      listSshHosts: vi.fn(async () => []),
-    };
+    const api = controlFake();
     const panel = panelFor(api, runtime.id);
     await panel.signIn();
     const key = `cybershuttle.runtime-access.v1.${runtime.id}`;
@@ -232,18 +221,16 @@ describe("polling an unchanged list", () => {
   };
 
   it("retries an access read that failed while cs-control reports no change", async () => {
-    const api = {
-      signIn: vi.fn(async () => undefined),
+    const api = controlFake({
       listRuntimes: vi
         .fn()
         .mockResolvedValueOnce(runtimeListFixture([ready]))
         .mockResolvedValue(UNCHANGED),
-      listSshHosts: vi.fn(async () => []),
       getRuntimeAccess: vi
         .fn()
         .mockRejectedValueOnce(new Error("tunnel not up yet"))
         .mockResolvedValue(access),
-    };
+    });
     const panel = panelFor(api);
     await panel.signIn();
     await vi.waitFor(() =>
@@ -325,12 +312,9 @@ describe("conditional polling across sessions", () => {
 
 describe("session resume", () => {
   it("treats a restored credential as signed in without a device-code round trip", async () => {
-    const api = {
+    const api = controlFake({
       resumeSession: vi.fn(async () => undefined),
-      signIn: vi.fn(async () => undefined),
-      listRuntimes: vi.fn(async () => runtimeListFixture()),
-      listSshHosts: vi.fn(async () => []),
-    };
+    });
     const panel = panelFor(api);
     await vi.waitFor(() => expect(panel.state.signedIn).toBe(true));
     expect(api.signIn).not.toHaveBeenCalled();
@@ -339,14 +323,11 @@ describe("session resume", () => {
   });
 
   it("stays signed out when no credential survived the reload", async () => {
-    const api = {
+    const api = controlFake({
       resumeSession: vi.fn(async () => {
         throw new AuthInteractionRequiredError();
       }),
-      signIn: vi.fn(async () => undefined),
-      listRuntimes: vi.fn(async () => runtimeListFixture()),
-      listSshHosts: vi.fn(async () => []),
-    };
+    });
     const panel = panelFor(api);
     await vi.waitFor(() => expect(api.resumeSession).toHaveBeenCalled());
     expect(panel.state.signedIn).toBe(false);

@@ -60,6 +60,16 @@ export function uiState(
   return { ...emptyState(), ...overrides };
 }
 
+// Every panel test differs in one or two client answers; the rest is this.
+export function controlFake<T extends object>(overrides = {} as T) {
+  return {
+    signIn: vi.fn(async () => undefined),
+    listRuntimes: vi.fn(async () => runtimeListFixture()),
+    listSshHosts: vi.fn(async () => []),
+    ...overrides,
+  };
+}
+
 export function runtimeListFixture(
   runtimes: IRuntime[] = [],
   logs: IRuntimeLogTail[] = [],

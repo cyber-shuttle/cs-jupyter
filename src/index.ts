@@ -115,8 +115,8 @@ const remoteServerSettingsPlugin: ServiceManagerPlugin<
         throw new Error("No runtime selected.");
       }
       const { runtimeId, generation } = selected;
-      // A READY runtime is a running Jupyter Server: cs-control only issues access once the
-      // allocation is up, so its response is the readiness signal.
+      // cs-control issues access only once the allocation is up, so its response
+      // is the readiness signal.
       let access = loadRuntimeAccess(runtimeId, generation);
       if (!access) {
         access = await new ControlClient(controlApiUrl).getRuntimeAccess(

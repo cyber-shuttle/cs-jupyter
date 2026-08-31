@@ -133,10 +133,9 @@ export function assertSecureOrLoopback(
   }
 }
 
-// Two different questions cs-control's responses are asked, each written out
-// several times before: is this exactly these keys, and does it carry anything
-// outside this list. The second still permits an absent optional field, so they
-// are not interchangeable.
+// Two questions a response is asked: is this exactly these keys, and does it
+// carry anything outside this list. The second permits an absent optional field,
+// so they are not interchangeable.
 export function exactKeys(
   value: unknown,
   expected: string[],

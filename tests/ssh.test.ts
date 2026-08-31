@@ -27,28 +27,39 @@ function discovery(host: string) {
     ],
   };
 }
-// The host is the form's first field, so choosing one is answering it.
-function hostSelect(form: CreateRuntimeForm): HTMLSelectElement {
-  const control = form.node.querySelector<HTMLSelectElement>(
-    'select[name="sshHost"]',
-  );
-  if (!control) {
-    throw new Error("the SSH host field is unavailable");
+// Every field lookup lands here, so a selector that stops matching fails where
+// it is read rather than three assertions later.
+function control<T extends HTMLElement>(
+  form: CreateRuntimeForm,
+  selector: string,
+): T {
+  const node = form.node.querySelector<T>(selector);
+  if (!node) {
+    throw new Error(`${selector} is unavailable`);
   }
-  return control;
+  return node;
 }
+
+const input = (form: CreateRuntimeForm, name: string): HTMLInputElement =>
+  control(form, `input[name="${name}"]`);
+const picker = (form: CreateRuntimeForm, name: string): HTMLSelectElement =>
+  control(form, `select[name="${name}"]`);
+
+// The host is the form's first field, so choosing one is answering it.
+const hostSelect = (form: CreateRuntimeForm): HTMLSelectElement =>
+  picker(form, "sshHost");
 function choose(form: CreateRuntimeForm, runtime: string): void {
-  const control = hostSelect(form);
-  if (![...control.options].some((option) => option.value === runtime)) {
+  const host = hostSelect(form);
+  if (![...host.options].some((option) => option.value === runtime)) {
     throw new Error(`runtime host ${runtime} is not listed`);
   }
-  control.value = runtime;
-  control.onchange?.(new Event("change"));
+  host.value = runtime;
+  host.onchange?.(new Event("change"));
 }
 function backToHosts(form: CreateRuntimeForm): void {
-  const control = hostSelect(form);
-  control.value = "";
-  control.onchange?.(new Event("change"));
+  const host = hostSelect(form);
+  host.value = "";
+  host.onchange?.(new Event("change"));
 }
 function options(form: CreateRuntimeForm): HTMLElement | null {
   return form.node.querySelector<HTMLElement>(".csRuntimeOptions");
@@ -125,9 +136,7 @@ function captureCreateRequest(form: CreateRuntimeForm): () => any {
 }
 
 async function submitValidForm(form: CreateRuntimeForm): Promise<void> {
-  const submit = form.node.querySelector<HTMLButtonElement>(
-    'button[type="submit"]',
-  )!;
+  const submit = control<HTMLButtonElement>(form, 'button[type="submit"]');
   expect(submit.disabled).toBe(false);
   expect(form.node.querySelector("form")?.reportValidity()).toBe(true);
   await reviewAndSubmit(form);
@@ -179,6 +188,30 @@ function formHarness() {
   };
   form.setHosts(hosts);
   return { form, api, operations, discoveries, deliver, failDiscovery };
+}
+
+// A validation left in flight: the form has submitted, the request is out, and
+// nothing has answered it yet.
+async function pendingValidation(workspaceValue: string) {
+  let resolveValidation!: (value: any) => void;
+  const { form, api, deliver } = formHarness();
+  api.validateRuntime.mockImplementation(
+    () => new Promise((resolve) => (resolveValidation = resolve)),
+  );
+  choose(form, "alpha");
+  await deliver(0, discovery("alpha"));
+  const workspace = input(form, "rootFolder");
+  workspace.value = workspaceValue;
+  workspace.dispatchEvent(new Event("input"));
+  submitConfiguration(form);
+  await advanceToValidation();
+  await vi.waitFor(() => expect(api.validateRuntime).toHaveBeenCalledOnce());
+  return {
+    form,
+    api,
+    signal: api.validateRuntime.mock.calls[0][1] as AbortSignal,
+    resolveValidation,
+  };
 }
 
 describe("SSH CRUD and streamed runtime-first creation", () => {
@@ -254,8 +287,7 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
   });
 
   it("starts with host selection and reveals options after a valid result", async () => {
-    const { form, api, operations, deliver, failDiscovery, discoveries } =
-      formHarness();
+    const { form, api, operations, deliver } = formHarness();
     expect(options(form)?.hidden).toBe(true);
     expect(operations).toHaveLength(0);
     expect(hostSelect(form).value).toBe("");
@@ -282,8 +314,7 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
   });
 
   it("opens the login console on demand and restarts discovery once", async () => {
-    const { form, api, operations, deliver, failDiscovery, discoveries } =
-      formHarness();
+    const { form, api, operations, discoveries, failDiscovery } = formHarness();
     choose(form, "alpha");
     expect(operations).toHaveLength(0);
     await failDiscovery(
@@ -306,8 +337,7 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
   });
 
   it("shows actionable retry after stream error and starts one new attempt", async () => {
-    const { form, operations, deliver, failDiscovery, discoveries } =
-      formHarness();
+    const { form, discoveries, failDiscovery } = formHarness();
     choose(form, "alpha");
     await failDiscovery(0, new Error("scheduler unavailable"));
     const retry = [...form.node.querySelectorAll("button")].find(
@@ -320,7 +350,7 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
   });
 
   it("ignores a stale discovery result after switching hosts", async () => {
-    const { form, deliver, discoveries } = formHarness();
+    const { form, discoveries, deliver } = formHarness();
     choose(form, "alpha");
     backToHosts(form);
     choose(form, "beta");
@@ -336,8 +366,7 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
   });
 
   it("rejects malformed streamed resources and retains retry/details", async () => {
-    const { form, operations, deliver, failDiscovery, discoveries } =
-      formHarness();
+    const { form, deliver } = formHarness();
     choose(form, "alpha");
     await deliver(0, {
       host: "alpha",
@@ -353,8 +382,7 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
   });
 
   it("aborts discovery and disposes the login console when the form is disposed", async () => {
-    const { form, operations, deliver, failDiscovery, discoveries } =
-      formHarness();
+    const { form, operations, failDiscovery } = formHarness();
     choose(form, "alpha");
     await failDiscovery(
       0,
@@ -367,16 +395,13 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
   });
 
   it("filters CPU-only discovery and omits GPU fields from the payload", async () => {
-    const { form, operations, deliver, failDiscovery, discoveries } =
-      formHarness();
+    const { form, deliver } = formHarness();
     choose(form, "alpha");
     await deliver(0, {
       ...discovery("alpha"),
       partitions: [{ name: "cpu", cpuCount: 32, memoryMb: 128000, gres: [] }],
     });
-    const partition = form.node.querySelector<HTMLSelectElement>(
-      'select[name="partition"]',
-    )!;
+    const partition = picker(form, "partition");
     expect([...partition.options].map((item) => item.textContent)).toEqual([
       "cpu — 32 CPU · 128000 MB",
     ]);
@@ -388,9 +413,7 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
         .querySelector<HTMLElement>('select[name="gpuType"]')
         ?.closest(".csField")?.hidden,
     ).toBe(true);
-    const workspace = form.node.querySelector<HTMLInputElement>(
-      'input[name="rootFolder"]',
-    )!;
+    const workspace = input(form, "rootFolder");
     workspace.value = "projects/cpu";
     workspace.dispatchEvent(new Event("input"));
     const request = captureCreateRequest(form);
@@ -401,8 +424,7 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
   });
 
   it("keeps non-GPU GRES on CPU and does not drop mixed GPU partitions", async () => {
-    const { form, operations, deliver, failDiscovery, discoveries } =
-      formHarness();
+    const { form, deliver } = formHarness();
     choose(form, "alpha");
     await deliver(0, {
       ...discovery("alpha"),
@@ -431,16 +453,15 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
       ],
     });
 
-    const partition = form.node.querySelector<HTMLSelectElement>(
-      'select[name="partition"]',
-    )!;
+    const partition = picker(form, "partition");
     expect([...partition.options].map((item) => item.textContent)).toEqual([
       "licensed-cpu — 32 CPU · 128000 MB",
     ]);
 
-    const gpu = form.node.querySelector<HTMLInputElement>(
+    const gpu = control<HTMLInputElement>(
+      form,
       'input[name="resourceType"][value="gpu"]',
-    )!;
+    );
     gpu.checked = true;
     gpu.dispatchEvent(new Event("change"));
     expect([...partition.options].map((item) => item.textContent)).toEqual([
@@ -450,8 +471,7 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
   });
 
   it("submits generic GPU GRES using the stable gpu type", async () => {
-    const { form, operations, deliver, failDiscovery, discoveries } =
-      formHarness();
+    const { form, deliver } = formHarness();
     choose(form, "alpha");
     await deliver(0, {
       ...discovery("alpha"),
@@ -464,15 +484,11 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
         },
       ],
     });
-    const gpuType = form.node.querySelector<HTMLSelectElement>(
-      'select[name="gpuType"]',
-    )!;
+    const gpuType = picker(form, "gpuType");
     expect(gpuType.value).toBe("gpu");
     expect(gpuType.selectedOptions[0].textContent).toBe("Generic GPU");
 
-    const workspace = form.node.querySelector<HTMLInputElement>(
-      'input[name="rootFolder"]',
-    )!;
+    const workspace = input(form, "rootFolder");
     workspace.value = "projects/generic-gpu";
     const request = captureCreateRequest(form);
     await reviewAndSubmit(form);
@@ -481,8 +497,7 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
   });
 
   it("auto-selects GPU-only discovery and includes GPU fields", async () => {
-    const { form, operations, deliver, failDiscovery, discoveries } =
-      formHarness();
+    const { form, deliver } = formHarness();
     choose(form, "alpha");
     await deliver(0, {
       ...discovery("alpha"),
@@ -504,9 +519,7 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
       form.node.querySelector<HTMLSelectElement>('select[name="gpuType"]')
         ?.value,
     ).toBe("h100");
-    const workspace = form.node.querySelector<HTMLInputElement>(
-      'input[name="rootFolder"]',
-    )!;
+    const workspace = input(form, "rootFolder");
     workspace.value = "projects/gpu";
     const request = captureCreateRequest(form);
     await submitValidForm(form);
@@ -514,8 +527,7 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
   });
 
   it("shows CPU and GPU as top-level choices and resets bounded resources on switch", async () => {
-    const { form, operations, deliver, failDiscovery, discoveries } =
-      formHarness();
+    const { form, deliver } = formHarness();
     choose(form, "alpha");
     await deliver(0, discovery("alpha"));
     const radios = [
@@ -525,12 +537,8 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
     ];
     expect(radios.map((item) => item.value)).toEqual(["cpu", "gpu"]);
     expect(radios.find((item) => item.checked)?.value).toBe("cpu");
-    const cores = form.node.querySelector<HTMLInputElement>(
-      'input[name="cores"]',
-    )!;
-    const memory = form.node.querySelector<HTMLInputElement>(
-      'input[name="memoryMb"]',
-    )!;
+    const cores = input(form, "cores");
+    const memory = input(form, "memoryMb");
     cores.value = "12";
     cores.dispatchEvent(new Event("input"));
     memory.value = "12000";
@@ -551,8 +559,7 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
   });
 
   it("keeps duplicate scheduler partition names deterministic and submits the real name", async () => {
-    const { form, operations, deliver, failDiscovery, discoveries } =
-      formHarness();
+    const { form, deliver } = formHarness();
     choose(form, "alpha");
     await deliver(0, {
       ...discovery("alpha"),
@@ -567,9 +574,7 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
         },
       ],
     });
-    const partition = form.node.querySelector<HTMLSelectElement>(
-      'select[name="partition"]',
-    )!;
+    const partition = picker(form, "partition");
     expect([...partition.options].map((item) => item.value)).toEqual([
       "cpu:0",
       "cpu:1",
@@ -580,9 +585,7 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
     ]);
     partition.value = "cpu:1";
     partition.dispatchEvent(new Event("change"));
-    const workspace = form.node.querySelector<HTMLInputElement>(
-      'input[name="rootFolder"]',
-    )!;
+    const workspace = input(form, "rootFolder");
     workspace.value = "projects/full";
     const request = captureCreateRequest(form);
     await submitValidForm(form);
@@ -592,13 +595,10 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
   it.each([".", "$HOME/work", "/scratch/user/work"])(
     "preserves raw workspace expression %s in the create payload",
     async (expression) => {
-      const { form, operations, deliver, failDiscovery, discoveries } =
-        formHarness();
+      const { form, deliver } = formHarness();
       choose(form, "alpha");
       await deliver(0, discovery("alpha"));
-      const workspace = form.node.querySelector<HTMLInputElement>(
-        'input[name="rootFolder"]',
-      )!;
+      const workspace = input(form, "rootFolder");
       expect(workspace.getAttribute("aria-describedby")).toBe(
         "cybershuttle-workspace-help",
       );
@@ -614,22 +614,8 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
   );
 
   it("aborts validation on dispose and ignores its stale response", async () => {
-    let resolveValidation!: (value: any) => void;
-    const { form, operations, api, deliver } = formHarness();
-    api.validateRuntime.mockImplementation(
-      () => new Promise((resolve) => (resolveValidation = resolve)),
-    );
-    choose(form, "alpha");
-    await deliver(0, discovery("alpha"));
-    const workspace = form.node.querySelector<HTMLInputElement>(
-      'input[name="rootFolder"]',
-    )!;
-    workspace.value = "projects/dispose";
-    workspace.dispatchEvent(new Event("input"));
-    submitConfiguration(form);
-    await advanceToValidation();
-    await vi.waitFor(() => expect(api.validateRuntime).toHaveBeenCalledOnce());
-    const signal = api.validateRuntime.mock.calls[0][1];
+    const { form, signal, resolveValidation } =
+      await pendingValidation("projects/dispose");
 
     form.dispose();
     expect(signal.aborted).toBe(true);
@@ -645,22 +631,9 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
   });
 
   it("ignores stale validation after Back and preserves the draft", async () => {
-    let resolveValidation!: (value: any) => void;
-    const { form, operations, api, deliver } = formHarness();
-    api.validateRuntime.mockImplementation(
-      () => new Promise((resolve) => (resolveValidation = resolve)),
+    const { form, signal, resolveValidation } = await pendingValidation(
+      "projects/preserved-review",
     );
-    choose(form, "alpha");
-    await deliver(0, discovery("alpha"));
-    const workspace = form.node.querySelector<HTMLInputElement>(
-      'input[name="rootFolder"]',
-    )!;
-    workspace.value = "projects/preserved-review";
-    workspace.dispatchEvent(new Event("input"));
-    submitConfiguration(form);
-    await advanceToValidation();
-    await vi.waitFor(() => expect(api.validateRuntime).toHaveBeenCalledOnce());
-    const signal = api.validateRuntime.mock.calls[0][1];
     [...form.node.querySelectorAll<HTMLButtonElement>("button")]
       .find((item) => item.textContent === "Back")!
       .click();
@@ -685,9 +658,7 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
     await deliver(0, discovery("alpha"));
     const validation = Promise.withResolvers<unknown>();
     (form as any)._api.validateRuntime = () => validation.promise;
-    const workspace = form.node.querySelector<HTMLInputElement>(
-      'input[name="rootFolder"]',
-    )!;
+    const workspace = input(form, "rootFolder");
     workspace.value = "$HOME";
     workspace.dispatchEvent(new Event("input"));
     submitConfiguration(form);
@@ -710,13 +681,10 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
   });
 
   it("shows create errors on the review step without losing validation", async () => {
-    const { form, operations, deliver, failDiscovery, discoveries } =
-      formHarness();
+    const { form, api, deliver } = formHarness();
     choose(form, "alpha");
     await deliver(0, discovery("alpha"));
-    const workspace = form.node.querySelector<HTMLInputElement>(
-      'input[name="rootFolder"]',
-    )!;
+    const workspace = input(form, "rootFolder");
     workspace.value = "projects/create-error";
     form.createRequested.connect(() => {
       form.setBusy(true);

@@ -12,6 +12,7 @@ import {
 } from "../src/runtime-access";
 import { CyberShuttleHeader, RuntimeList } from "../src/RuntimeList";
 import {
+  controlFake,
   pollPanel,
   runtimeFixture,
   runtimeListFixture,
@@ -77,10 +78,8 @@ function harness(
     commands: { execute, hasCommand: vi.fn(() => true) },
     shell: { currentWidget: null },
   };
-  const api = {
-    signIn: vi.fn(async () => undefined),
+  const api = controlFake({
     listRuntimes: vi.fn(async () => runtimeListFixture(runtimes)),
-    listSshHosts: vi.fn(async () => []),
     getRuntime: vi.fn(getRuntime),
     stopRuntime: vi.fn(async () => first),
     getRuntimeAccess: vi.fn(async (id: string) => ({
@@ -92,7 +91,7 @@ function harness(
         token: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
       },
     })),
-  };
+  });
   sessionStorage.clear();
   for (const runtime of runtimes) {
     cacheRuntimeAccess({

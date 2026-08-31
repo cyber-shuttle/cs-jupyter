@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import type { IRuntime } from "../src/Common";
 import { CyberShuttlePanel } from "../src/CyberShuttlePanel";
-import { pollPanel, runtimeFixture, runtimeListFixture } from "./fakes";
+import {
+  controlFake,
+  pollPanel,
+  runtimeFixture,
+  runtimeListFixture,
+} from "./fakes";
 
 const base = runtimeFixture({
   id: "rt-111111111111",
@@ -21,12 +26,10 @@ async function loaded(panel: CyberShuttlePanel): Promise<void> {
 
 /** A loaded panel whose only runtime is the stopped one, ready to run again. */
 async function started(startRuntime: unknown) {
-  const api = {
-    signIn: vi.fn(async () => undefined),
+  const api = controlFake({
     listRuntimes: vi.fn(async () => runtimeListFixture([base])),
-    listSshHosts: vi.fn(async () => []),
     startRuntime,
-  };
+  });
   const panel = new CyberShuttlePanel(
     api as any,
     {
@@ -42,17 +45,15 @@ describe("runtime stop action", () => {
   it("publishes busy and error state for controller actions", async () => {
     const stopPending = Promise.withResolvers<IRuntime>();
     const failing = Promise.withResolvers<IRuntime>();
-    const api = {
-      signIn: vi.fn(async () => undefined),
+    const api = controlFake({
       listRuntimes: vi.fn(async () =>
         runtimeListFixture([{ ...base, state: "READY" as const }]),
       ),
-      listSshHosts: vi.fn(async () => []),
       stopRuntime: vi
         .fn()
         .mockReturnValueOnce(failing.promise)
         .mockReturnValueOnce(stopPending.promise),
-    };
+    });
     const panel = new CyberShuttlePanel(
       api as any,
       { currentRuntimeId: undefined, select: vi.fn() } as any,
