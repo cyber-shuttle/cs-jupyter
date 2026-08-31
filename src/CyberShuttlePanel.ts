@@ -191,6 +191,9 @@ export class CyberShuttlePanel extends StackedPanel {
   }
 
   private _setStreamStatus(message: string): void {
+    if (this._updatesStatus === message) {
+      return;
+    }
     this._updatesStatus = message;
     this._emitState();
   }
@@ -318,7 +321,6 @@ export class CyberShuttlePanel extends StackedPanel {
           void this.refreshJupyter(runtime.id);
         }
       }
-      this._emitState();
       this._setStreamStatus("");
     } catch (error) {
       if (this.isDisposed) {
