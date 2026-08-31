@@ -192,7 +192,7 @@ const terminalManagerPlugin: ServiceManagerPlugin<
   autoStart: true,
   provides: ITerminalManager,
   requires: [IRemoteServerSettings],
-  // ponytail: the active runtime id is the fail-closed signal; tag the settings
+  // Trade-off: the active runtime id is the fail-closed signal; tag the settings
   // object only if a second settings producer ever appears.
   activate: (_app, serverSettings) =>
     getActiveRuntimeId()

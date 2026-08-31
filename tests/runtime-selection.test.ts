@@ -169,7 +169,7 @@ describe("serialized runtime selection", () => {
       [...panel.header.node.querySelectorAll("h2")].map((h) =>
         h.textContent?.trim(),
       ),
-    ).toEqual(["Cybershuttle"]);
+    ).toEqual(["CyberShuttle"]);
     expect(
       // The runtimes render as a section the launcher can host directly, so
       // they share its scrolling content instead of bringing their own.

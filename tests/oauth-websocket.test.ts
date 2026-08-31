@@ -49,6 +49,8 @@ describe("OAuth WebSocket factory", () => {
   });
 
   it("acquires fresh credentials and sends only the three exact subprotocols", async () => {
+    // The multibyte token is the point: the subprotocol carries base64url of the
+    // UTF-8 bytes, so an ASCII-only vector would not exercise the encoding.
     const acquireToken = vi
       .fn()
       .mockResolvedValueOnce({ accessToken: "token-✓", idToken: "first-id" })

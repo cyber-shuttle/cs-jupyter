@@ -388,7 +388,7 @@ export class CyberShuttlePanel extends StackedPanel {
     this._emitState();
   }
 
-  // ponytail: the first poll is the bootstrap read; add a separate initial
+  // Trade-off: the first poll is the bootstrap read; add a separate initial
   // fetch only if the poll ever stops returning the full list.
   private async _activateSession(): Promise<void> {
     this._signedIn = true;

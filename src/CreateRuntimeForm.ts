@@ -76,7 +76,7 @@ export class CreateRuntimeForm extends Widget {
     this._render();
   }
 
-  // ponytail: setHosts is called once per form; restore compare-and-skip if
+  // Trade-off: setHosts is called once per form; restore compare-and-skip if
   // host polling returns.
   setHosts(hosts: ISshHost[]): void {
     this._hosts = hosts;
@@ -393,7 +393,7 @@ export class CreateRuntimeForm extends Widget {
     operationArea.hidden = !this._draft.sshHost;
     const operationHeader = element("div", "", "csSshAuthHeader");
     const spinner = element("span", "", "csSpinner");
-    const operationTitle = element("strong", "SLURM discovery");
+    const operationTitle = element("strong", "Slurm discovery");
     const cancelOperation = button(
       "Cancel",
       "csTextButton csDiscoveryCancel",
@@ -549,7 +549,7 @@ export class CreateRuntimeForm extends Widget {
           : types[0];
       if (!remembered) {
         throw new Error(
-          `No CPU or GPU SLURM partitions were discovered for ${this._draft.sshHost}.`,
+          `No CPU or GPU Slurm partitions were discovered for ${this._draft.sshHost}.`,
         );
       }
       for (const type of types) {
@@ -619,7 +619,7 @@ export class CreateRuntimeForm extends Widget {
     };
     const showFailure = (message: string): void => {
       endOperation(message, {
-        title: `SLURM discovery failed — ${this._draft.sshHost}`,
+        title: `Slurm discovery failed — ${this._draft.sshHost}`,
         collapse: false,
       });
       if (!this._operation) {
@@ -630,7 +630,7 @@ export class CreateRuntimeForm extends Widget {
     const startDiscovery = (afterAuthentication = false): void => {
       const alias = this._draft.sshHost;
       clearDependentState();
-      operationTitle.textContent = "Querying SLURM…";
+      operationTitle.textContent = "Querying Slurm…";
       operationStatus.textContent = `Connecting to ${alias}.`;
       running(true);
       this._discoveryAbort?.abort();
@@ -647,7 +647,7 @@ export class CreateRuntimeForm extends Widget {
           }
           if (value.host !== alias) {
             showFailure(
-              `Received SLURM discovery for ${value.host}, not ${alias}.`,
+              `Received Slurm discovery for ${value.host}, not ${alias}.`,
             );
             return;
           }
@@ -746,7 +746,7 @@ export class CreateRuntimeForm extends Widget {
       }
       this._payload = serialized;
       this._cancelReviewOperation();
-      // ponytail: requests are treated as immutable; clone if a consumer ever
+      // Trade-off: requests are treated as immutable; clone if a consumer ever
       // edits one in place.
       this._reviewRequest = { idempotencyKey: this._key, ...payload };
       this._validation = undefined;

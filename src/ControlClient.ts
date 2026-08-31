@@ -531,7 +531,7 @@ export function validateSlurmResource(value: unknown): ISlurmInfo {
       (part) => isPlainObject(part) && Array.isArray(part.gres),
     )
   ) {
-    throw new Error("cs-control returned invalid SLURM discovery.");
+    throw new Error("cs-control returned invalid Slurm discovery.");
   }
   return value as unknown as ISlurmInfo;
 }

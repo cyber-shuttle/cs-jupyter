@@ -50,7 +50,7 @@ export class CyberShuttleHeader extends Widget {
       "",
       "jp-Launcher-sectionHeader csRuntimeLauncherHeader",
     );
-    const title = element("h2", "Cybershuttle", "jp-Launcher-sectionTitle");
+    const title = element("h2", "CyberShuttle", "jp-Launcher-sectionTitle");
     header.append(
       element("div", "", "csRuntimeSectionIcon"),
       title,
@@ -215,7 +215,7 @@ export class RuntimeList extends Widget {
     );
     card.ariaLabel = `${runtime.sshHost}, ${runtime.state}${current ? ", current session" : ""}`;
     card.title = card.ariaLabel;
-    card.dataset.category = "Cybershuttle Runtimes";
+    card.dataset.category = "CyberShuttle Runtimes";
     card.dataset.runtimeAction = runtime.id;
     card.onclick = () => this.runtimeRequested.emit(runtime.id);
     const label = element(

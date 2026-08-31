@@ -373,7 +373,7 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
       accounts: null,
     });
     expect(options(form)?.hidden).toBe(true);
-    expect(form.node.textContent).toContain("invalid SLURM discovery");
+    expect(form.node.textContent).toContain("invalid Slurm discovery");
     expect(
       [...form.node.querySelectorAll("button")].some(
         (item) => item.textContent === "Retry" && !item.hidden,
