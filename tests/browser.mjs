@@ -397,7 +397,7 @@ try {
   // runtime-ui attaches it to launcher.contentHeader so it spans the launcher.
   assert.equal(
     await page
-      .getByRole("heading", { name: "Cybershuttle", exact: true })
+      .getByRole("heading", { name: "CyberShuttle", exact: true })
       .count(),
     1,
     "the product heading must appear once, in the launcher content header",
@@ -494,7 +494,7 @@ try {
       .evaluateAll((cards) =>
         cards.map((card) => card.getAttribute("data-category")),
       ),
-    ["Cybershuttle Runtimes", "Cybershuttle Runtimes"],
+    ["CyberShuttle Runtimes", "CyberShuttle Runtimes"],
   );
 
   const runtimeSection = panel.locator(".csRuntimeSection");

@@ -174,13 +174,15 @@ describe("shared cs-control client", () => {
   });
 
   it("rejects a malformed id before the action is sent, not after", async () => {
-    const fetch = vi.fn(async () => response({ ...runtime, id: "rt-bogus!" }));
+    const fetch = vi.fn(async () =>
+      response({ ...runtime, id: "rt-invalid!" }),
+    );
     const client = new ControlClient(
       "http://localhost:3000/gateway/api/v1",
       auth,
       fetch as any,
     );
-    await expect(client.stopRuntime("rt-bogus!")).rejects.toThrow(
+    await expect(client.stopRuntime("rt-invalid!")).rejects.toThrow(
       "Invalid runtime id.",
     );
     // Reporting a failure for an allocation that was actually stopped leaves

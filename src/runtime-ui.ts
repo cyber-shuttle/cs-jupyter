@@ -69,9 +69,9 @@ export const runtimeUiPlugin: JupyterFrontEndPlugin<void> = {
     // The title row stays put, so it goes in the main widget's fixed header. The
     // runtimes scroll with the page, so they go in the launcher's own content;
     // mounting them in the header too gave them a second scroll container.
-    // ponytail: one await on the launcher's render; if JupyterLab ever renders
+    // Trade-off: one await on the launcher's render. If JupyterLab ever renders
     // the launcher content lazily across frames the section silently fails to
-    // mount — restore a bounded frame wait then.
+    // mount; restore a bounded frame wait then.
     const mountSection = async (launcher: MainWidget): Promise<void> => {
       await (launcher.content as ReactWidget).renderPromise;
       const content = launcher.content.node.querySelector<HTMLElement>(
