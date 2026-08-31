@@ -1,7 +1,8 @@
-import { GENERATION } from "./Common";
+import { GENERATION, RUNTIME_ID } from "./Common";
 import type { JupyterFrontEndPlugin } from "@jupyterlab/application";
 import { ICommandPalette } from "@jupyterlab/apputils";
 import { PageConfig } from "@jupyterlab/coreutils";
+import type { ReactWidget } from "@jupyterlab/ui-components";
 import { BoxPanel, Widget } from "@lumino/widgets";
 import { ControlClient, validRuntimeId } from "./ControlClient.js";
 import { CyberShuttlePanel } from "./CyberShuttlePanel.js";
@@ -9,19 +10,20 @@ import {
   RuntimeController,
   installRuntimeCommandGuard,
 } from "./RuntimeController.js";
-import { getActiveRuntimeId } from "./runtime-state.js";
 
 export const SELECT_RUNTIME_COMMAND = "@cybershuttle/jupyter:select-runtime";
 
-export function resolveRuntimeId(
+// The selection is the pair or nothing: a runtime without a live generation
+// names no allocation.
+export function selectedRuntime(
   search = window.location.search,
-): string | undefined {
-  const value = new URLSearchParams(search).get("runtime")?.trim();
-  try {
-    return value ? validRuntimeId(value) : undefined;
-  } catch {
-    return undefined;
-  }
+): { runtimeId: string; generation: string } | undefined {
+  const query = new URLSearchParams(search);
+  const runtimeId = query.get("runtime")?.trim() ?? "";
+  const generation = query.get("generation") ?? "";
+  return RUNTIME_ID.test(runtimeId) && GENERATION.test(generation)
+    ? { runtimeId, generation }
+    : undefined;
 }
 
 export function runtimeLiteUrl(
@@ -44,14 +46,6 @@ export function runtimeLiteUrl(
 
 type MainWidget = Widget & { content: Widget; contentHeader: BoxPanel };
 
-class LiteRuntimeController extends RuntimeController {
-  activeRuntimeId: string | undefined;
-
-  override get currentRuntimeId(): string | undefined {
-    return this.activeRuntimeId;
-  }
-}
-
 const launcherHeaderHeight = 46;
 
 export const runtimeUiPlugin: JupyterFrontEndPlugin<void> = {
@@ -62,13 +56,12 @@ export const runtimeUiPlugin: JupyterFrontEndPlugin<void> = {
     const api = new ControlClient(
       PageConfig.getOption("cybershuttleControlApiUrl"),
     );
-    const controller = new LiteRuntimeController(
+    const controller = new RuntimeController(
       app,
       api,
       (runtimeId, generation, path) =>
         runtimeLiteUrl(runtimeId, generation, path),
     );
-    controller.activeRuntimeId = getActiveRuntimeId();
     let panel: CyberShuttlePanel | undefined;
     const asLauncher = (widget: Widget | null): MainWidget | undefined =>
       (widget as MainWidget | null)?.content?.hasClass("jp-Launcher")
@@ -79,28 +72,19 @@ export const runtimeUiPlugin: JupyterFrontEndPlugin<void> = {
     // launcher's own content beside the sections it renders itself; mounting
     // them in the header too gave them a second scroll container and a long
     // list scrolled against the rest of the page rather than with it.
-    // The launcher renders its content asynchronously, so the section waits for
-    // that content to exist rather than watching the DOM for it.
+    // ponytail: one await on the launcher's render; if JupyterLab ever renders
+    // the launcher content lazily across frames the section silently fails to
+    // mount — restore a bounded frame wait then.
     const mountSection = async (launcher: MainWidget): Promise<void> => {
-      for (let frame = 0; panel && frame < 60; frame += 1) {
-        const content = launcher.content.node.querySelector<HTMLElement>(
-          ".jp-Launcher-content",
-        );
-        if (content) {
-          if (panel.node.parentElement !== content) {
-            // Lumino owns both the insertion and the attach lifecycle: placing
-            // the node first makes it connected, which attach then rejects.
-            if (panel.isAttached) Widget.detach(panel);
-            Widget.attach(
-              panel,
-              content,
-              content.firstElementChild as HTMLElement,
-            );
-          }
-          return;
-        }
-        await new Promise(requestAnimationFrame);
-      }
+      await (launcher.content as ReactWidget).renderPromise;
+      const content = launcher.content.node.querySelector<HTMLElement>(
+        ".jp-Launcher-content",
+      );
+      if (!panel || !content || panel.node.parentElement === content) return;
+      // Lumino owns both the insertion and the attach lifecycle: placing the
+      // node first makes it connected, which attach then rejects.
+      if (panel.isAttached) Widget.detach(panel);
+      Widget.attach(panel, content, content.firstElementChild as HTMLElement);
     };
 
     // JupyterLab disposes a launcher as soon as anything is launched from it,

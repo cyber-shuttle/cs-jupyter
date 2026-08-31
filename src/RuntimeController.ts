@@ -1,8 +1,9 @@
-import { GENERATION } from "./Common";
 import type { JupyterFrontEnd } from "@jupyterlab/application";
 import type { Widget } from "@lumino/widgets";
-import { ControlClient, validRuntimeId } from "./ControlClient";
+import { ControlClient } from "./ControlClient";
 import { clearRuntimeAccess, loadRuntimeAccess } from "./runtime-access";
+import { getActiveRuntimeId } from "./runtime-state";
+import { selectedRuntime } from "./runtime-ui";
 
 export type RuntimeDestination = (
   runtimeId: string,
@@ -23,18 +24,8 @@ export class RuntimeController {
     private _destination: RuntimeDestination,
     private _navigate: (url: string) => void = (url) =>
       window.location.assign(url),
+    readonly currentRuntimeId = getActiveRuntimeId(),
   ) {}
-
-  get currentRuntimeId(): string | undefined {
-    const search = new URLSearchParams(window.location.search);
-    const value = search.get("runtime") ?? "";
-    if (!this._currentGeneration(search)) return undefined;
-    try {
-      return value ? validRuntimeId(value) : undefined;
-    } catch {
-      return undefined;
-    }
-  }
 
   requestDocumentPath(path: string | undefined): void {
     this._requestedDocumentPath = path;
@@ -51,56 +42,46 @@ export class RuntimeController {
     if (runtime.state !== "READY") {
       throw new Error("Runtime must remain READY.");
     }
-    const search = new URLSearchParams(window.location.search);
     if (
       runtime.id === this.currentRuntimeId &&
-      runtime.generation === this._currentGeneration(search)
+      runtime.generation === selectedRuntime()?.generation
     )
       return;
     if (!loadRuntimeAccess(runtime.id, runtime.generation)) {
       throw new Error("Jupyter access is not available for selection.");
     }
-    if (this.currentRuntimeId) {
+    const previous = this.currentRuntimeId;
+    if (previous) {
       if (!this._app.commands.hasCommand("docmanager:save-all")) {
         throw new Error(
           "Cannot switch runtime because save-all is unavailable.",
         );
       }
-      if (!isCurrent()) {
-        return;
-      }
       await this._app.commands.execute("docmanager:save-all");
       if (!isCurrent()) {
         return;
       }
-    }
-    const live = await this._api.getRuntime(runtime.id);
-    if (!isCurrent()) return;
-    if (
-      live.id !== runtime.id ||
-      live.generation !== runtime.generation ||
-      live.state !== "READY" ||
-      !loadRuntimeAccess(live.id, live.generation)
-    ) {
-      throw new Error("Runtime changed before selection completed.");
+      // The save is an unbounded gap, so the runtime is re-read across it.
+      const live = await this._api.getRuntime(runtime.id);
+      if (!isCurrent()) return;
+      if (
+        live.id !== runtime.id ||
+        live.generation !== runtime.generation ||
+        live.state !== "READY" ||
+        !loadRuntimeAccess(live.id, live.generation)
+      ) {
+        throw new Error("Runtime changed before selection completed.");
+      }
     }
     const documentPath =
       this._requestedDocumentPath ?? this._activeDocumentContext()?.path;
-    if (!isCurrent()) {
-      return;
-    }
     this._requestedDocumentPath = undefined;
-    if (this.currentRuntimeId && this.currentRuntimeId !== runtime.id) {
-      clearRuntimeAccess(this.currentRuntimeId);
+    if (previous && previous !== runtime.id) {
+      clearRuntimeAccess(previous);
     }
     this._navigate(
       this._destination(runtime.id, runtime.generation, documentPath),
     );
-  }
-
-  private _currentGeneration(search: URLSearchParams): string | undefined {
-    const generation = search.get("generation") ?? "";
-    return GENERATION.test(generation) ? generation : undefined;
   }
 
   private _activeDocumentContext(): IDocumentContextLike | undefined {

@@ -69,6 +69,7 @@ async function emitRuntimes(
 function harness(
   runtimes: IRuntime[],
   getRuntime: (id: string) => Promise<IRuntime>,
+  currentRuntimeId?: string,
 ) {
   const navigate = vi.fn();
   const execute = vi.fn(async () => undefined);
@@ -109,6 +110,7 @@ function harness(
     api as any,
     (id) => `/selected/${id}`,
     navigate,
+    currentRuntimeId,
   );
   const panel = new CyberShuttlePanel(api as any, controller);
   void panel.signIn();
@@ -137,38 +139,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const pathController = (): RuntimeController =>
-  new RuntimeController(
-    { commands: {}, shell: {} } as any,
-    {} as any,
-    (id) => `/selected/${id}`,
-    undefined,
-  );
-
 describe("serialized runtime selection", () => {
-  it("recognizes the current runtime only from the static Lite query", () => {
-    window.history.replaceState(
-      {},
-      "",
-      "/lite/lab/?runtime=rt-111111111111&generation=g-0123456789abcdef",
-    );
-    expect(pathController().currentRuntimeId).toBe("rt-111111111111");
-  });
-
-  it.each([
-    "/gateway/team/notebooks/runtimes/rt-222222222222/jupyter/lab",
-    "/api/v0/runtimes/rt-222222222222/jupyter/lab",
-    "/api/v1/files/runtimes/rt-222222222222/jupyter/lab",
-    "/r/rt-222222222222/jupyter/lab",
-    "/gateway/myruntimes/rt-222222222222/jupyter/lab",
-  ])(
-    "rejects a runtime-looking path outside the exact control API: %s",
-    (path) => {
-      window.history.replaceState({}, "", path);
-      expect(pathController().currentRuntimeId).toBeUndefined();
-    },
-  );
-
   it("renders native runtime cards and opens their live detail modal", async () => {
     const { panel } = harness(
       [first, { ...second, state: "FAILED" }],
@@ -271,6 +242,7 @@ describe("serialized runtime selection", () => {
       const { panel, api, navigate, execute } = harness(
         [first, second],
         async (id) => (id === first.id ? first : second),
+        active.id,
       );
       cacheReady(active);
       await ready(panel);
@@ -309,6 +281,7 @@ describe("serialized runtime selection", () => {
       const { panel, navigate, execute } = harness(
         [active, first],
         async () => first,
+        active.id,
       );
       execute.mockImplementationOnce(() => save.promise);
       await ready(panel);
@@ -359,10 +332,14 @@ describe("serialized runtime selection", () => {
     );
     const live = Promise.withResolvers<IRuntime>();
     let calls = 0;
-    const { panel, api, navigate } = harness([active, first], async () => {
-      calls++;
-      return calls === 1 ? first : live.promise;
-    });
+    const { panel, api, navigate } = harness(
+      [active, first],
+      async () => {
+        calls++;
+        return calls === 1 ? first : live.promise;
+      },
+      active.id,
+    );
     await ready(panel);
     vi.stubGlobal(
       "fetch",
@@ -407,6 +384,7 @@ describe("serialized runtime selection", () => {
     const { panel, navigate, execute } = harness(
       [first, second],
       (id) => requests.get(id)!.promise,
+      active.id,
     );
     await ready(panel);
 
@@ -430,9 +408,8 @@ describe("serialized runtime selection", () => {
 
 describe("current session pill", () => {
   it("marks only the runtime this page is attached to", () => {
-    const list = new RuntimeList();
+    const list = new RuntimeList(first.id);
     const other = { ...first, id: "rt-999999999999" };
-    list.setCurrentRuntimeId(first.id);
     setRuntimes(list, [first, other]);
     const cards = [
       ...list.node.querySelectorAll<HTMLElement>(".csRuntimeCard"),

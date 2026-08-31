@@ -57,10 +57,9 @@ export class CyberShuttlePanel extends StackedPanel {
   readonly stateChanged = new Signal<this, IRuntimeUiState>(this);
 
   readonly header = new CyberShuttleHeader();
-  private _list = new RuntimeList();
+  private _list: RuntimeList;
   private _pollTimer: ReturnType<typeof setInterval> | undefined;
   private _polling = false;
-  private _polled = false;
   private _selection = 0;
   private _runtimes: IRuntime[] = [];
   private _logs = new Map<string, IRuntimeLogTail>();
@@ -95,7 +94,7 @@ export class CyberShuttlePanel extends StackedPanel {
     this.title.label = "Remote Runtimes";
     this.title.closable = false;
     this.addClass("csShell");
-    this._list.setCurrentRuntimeId(_controller.currentRuntimeId);
+    this._list = new RuntimeList(_controller.currentRuntimeId);
     this.addWidget(this._list);
     this._list.runtimeRequested.connect(
       (_sender, id) => void this.openRuntime(id),
@@ -121,14 +120,8 @@ export class CyberShuttlePanel extends StackedPanel {
         state: this._startingRuntimeIds.has(runtime.id)
           ? "SUBMITTING"
           : runtime.state,
-        resources: { ...runtime.resources },
       })),
-      logs: new Map(
-        [...this._logs].map(([id, tail]) => [
-          id,
-          { ...tail, lines: tail.lines.map((line) => ({ ...line })) },
-        ]),
-      ),
+      logs: this._logs,
       loading: this._loading,
       updatesStatus: this._updatesStatus,
       error: this._error,
@@ -149,14 +142,19 @@ export class CyberShuttlePanel extends StackedPanel {
     this.stateChanged.emit(state);
   }
 
+  // Every emit rebuilds both widget subtrees, so an unchanged read renders
+  // nothing rather than four times a second.
   private _setRuntimes(runtimes: IRuntime[]): void {
+    if (JSON.stringify(runtimes) === JSON.stringify(this._runtimes)) {
+      return;
+    }
     const next = new Map(runtimes.map((runtime) => [runtime.id, runtime]));
     for (const previous of this._runtimes) {
       const runtime = next.get(previous.id);
       if (
         !runtime ||
         runtime.generation !== previous.generation ||
-        this._runtimeIsTerminal(runtime)
+        isTerminal(runtime.state)
       ) {
         this._releaseRuntime(previous.id);
       } else if (runtime.state !== "READY") {
@@ -164,7 +162,7 @@ export class CyberShuttlePanel extends StackedPanel {
       }
     }
     for (const runtime of runtimes) {
-      if (this._runtimeIsTerminal(runtime)) {
+      if (isTerminal(runtime.state)) {
         this._releaseRuntime(runtime.id);
       }
     }
@@ -175,6 +173,9 @@ export class CyberShuttlePanel extends StackedPanel {
   // The poll carries every tail the caller owns, so the map is replaced rather
   // than merged and a runtime that has gone away takes its tail with it.
   private _setRuntimeLogs(tails: readonly IRuntimeLogTail[]): void {
+    if (JSON.stringify(tails) === JSON.stringify([...this._logs.values()])) {
+      return;
+    }
     this._logs = new Map(tails.map((tail) => [tail.runtimeId, tail]));
     this._emitState();
   }
@@ -227,10 +228,6 @@ export class CyberShuttlePanel extends StackedPanel {
     return runtime;
   }
 
-  private _runtimeIsTerminal(runtime: IRuntime): boolean {
-    return isTerminal(runtime.state);
-  }
-
   private _beginJupyter(runtime: IRuntime): IJupyterOperation {
     this._abortJupyter(runtime.id);
     const operation = {
@@ -253,7 +250,7 @@ export class CyberShuttlePanel extends StackedPanel {
       !operation.controller.signal.aborted &&
       runtime?.generation === operation.generation &&
       runtime.state === "READY" &&
-      !this._runtimeIsTerminal(runtime)
+      !isTerminal(runtime.state)
     );
   }
 
@@ -291,17 +288,6 @@ export class CyberShuttlePanel extends StackedPanel {
     }
   }
 
-  private _startPolling(): void {
-    if (this._pollTimer !== undefined) {
-      return;
-    }
-    void this._poll();
-    this._pollTimer = setInterval(
-      () => void this._poll(),
-      RUNTIME_POLL_INTERVAL_MS,
-    );
-  }
-
   private _stopPolling(): void {
     if (this._pollTimer !== undefined) {
       clearInterval(this._pollTimer);
@@ -321,7 +307,6 @@ export class CyberShuttlePanel extends StackedPanel {
       if (this.isDisposed) {
         return;
       }
-      this._polled = true;
       this._setRuntimes(list.runtimes);
       this._setRuntimeLogs(list.logs);
       for (const runtime of list.runtimes) {
@@ -389,7 +374,6 @@ export class CyberShuttlePanel extends StackedPanel {
     this._signedIn = false;
     this._authRequired = false;
     this._controlInitialized = false;
-    this._polled = false;
     this._runtimes = [];
     this._hosts = undefined;
     this._logs = new Map();
@@ -399,15 +383,24 @@ export class CyberShuttlePanel extends StackedPanel {
     this._emitState();
   }
 
+  // ponytail: the first poll is the bootstrap read; add a separate initial
+  // fetch only if the poll ever stops returning the full list.
   private async _activateSession(): Promise<void> {
     this._signedIn = true;
     this._authRequired = false;
     this._setStreamStatus("");
-    this._startPolling();
-    if (!this._controlInitialized) {
-      this._controlInitialized = true;
-      await this._initialize();
+    this._pollTimer ??= setInterval(
+      () => void this._poll(),
+      RUNTIME_POLL_INTERVAL_MS,
+    );
+    if (this._controlInitialized) {
+      void this._poll();
+      return;
     }
+    this._controlInitialized = true;
+    this._setLoading(true);
+    await Promise.all([this._poll(), this._refreshHosts()]);
+    this._setLoading(false);
   }
 
   // A credential restored from the previous page is already a live session:
@@ -427,24 +420,6 @@ export class CyberShuttlePanel extends StackedPanel {
     this._authRequired = true;
     this._stopPolling();
     this._setStreamStatus("Sign in again to resume runtime updates.");
-  }
-
-  private async _initialize(): Promise<void> {
-    this._setLoading(true);
-    try {
-      const [list] = await Promise.all([
-        this._api.listRuntimes(),
-        this._refreshHosts(),
-      ]);
-      if (!this._polled && !this.isDisposed) {
-        this._setRuntimes(list.runtimes);
-        this._setRuntimeLogs(list.logs);
-      }
-    } catch (error) {
-      this._setError(errorMessage(error));
-    } finally {
-      this._setLoading(false);
-    }
   }
 
   dispose(): void {
@@ -614,6 +589,8 @@ export class CyberShuttlePanel extends StackedPanel {
   private async _act(
     runtimeId: string,
     act: (id: string) => Promise<IRuntime>,
+    apply: (acted: IRuntime) => IRuntime[] = (acted) =>
+      this._runtimes.map((each) => (each.id === acted.id ? acted : each)),
   ): Promise<void> {
     const runtime = this._selectedRuntime(runtimeId);
     if (!runtime) {
@@ -625,9 +602,7 @@ export class CyberShuttlePanel extends StackedPanel {
     try {
       // Newer than the last poll, so the card follows it rather than the read.
       const acted = await this._overSsh(runtime.sshHost, () => act(runtime.id));
-      this._runtimes = this._runtimes.map((each) =>
-        each.id === acted.id ? acted : each,
-      );
+      this._runtimes = apply(acted);
     } catch (error) {
       this._setError(errorMessage(error));
     } finally {
@@ -659,18 +634,11 @@ export class CyberShuttlePanel extends StackedPanel {
     if (!confirmed.button.accept || this.isDisposed) {
       return;
     }
-    this._setError("");
-    this._releaseRuntime(runtime.id);
-    this._setBusy(runtime.id, true);
-    try {
-      await this._api.deleteRuntime(runtime.id);
-      this._runtimes = this._runtimes.filter((each) => each.id !== runtime.id);
-      this._emitState();
-    } catch (error) {
-      this._setError(errorMessage(error));
-    } finally {
-      this._setBusy(runtime.id, false);
-    }
+    await this._act(
+      runtimeId,
+      (id) => this._api.deleteRuntime(id),
+      () => this._runtimes.filter((each) => each.id !== runtime.id),
+    );
   }
 
   // Each modal is one view titled after it, closed by the dialog's own control:
