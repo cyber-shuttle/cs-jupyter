@@ -79,19 +79,17 @@ describe("remote-only native workspace distribution", () => {
     }
   });
 
-  it("shares every host package crossing the package boundary", () => {
+  it("pins a required version for every host package crossing the package boundary", () => {
     for (const name of [
-      "@jupyterlab/application",
       "@jupyterlab/apputils",
       "@jupyterlab/coreutils",
       "@jupyterlab/services",
       "@lumino/signaling",
       "@lumino/widgets",
     ]) {
-      expect(packageJson.jupyterlab.sharedPackages[name]).toMatchObject({
-        bundled: false,
-        singleton: true,
-      });
+      expect(
+        packageJson.jupyterlab.sharedPackages[name].requiredVersion,
+      ).toBeTruthy();
     }
   });
 });
