@@ -1,5 +1,5 @@
 import type { ITokenProvider } from "./ControlClient";
-import { assertSecureOrLoopback } from "./Common";
+import { assertSecureOrLoopback, parseUrl } from "./Common";
 
 export const CYBERSHUTTLE_WEBSOCKET_PROTOCOL = "cybershuttle.v1";
 export const CYBERSHUTTLE_BEARER_PROTOCOL_PREFIX = "bearer.";
@@ -72,12 +72,7 @@ export function encodeAccessToken(token: string): string {
 }
 
 function validateWebSocketUrl(raw: string): string {
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch {
-    throw new Error("CyberShuttle WebSocket URL is invalid.");
-  }
+  const url = parseUrl(raw, "CyberShuttle WebSocket URL is invalid.");
   assertSecureOrLoopback(
     url,
     "wss:",

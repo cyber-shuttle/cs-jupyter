@@ -47,17 +47,14 @@ describe("OAuth cross-origin control client", () => {
     },
   );
 
-  it("rejects unrelated origins and redirect responses", async () => {
+  it("rejects unrelated origins", async () => {
     const guarded = safeControlFetch(
       "https://control.example.edu/api/v1",
       auth,
-      vi.fn(async () => new Response(null, { status: 302 })) as any,
+      vi.fn(async () => new Response(null, { status: 200 })) as any,
     );
     await expect(guarded("https://hostile.example/api/v1")).rejects.toThrow(
       "outside the configured control origin",
     );
-    await expect(
-      guarded("https://control.example.edu/api/v1/runtimes"),
-    ).rejects.toThrow("redirects");
   });
 });

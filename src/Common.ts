@@ -44,11 +44,9 @@ export interface IRuntimeCreateRequest extends IAllocation {
 }
 
 export interface IRuntimeValidation {
-  runtimeId: string;
   status: RuntimeValidationStatus;
   script: string;
   message: string;
-  stdout?: string;
   stderr?: string;
 }
 
@@ -100,6 +98,21 @@ export interface ISlurmInfo {
 export function isPlainObject(value: unknown): value is Record<string, any> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
+export function parseUrl(value: string, message: string): URL {
+  try {
+    return new URL(value);
+  } catch {
+    throw new Error(message);
+  }
+}
+
+export const requestUrl = (input: RequestInfo | URL): string =>
+  typeof input === "string"
+    ? input
+    : input instanceof URL
+      ? input.toString()
+      : input.url;
 
 // One rule for both the control API URL and the WebSocket URL.
 export function assertSecureOrLoopback(
