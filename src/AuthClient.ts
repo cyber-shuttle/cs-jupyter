@@ -56,9 +56,8 @@ const SESSION_KEY = "cybershuttle.oauth.v1";
 const COPY_GLYPH = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.2"><rect x="5.6" y="5.6" width="8" height="8" rx="1.4" /><path d="M10.9 5.6V3.9a1.4 1.4 0 0 0-1.4-1.4H3.9a1.4 1.4 0 0 0-1.4 1.4v5.6a1.4 1.4 0 0 0 1.4 1.4h1.7" /></g></svg>`;
 const CHECK_GLYPH = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m3.4 8.4 3 3 6.2-6.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
 
-// The header names who is signed in. The claim is read for display only; the
-// control plane still validates the token it is carved from, so nothing here
-// depends on this being trustworthy.
+// Display only: the control plane validates the token this is carved from, so
+// nothing depends on the claim being trustworthy.
 function accountFromIdToken(idToken: string): string | undefined {
   const payload = idToken.split(".")[1];
   if (!payload) {
@@ -84,9 +83,9 @@ function accountFromIdToken(idToken: string): string | undefined {
   return undefined;
 }
 
-// Tokens survive a reload in per-tab session storage, never a URL and never a
-// log. Opening a runtime navigates the page, so a memory-only credential would
-// force a device-code round trip on every navigation.
+// Tokens survive a reload in per-tab session storage, never a URL or a log.
+// Opening a runtime navigates, so a memory-only credential would force a
+// device-code round trip every time.
 function readStoredCredentials(
   now: number,
 ): { credentials: OAuthCredentials; expiresAt: number } | undefined {
@@ -97,8 +96,7 @@ function readStoredCredentials(
       string,
       unknown
     >;
-    // A record of any other shape is not a session: accepting one puts
-    // `Bearer undefined` on the wire and throws out of the account getter.
+    // Any other shape puts `Bearer undefined` on the wire.
     if (
       typeof accessToken !== "string" ||
       typeof idToken !== "string" ||
@@ -249,8 +247,8 @@ export class AuthClient {
     signal: AbortSignal,
   ): Promise<TokenResult> {
     let interval = authorization.intervalSeconds * 1000;
-    // A broker that keeps answering 202 past the life it advertised would
-    // otherwise leave the cached interaction promise unsettled for the tab.
+    // A broker answering 202 past the life it advertised would otherwise leave
+    // the cached interaction promise unsettled for the tab.
     const deadline = this._now() + authorization.expiresInSeconds * 1000;
     while (this._now() < deadline) {
       await this._sleep(interval, signal);
@@ -387,8 +385,8 @@ function boundedInteger(
   );
 }
 
-// Bounds the body as it arrives: buffering the whole thing and measuring after
-// lets a broker answering with gigabytes reach memory before the cap is read.
+// Bounds the body as it arrives; measuring after buffering lets a broker answer
+// with gigabytes before the cap is read.
 async function readBoundedBody(response: Response): Promise<string> {
   const reader = response.body?.getReader();
   if (!reader) return "";
@@ -433,14 +431,12 @@ function showDeviceCodeModal(
   const code = element("code", authorization.userCode, "csDeviceCode");
   code.setAttribute("aria-label", `Device code ${authorization.userCode}`);
 
-  // The copy control answers in place: a checkmark where the icon was says the
-  // code is on the clipboard without a line of prose that outlives its moment.
+  // The copy control answers in place, with a checkmark where the icon was.
   const copy = document.createElement("button");
   copy.type = "button";
   copy.className = "csDeviceCodeCopy";
   copy.innerHTML = COPY_GLYPH;
-  // The label and the tooltip say the same thing, so a failed attempt cannot
-  // leave a stale explanation behind a later success.
+  // Label and tooltip say the same thing, so a failure leaves nothing stale.
   const describeCopy = (text: string): void => {
     copy.title = text;
     copy.setAttribute("aria-label", text);
@@ -476,8 +472,8 @@ function showDeviceCodeModal(
   open.rel = "noopener noreferrer";
   open.referrerPolicy = "no-referrer";
   open.textContent = "Open sign-in page";
-  // Once the page is open the answer arrives on the other device, so the button
-  // stops inviting a second click and reports what it is now doing.
+  // The answer arrives on the other device, so the button stops inviting clicks
+  // and reports what it is now doing.
   open.onclick = () => {
     open.classList.add("csDeviceCodeWaiting");
     open.textContent = "";
@@ -491,7 +487,7 @@ function showDeviceCodeModal(
   dialog.append(closeButton(cancel), title, instructions, codeRow, actions);
   overlay.appendChild(dialog);
   // Modal semantics, focus containment, Escape and an inert backdrop come from
-  // showModal; the overlay stays on document.body so no themed container clips it.
+  // showModal; document.body keeps a themed container from clipping the overlay.
   document.body.appendChild(overlay);
   overlay.addEventListener("cancel", cancel);
   overlay.showModal();
@@ -517,8 +513,8 @@ const abortableSleep = (
       window.clearTimeout(timer);
       reject(signal.reason);
     };
-    // The poll sleeps once per interval on one long-lived signal, so a listener
-    // left behind by every timer that fires normally is an unbounded leak.
+    // The poll sleeps on one long-lived signal, so a listener left behind by
+    // every normal timer is an unbounded leak.
     const timer = window.setTimeout(() => {
       signal.removeEventListener("abort", abort);
       resolve();

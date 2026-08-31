@@ -27,8 +27,8 @@ import {
 import { CyberShuttleHeader, RuntimeList } from "./RuntimeList";
 import { SshHosts } from "./SshHosts";
 
-/** How often the workspace re-reads cs-control. It caps its own SSH work at
- * the same rate, so polling faster would only add HTTP round trips. */
+/** cs-control caps its own SSH work at this rate, so polling faster would only
+ * add HTTP round trips. */
 const RUNTIME_POLL_INTERVAL_MS = 1000;
 
 export interface IRuntimeUiState {
@@ -114,8 +114,8 @@ export class CyberShuttlePanel extends StackedPanel {
 
   get state(): IRuntimeUiState {
     return {
-      // A card being run again is starting from the click, not from the poll
-      // that first sees it, and only while that request is in flight.
+      // A card being run again starts from the click, not from the poll that
+      // first sees it, and only while that request is in flight.
       runtimes: this._runtimes.map((runtime) => ({
         ...runtime,
         state: this._startingRuntimeIds.has(runtime.id)
@@ -144,7 +144,7 @@ export class CyberShuttlePanel extends StackedPanel {
   }
 
   // Every emit rebuilds both widget subtrees, so an unchanged read renders
-  // nothing rather than four times a second.
+  // nothing.
   private _setRuntimes(runtimes: IRuntime[]): void {
     if (JSON.stringify(runtimes) === JSON.stringify(this._runtimes)) {
       return;
@@ -172,7 +172,7 @@ export class CyberShuttlePanel extends StackedPanel {
   }
 
   // The poll carries every tail the caller owns, so the map is replaced rather
-  // than merged and a runtime that has gone away takes its tail with it.
+  // than merged: a runtime that has gone away takes its tail with it.
   private _setRuntimeLogs(tails: readonly IRuntimeLogTail[]): void {
     if (JSON.stringify(tails) === JSON.stringify([...this._logs.values()])) {
       return;
@@ -268,8 +268,8 @@ export class CyberShuttlePanel extends StackedPanel {
     }
   }
 
-  // Only this operation's busy flag: the poll releases a terminal card's access
-  // and used to take an unrelated action's spinner with it.
+  // Only this operation's busy flag: releasing a terminal card's access must not
+  // take an unrelated action's spinner with it.
   private _abortJupyter(runtimeId: string): void {
     const operation = this._jupyterOperations.get(runtimeId);
     if (!operation) {
@@ -299,8 +299,7 @@ export class CyberShuttlePanel extends StackedPanel {
     }
   }
 
-  // cs-control answers from its own state and starts a reconciliation for the
-  // next poll, so this never waits on SSH.
+  // cs-control answers from its own state, so this never waits on SSH.
   private async _poll(): Promise<void> {
     if (this._polling || this.isDisposed) {
       return;
@@ -315,8 +314,8 @@ export class CyberShuttlePanel extends StackedPanel {
         this._setRuntimes(list.runtimes);
         this._setRuntimeLogs(list.logs);
       }
-      // An unchanged list still has to run this: a getRuntimeAccess that failed
-      // once would otherwise never be retried while the list sits settled.
+      // An unchanged list still runs this: a getRuntimeAccess that failed once
+      // would otherwise never be retried while the list sits settled.
       for (const runtime of this._runtimes) {
         if (
           runtime.state === "READY" &&
@@ -369,9 +368,8 @@ export class CyberShuttlePanel extends StackedPanel {
     }
   }
 
-  // Signing out has to take the cached Jupyter credentials with it: they grant
-  // code execution on the allocation and would otherwise outlive the session
-  // that authorised them.
+  // The cached Jupyter credentials grant code execution on the allocation, so
+  // they must not outlive the session that authorised them.
   signOut(): void {
     for (const runtime of this._runtimes) {
       clearRuntimeAccess(runtime.id);
@@ -410,9 +408,8 @@ export class CyberShuttlePanel extends StackedPanel {
     this._setLoading(false);
   }
 
-  // A credential restored from the previous page is already a live session:
-  // without this the header offers a sign-in the browser does not need and
-  // runtime polling never starts.
+  // A credential restored from the previous page is already a live session, so
+  // without this the header offers a sign-in the browser does not need.
   async resume(): Promise<void> {
     try {
       await this._api.resumeSession();
@@ -480,7 +477,7 @@ export class CyberShuttlePanel extends StackedPanel {
     }
   }
 
-  // The retry is outside the try, so a host that refuses again reports that
+  // The retry sits outside the try, so a host that refuses again reports that
   // refusal rather than starting a second login.
   private async _overSsh<T>(
     alias: string,
@@ -497,7 +494,7 @@ export class CyberShuttlePanel extends StackedPanel {
     }
   }
 
-  // A READY runtime already runs Jupyter, so "refresh" only means fetching the owner-scoped
+  // A READY runtime already runs Jupyter, so this only fetches the owner-scoped
   // access cs-control issues for it.
   async refreshJupyter(runtimeId: string): Promise<boolean> {
     const runtime = this._runtime(runtimeId);
@@ -618,7 +615,7 @@ export class CyberShuttlePanel extends StackedPanel {
   }
 
   // Deleting a live allocation cancels its job, so the confirmation names what
-  // is actually lost rather than asking a generic "are you sure".
+  // is lost.
   async remove(runtimeId: string): Promise<void> {
     const runtime = this._selectedRuntime(runtimeId);
     if (!runtime) {
@@ -648,8 +645,8 @@ export class CyberShuttlePanel extends StackedPanel {
     );
   }
 
-  // Each modal is one view titled after it, closed by the dialog's own control:
-  // no footer repeats that, and the view's own action sits where a footer would.
+  // Each modal is one view titled after it and closed by the dialog's own
+  // control, with the view's own action where a footer would be.
   async openCreate(): Promise<void> {
     const body = new Panel();
     body.addClass("csWorkspaceModal");

@@ -49,7 +49,7 @@ export interface IRuntimeLogTail {
 }
 
 // cs-control answers 304 while the owner-filtered list and its tails are
-// byte-identical to the last poll, so there is nothing to parse or re-render.
+// byte-identical to the last poll: nothing to parse, nothing to re-render.
 export const UNCHANGED = Symbol("cs-control runtime list unchanged");
 
 export interface IRuntimeList {
@@ -119,9 +119,8 @@ export class ControlClient {
   private _fetch: typeof globalThis.fetch;
   private _webSockets: OAuthWebSocketFactory;
   private _auth: IControlAuth;
-  // Describes the list its holder already has, so every entry into or exit from
-  // a session drops it: the panel behind a fresh session holds no list to
-  // revalidate against, and a 304 would leave it empty.
+  // Describes the list its holder already has, so entering or leaving a session
+  // drops it: a fresh panel has no list to revalidate, and a 304 leaves it empty.
   private _runtimesTag: string | undefined;
 
   constructor(
@@ -142,8 +141,8 @@ export class ControlClient {
     await this._auth.interactiveLogin();
   }
 
-  // Succeeds only on a credential that is still valid, so callers can tell a
-  // resumable session from one that needs the device-code round trip.
+  // Succeeds only on a still-valid credential, so a caller can tell a resumable
+  // session from one needing the device-code round trip.
   async resumeSession(): Promise<void> {
     this._runtimesTag = undefined;
     await this._auth.acquireToken();
@@ -166,8 +165,7 @@ export class ControlClient {
     return value.hosts.map(validateHost);
   }
 
-  // cs-control parses the pasted command, so the browser never composes SSH
-  // configuration text of its own.
+  // cs-control parses the pasted command; the browser composes no SSH config.
   async addSshHost(name: string, command: string): Promise<ISshHost> {
     return validateHost(
       await this._request("ssh", {
@@ -212,11 +210,9 @@ export class ControlClient {
     return this._webSocketConnector(`ssh/${encodeURIComponent(alias)}/auth`);
   }
 
-  // Answers UNCHANGED while cs-control's reply is byte-identical to the last
-  // one. The poll runs once a second for as long as a job sits in a queue, so
-  // most of its life is spent re-reading a list that has not moved. `cache:
-  // "no-store"` means the browser will not revalidate on its own, so the
-  // conditional request is made here.
+  // Answers UNCHANGED while cs-control's reply is byte-identical to the last, as
+  // it is for most of a queued job's life. `cache: "no-store"` stops the browser
+  // revalidating on its own, so the conditional request is made here.
   async listRuntimes(): Promise<IRuntimeList | typeof UNCHANGED> {
     const response = await this._fetch(
       URLExt.join(this._base, "runtimes"),
@@ -245,8 +241,7 @@ export class ControlClient {
     };
   }
 
-  // The script alone, so a caller can read what Slurm is about to be asked
-  // about while it is being asked.
+  // The script alone, readable while Slurm is being asked about it.
   async previewRuntimeScript(
     request: IRuntimeCreateRequest,
     signal?: AbortSignal,
@@ -380,15 +375,11 @@ export class ControlClient {
   }
 }
 
-// Jupyter Server owns its own auth, so ServerConnection's built-in token handling is the whole
-// integration: the Authorization header on REST and ?token= on WebSocket URLs.
 // A kernel spec reports its logos as paths on the runtime, but an <img> cannot
 // carry the identity token: unauthenticated the runtime answers with its login
-// page, and its static handler refuses the cross-origin preflight that an
-// Authorization header forces. Putting the token in the URL is the one thing
-// that would work and the one thing that must never happen, so drop the
-// resources and let the launcher fall back to its built-in kernel icon rather
-// than render a broken image.
+// page, and its static handler refuses the preflight an Authorization header
+// forces. A token in the URL is the one thing that would work and the one thing
+// that must never happen, so the launcher falls back to its built-in icon.
 async function withoutUnreachableKernelSpecLogos(
   response: Response,
 ): Promise<Response> {

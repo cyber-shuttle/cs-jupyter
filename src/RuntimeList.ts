@@ -20,8 +20,7 @@ export const emptyState = (): IRuntimeUiState => ({
 });
 
 // The title row is the one part of this UI that stays put, so it is its own
-// widget and the launcher hosts it in the fixed header above its scrolling
-// content.
+// widget in the launcher's fixed header.
 export class CyberShuttleHeader extends Widget {
   readonly signInRequested = new Signal<this, void>(this);
   readonly signOutRequested = new Signal<this, void>(this);
@@ -61,7 +60,7 @@ export class CyberShuttleHeader extends Widget {
   }
 
   // Signed out this is one button; signed in it names the account and hides
-  // sign-out behind a menu, so leaving is deliberate rather than one stray click.
+  // sign-out behind a menu, so leaving is deliberate.
   private _identityControl(): HTMLElement {
     const holder = element("div", "", "csIdentity");
     if (!this._state.signedIn) {
@@ -90,8 +89,7 @@ export class CyberShuttleHeader extends Widget {
     };
     holder.appendChild(trigger);
     if (this._accountMenuOpen) {
-      const menu = element("div", "", "csAccountMenu");
-      menu.setAttribute("role", "menu");
+      const menu = element("div", "", "csAccountMenu", { role: "menu" });
       const signOut = button("Sign out", "csAccountMenuItem");
       signOut.dataset.runtimeAction = "sign-out";
       signOut.setAttribute("role", "menuitem");
@@ -225,11 +223,9 @@ export class RuntimeList extends Widget {
       "",
       "jp-LauncherCard-label csRuntimeCardLabel",
     );
-    // The card identifies the runtime and what it costs; everything else about
-    // it, including the working directory, belongs to the detail dialog a click
-    // away.
-    // The host and the allocation it runs under are one identity, so they sit
-    // together without the gap that separates the rest of the card.
+    // The card identifies the runtime and what it costs; the rest belongs to the
+    // detail dialog. Host and allocation are one identity, so they sit together
+    // without the gap that separates the rest of the card.
     const identity = element("span", "", "csRuntimeCardIdentity");
     identity.append(element("p", runtime.sshHost, "csRuntimeCardTitle"));
     if (runtime.account) {
@@ -252,8 +248,7 @@ const RESOURCE_GLYPHS = {
   mem: `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"><rect x="1.9" y="5.1" width="12.2" height="6.4" rx="1" /><path d="M5.2 5.1v6.4M8 5.1v6.4M10.8 5.1v6.4" /></g></svg>`,
 };
 
-// Memory is always gigabytes so the three figures stay the same shape and the
-// row survives a narrow card.
+// Always gigabytes, so the three figures keep one shape on a narrow card.
 function gigabytes(memoryMb: number): string {
   return `${Number((memoryMb / 1024).toFixed(1))}G`;
 }
@@ -279,9 +274,8 @@ function runtimeResourceRow(runtime: IRuntime): HTMLElement {
   return row;
 }
 
-// JupyterLab ships no rack icon, so this is the smallest one that still reads
-// as a machine. Hairline strokes keep it as light as the glyphs beside it, and
-// currentColor keeps it correct in either theme.
+// JupyterLab ships no rack icon. Hairline strokes keep this as light as the
+// glyphs beside it, and currentColor keeps it correct in either theme.
 function serverRackIcon(
   className = "jp-LauncherCard-icon csRuntimeCardIcon",
 ): HTMLElement {
@@ -301,8 +295,7 @@ function serverRackIcon(
   return icon;
 }
 
-// The identity control shows who the session belongs to, so it carries a face
-// rather than only a name.
+// Whose session this is, so the control carries a face and not only a name.
 function userGlyph(): SVGSVGElement {
   const holder = element("div", "");
   holder.innerHTML = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><circle cx="10" cy="10" r="8.6" /><circle cx="10" cy="8.2" r="2.6" /><path d="M5.3 16.5a5 5 0 0 1 9.4 0" /></g></svg>`;

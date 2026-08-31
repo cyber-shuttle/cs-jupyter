@@ -4,6 +4,7 @@ import { CyberShuttlePanel } from "../src/CyberShuttlePanel";
 import { SshLoginDock } from "../src/SshLoginDock";
 import {
   FakeOperation,
+  controlFake,
   pollPanel,
   runtimeFixture,
   runtimeListFixture,
@@ -25,13 +26,11 @@ const refused = (): ControlError =>
  * The modal is closed again: one left attached keeps a document-wide focus trap
  * that would pull the caret out of the next test's terminal. */
 async function opened(startRuntime: unknown, operation: FakeOperation) {
-  const api = {
-    signIn: vi.fn(async () => undefined),
+  const api = controlFake({
     listRuntimes: vi.fn(async () => runtimeListFixture([base])),
-    listSshHosts: vi.fn(async () => []),
     sshAuthWebSocket: vi.fn(() => vi.fn()),
     startRuntime,
-  };
+  });
   const panel = new CyberShuttlePanel(
     api as any,
     {

@@ -18,12 +18,11 @@ export class SshHosts extends Widget {
   private _draft = { name: "", command: "" };
   private _addError = "";
   private _saving = false;
-  // Expansion and test outcomes belong to the alias, so a re-render after any
-  // action leaves the reader where they were.
+  // Keyed by alias, so a re-render leaves the reader where they were.
   private _open = new Set<string>();
   private _tests = new Map<string, IHostTest>();
-  // A dialog cannot ask this: JupyterLab queues a second dialog behind the one
-  // already open, so the question would arrive after the answer was needed.
+  // JupyterLab queues a second dialog behind the open one, so a dialog would ask
+  // this after the answer was needed.
   private _confirming = "";
 
   constructor(api: ControlClient) {
@@ -107,9 +106,8 @@ export class SshHosts extends Widget {
   private _render(): void {
     this.node.textContent = "";
     const root = element("div", "", "csRoot csScrollRoot");
-    // The dialog already names itself, so this opens with what the list means
-    // and a rule under it. Both belong to the title: the list scrolls under
-    // them, never with them.
+    // The dialog names itself, so this opens with what the list means and a rule
+    // under it. Both belong to the title: the list scrolls under them.
     root.append(
       element(
         "div",
@@ -220,13 +218,14 @@ export class SshHosts extends Widget {
     }
     const test = this._tests.get(host.name);
     if (test) {
-      const status = element(
-        "div",
-        test.busy ? "Connecting…" : (test.message ?? ""),
-        `csSshHostStatus${test.busy ? "" : test.ok ? " csValidationPassed" : " csValidationFailed"}`,
+      body.appendChild(
+        element(
+          "div",
+          test.busy ? "Connecting…" : (test.message ?? ""),
+          `csSshHostStatus${test.busy ? "" : test.ok ? " csValidationPassed" : " csValidationFailed"}`,
+          { role: "status" },
+        ),
       );
-      status.setAttribute("role", "status");
-      body.appendChild(status);
     }
     const actions = element("div", "", "csSshHostActions");
     if (this._confirming === host.name) {
@@ -272,8 +271,7 @@ function hostTarget(host: ISshHost): string {
   return target || "Uses SSH defaults";
 }
 
-// The rows read as the configuration does, so what the UI shows and what ssh
-// uses are the same list.
+// The rows read as the configuration does, so the UI and ssh see one list.
 function hostArguments(host: ISshHost): Array<[string, string]> {
   const rows: Array<[string, string]> = [];
   if (host.hostname) rows.push(["HostName", host.hostname]);

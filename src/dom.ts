@@ -2,11 +2,15 @@ export function element<K extends keyof HTMLElementTagNameMap>(
   tag: K,
   text = "",
   className?: string,
+  attributes: Record<string, string> = {},
 ): HTMLElementTagNameMap[K] {
   const value = document.createElement(tag);
   value.textContent = text;
   if (className) {
     value.className = className;
+  }
+  for (const [name, attribute] of Object.entries(attributes)) {
+    value.setAttribute(name, attribute);
   }
   return value;
 }

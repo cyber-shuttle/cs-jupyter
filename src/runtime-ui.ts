@@ -13,8 +13,7 @@ import {
 
 export const SELECT_RUNTIME_COMMAND = "@cybershuttle/jupyter:select-runtime";
 
-// The selection is the pair or nothing: a runtime without a live generation
-// names no allocation.
+// The pair or nothing: a runtime without a generation names no allocation.
 export function selectedRuntime(
   search = window.location.search,
 ): { runtimeId: string; generation: string } | undefined {
@@ -67,11 +66,9 @@ export const runtimeUiPlugin: JupyterFrontEndPlugin<void> = {
       (widget as MainWidget | null)?.content?.hasClass("jp-Launcher")
         ? (widget as MainWidget)
         : undefined;
-    // The title row stays put, so it goes where a main-area widget keeps a
-    // fixed header. The runtimes scroll with the page, so they go into the
-    // launcher's own content beside the sections it renders itself; mounting
-    // them in the header too gave them a second scroll container and a long
-    // list scrolled against the rest of the page rather than with it.
+    // The title row stays put, so it goes in the main widget's fixed header. The
+    // runtimes scroll with the page, so they go in the launcher's own content;
+    // mounting them in the header too gave them a second scroll container.
     // ponytail: one await on the launcher's render; if JupyterLab ever renders
     // the launcher content lazily across frames the section silently fails to
     // mount — restore a bounded frame wait then.
