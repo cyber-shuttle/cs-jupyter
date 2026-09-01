@@ -1,0 +1,63 @@
+name: Bug report
+description: Report something the browser client does wrong
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: dropdown
+    id: runtime-state
+    attributes:
+      label: Runtime state
+      description: Most behaviour here depends on it. The runtime card shows the state.
+      options:
+        - No runtime selected (signed out)
+        - No runtime selected (signed in)
+        - SUBMITTING
+        - QUEUED
+        - STARTING
+        - READY
+        - STOPPING
+        - STOPPED
+        - FAILED
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and version
+      description: For example, Chrome 141 on macOS 15.
+    validations:
+      required: true
+  - type: input
+    id: cs-control
+    attributes:
+      label: cs-control version
+      description: Output of `csctl version` for the deployment you are using.
+    validations:
+      required: true
+  - type: input
+    id: site-version
+    attributes:
+      label: Site version
+      description: Commit this deployment was built from.
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Browser console output
+      description: Redact tokens, user codes and URLs carrying them before pasting.
+      render: text
+    validations:
+      required: false

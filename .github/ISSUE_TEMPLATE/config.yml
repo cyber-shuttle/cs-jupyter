@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a vulnerability
+    url: https://github.com/cyber-shuttle/cs-jupyter/blob/main/SECURITY.md
+    about: Security problems are reported privately, never as a public issue.
