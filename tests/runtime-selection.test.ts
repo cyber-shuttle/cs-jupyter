@@ -1,9 +1,11 @@
+import type { ReadonlyPartialJSONObject } from "@lumino/coreutils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CyberShuttlePanel,
   type IRuntimeUiState,
 } from "../src/CyberShuttlePanel";
 import type { IRuntime } from "../src/Common";
+import type { IRuntimeLogTail } from "../src/ControlClient";
 import { RuntimeController } from "../src/RuntimeController";
 import {
   cacheRuntimeAccess,
@@ -34,11 +36,11 @@ const active: IRuntime = {
   id: "rt-333333333333",
   rootFolder: "projects/active",
 };
-const hiddenLog = {
-  epoch: "1".repeat(32),
+const hiddenLog: IRuntimeLogTail = {
   runtimeId: first.id,
-  revision: 1,
-  lines: [{ stream: "status" as const, text: "Preparing runtime" }],
+  lines: [
+    { stream: "status", text: "Preparing runtime", at: "2026-01-01T00:00:00Z" },
+  ],
 };
 
 function setRuntimes(
@@ -73,7 +75,9 @@ function harness(
   currentRuntimeId?: string,
 ) {
   const navigate = vi.fn();
-  const execute = vi.fn(async () => undefined);
+  const execute = vi.fn<
+    (command: string, args?: ReadonlyPartialJSONObject) => Promise<void>
+  >(async () => undefined);
   const app = {
     commands: { execute, hasCommand: vi.fn(() => true) },
     shell: { currentWidget: null },

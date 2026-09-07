@@ -1,3 +1,4 @@
+import type { ITerminalOptions } from "@xterm/xterm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
@@ -5,10 +6,10 @@ const mocks = vi.hoisted(() => {
     writes: string[] = [];
     disposed = false;
     focused = false;
-    options: any;
-    private _data = (_value: string) => undefined;
-    private _resize = (_value: { cols: number; rows: number }) => undefined;
-    constructor(options: unknown) {
+    options: ITerminalOptions;
+    private _data: (value: string) => void = () => {};
+    private _resize: (value: { cols: number; rows: number }) => void = () => {};
+    constructor(options: ITerminalOptions) {
       this.options = options;
       terminals.push(this);
     }
@@ -90,13 +91,6 @@ const connect =
   (url: string): OAuthWebSocketConnector =>
   async () =>
     new FakeSocket(url) as unknown as WebSocket;
-
-const resource = {
-  host: "delta",
-  homeDir: "/home/a",
-  accounts: ["a"],
-  partitions: [{ name: "cpu", cpuCount: 8, memoryMb: 16000, gres: [] }],
-};
 
 describe("SSH operation console protocol", () => {
   beforeEach(() => {

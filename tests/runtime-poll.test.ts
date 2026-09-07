@@ -138,7 +138,13 @@ describe("runtime polling", () => {
         [
           {
             runtimeId: runtime.id,
-            lines: [{ stream: "status", text: "queued" }],
+            lines: [
+              {
+                stream: "status",
+                text: "queued",
+                at: "2026-01-01T00:00:00Z",
+              },
+            ],
           },
         ],
       ),

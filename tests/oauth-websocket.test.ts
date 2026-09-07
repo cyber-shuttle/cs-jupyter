@@ -2,15 +2,26 @@ import { fakeAuth } from "./fakes";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ControlClient } from "../src/ControlClient";
 import {
-  CYBERSHUTTLE_WEBSOCKET_PROTOCOL,
   OAuthWebSocketFactory,
-  encodeAccessToken,
   type WebSocketConstructor,
 } from "../src/OAuthWebSocket";
 
-class FakeSocket extends EventTarget {
+class FakeSocket extends EventTarget implements WebSocket {
+  readonly CONNECTING = 0;
+  readonly OPEN = 1;
+  readonly CLOSING = 2;
+  readonly CLOSED = 3;
+  readonly readyState = this.CONNECTING;
+  readonly bufferedAmount = 0;
+  readonly extensions = "";
+  binaryType: BinaryType = "blob";
+  onclose: WebSocket["onclose"] = null;
+  onerror: WebSocket["onerror"] = null;
+  onmessage: WebSocket["onmessage"] = null;
+  onopen: WebSocket["onopen"] = null;
   protocol = "";
-  close = vi.fn();
+  send = vi.fn<WebSocket["send"]>();
+  close = vi.fn<WebSocket["close"]>();
   constructor(
     readonly url: string,
     readonly protocols: string[],
@@ -21,7 +32,7 @@ class FakeSocket extends EventTarget {
 }
 
 const sockets: FakeSocket[] = [];
-const Socket = FakeSocket as unknown as WebSocketConstructor;
+const Socket: WebSocketConstructor = FakeSocket;
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -31,15 +42,19 @@ afterEach(() => {
 
 describe("OAuth WebSocket factory", () => {
   it("builds the authentication socket URL from the control base", async () => {
-    const open = vi.fn(
-      async () => new FakeSocket("wss://unused", []) as unknown as WebSocket,
-    );
-    const webSockets = { open } as OAuthWebSocketFactory;
     const auth = fakeAuth();
+    const webSockets = new OAuthWebSocketFactory(
+      auth,
+      "https://control.example.edu",
+      Socket,
+    );
+    const open = vi
+      .spyOn(webSockets, "open")
+      .mockResolvedValue(new FakeSocket("wss://unused", []));
     const client = new ControlClient(
       "https://control.example.edu/api/v1",
       auth,
-      vi.fn() as any,
+      vi.fn<typeof globalThis.fetch>(),
       webSockets,
     );
     await client.sshAuthWebSocket("delta")();

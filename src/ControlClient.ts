@@ -23,6 +23,7 @@ import {
   ISshHost,
   ISshHostTest,
   RUNTIME_ID,
+  RUNTIME_KEYS,
   RUNTIME_STATES,
   RuntimeState,
   RuntimeValidationStatus,
@@ -490,19 +491,7 @@ function validateRuntimeLogTail(value: unknown): IRuntimeLogTail {
 
 function validateRuntime(value: unknown): IRuntime {
   if (
-    !onlyKeys(value, [
-      "id",
-      "generation",
-      "state",
-      "sshHost",
-      "account",
-      "partition",
-      "rootFolder",
-      "resources",
-      "error",
-      "createdAt",
-      "updatedAt",
-    ]) ||
+    !onlyKeys(value, RUNTIME_KEYS) ||
     !RUNTIME_STATES.includes(value.state as RuntimeState) ||
     !isPlainObject(value.resources)
   ) {

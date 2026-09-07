@@ -20,7 +20,7 @@ import {
   SessionManager,
   TerminalManager,
 } from "@jupyterlab/services";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, describe, expect, it, vi } from "vitest";
 
 import { remoteServicePlugins } from "../src/index.js";
 import { getActiveRuntimeId } from "../src/runtime-state.js";
@@ -221,12 +221,13 @@ describe("remote service manager registry", () => {
     expect(contents.serverSettings.baseUrl).toBe(remoteBase);
     expect(kernels.serverSettings.baseUrl).toBe(remoteBase);
     expect(kernelspecs.serverSettings.baseUrl).toBe(remoteBase);
+    assert.isDefined(sessions.serverSettings);
     expect(sessions.serverSettings.baseUrl).toBe(remoteBase);
     expect(terminals.serverSettings.baseUrl).toBe(remoteBase);
     expect(terminals.isAvailable()).toBe(true);
 
     await shellServerSettings.fetch(
-      new URL("lab/api/settings", shellServerSettings.baseUrl),
+      new URL("lab/api/settings", shellServerSettings.baseUrl).href,
     );
     await Promise.all([
       kernels.ready,

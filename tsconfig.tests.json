@@ -5,7 +5,9 @@
     "declaration": false,
     "noEmit": true,
     "rootDir": ".",
+    "lib": ["DOM", "DOM.Iterable", "ES2024"],
     "types": ["node"]
   },
+  "exclude": [],
   "include": ["tests/**/*.ts", "src/**/*.ts"]
 }

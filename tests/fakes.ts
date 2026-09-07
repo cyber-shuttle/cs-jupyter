@@ -1,6 +1,10 @@
 import { vi } from "vitest";
 import type { IRuntime } from "../src/Common";
-import type { IRuntimeList, IRuntimeLogTail } from "../src/ControlClient";
+import type {
+  IControlAuth,
+  IRuntimeList,
+  IRuntimeLogTail,
+} from "../src/ControlClient";
 import type { IRuntimeUiState } from "../src/CyberShuttlePanel";
 import { emptyState } from "../src/RuntimeList";
 import type { OAuthWebSocketConnector } from "../src/OAuthWebSocket";
@@ -79,10 +83,9 @@ export function runtimeListFixture(
 
 /** The token provider a ControlClient needs, stubbed. */
 export function fakeAuth(accessToken = "delegated-token") {
+  const credentials = async () => ({ accessToken, idToken: "identity-token" });
   return {
-    acquireToken: vi.fn(async () => ({
-      accessToken,
-      idToken: "identity-token",
-    })),
-  };
+    acquireToken: vi.fn(credentials),
+    interactiveLogin: vi.fn(credentials),
+  } satisfies IControlAuth;
 }

@@ -12,7 +12,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
-      - run: bun run typecheck
+      - run: bun run lint
       - run: bun run test
 
   # The end-to-end run needs the built site and a real browser, so it is its own

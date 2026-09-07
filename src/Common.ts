@@ -59,6 +59,26 @@ export interface IRuntime extends IAllocation {
   updatedAt: string;
 }
 
+export const RUNTIME_KEYS = [
+  "id",
+  "generation",
+  "state",
+  "sshHost",
+  "account",
+  "partition",
+  "rootFolder",
+  "resources",
+  "error",
+  "createdAt",
+  "updatedAt",
+] as const satisfies readonly (keyof IRuntime)[];
+
+export const runtimeKeysCoverIRuntime: [
+  Exclude<keyof IRuntime, (typeof RUNTIME_KEYS)[number]>,
+] extends [never]
+  ? true
+  : false = true;
+
 export interface ISshHost {
   name: string;
   hostname?: string;
@@ -121,7 +141,7 @@ export function assertSecureOrLoopback(
   insecure: string,
   message: string,
 ): void {
-  const loopback = ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
+  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
   if (
     (url.protocol !== secure && !(url.protocol === insecure && loopback)) ||
     url.username ||
@@ -150,7 +170,7 @@ export function exactKeys(
 
 export function onlyKeys(
   value: unknown,
-  allowed: string[],
+  allowed: readonly string[],
 ): value is Record<string, any> {
   return (
     isPlainObject(value) &&

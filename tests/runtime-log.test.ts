@@ -3,10 +3,14 @@ import { describe, expect, it, vi } from "vitest";
 import type { IRuntime } from "../src/Common";
 import {
   ControlClient,
+  UNCHANGED,
   type IRuntimeLogLine,
   type IRuntimeLogTail,
 } from "../src/ControlClient";
-import type { IRuntimeUiState } from "../src/CyberShuttlePanel";
+import type {
+  CyberShuttlePanel,
+  IRuntimeUiState,
+} from "../src/CyberShuttlePanel";
 import { RuntimeDetail } from "../src/RuntimeDetail";
 import { fakeAuth, runtimeFixture, uiState } from "./fakes";
 
@@ -40,19 +44,22 @@ function clientFor(logs: unknown[]): ControlClient {
   return new ControlClient(
     "https://control.example.edu/api/v1",
     fakeAuth(),
-    vi.fn(
+    vi.fn<typeof globalThis.fetch>(
       async () =>
         new Response(
           JSON.stringify({ runtimes: [], refreshing: false, logs }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
-    ) as any,
+    ),
   );
 }
 
 describe("runtime log tails on the polled read", () => {
   it("accepts a complete bounded tail", async () => {
     const list = await clientFor([log()]).listRuntimes();
+    if (list === UNCHANGED) {
+      throw new Error("cs-control answered 304 to a first read.");
+    }
     expect(list.logs).toEqual([log()]);
   });
 
@@ -115,6 +122,7 @@ class DetailController {
   readonly runAgain = vi.fn(async () => undefined);
   readonly stop = vi.fn(async () => undefined);
   readonly connect = vi.fn(async () => undefined);
+  readonly remove = vi.fn(async () => undefined);
   currentRuntimeId: string | undefined;
 
   constructor(public state: IRuntimeUiState) {}
@@ -140,7 +148,6 @@ function detailState(
   return uiState({
     runtimes: [value],
     logs: new Map([[value.id, { runtimeId: value.id, lines: stamped }]]),
-    hosts: [],
     jupyterReady: new Set(value.state === "READY" ? [value.id] : []),
   });
 }
@@ -152,7 +159,10 @@ function runtimeDetail(value: IRuntime): {
   const controller = new DetailController(detailState(value));
   return {
     controller,
-    detail: new RuntimeDetail(controller as any, value.id),
+    detail: new RuntimeDetail(
+      controller as unknown as CyberShuttlePanel,
+      value.id,
+    ),
   };
 }
 
@@ -273,11 +283,13 @@ describe("runtime detail modal body", () => {
       uiState({
         runtimes: [ready],
         logs: new Map(),
-        hosts: [],
         jupyterReady: new Set<string>(),
       }),
     );
-    const detail = new RuntimeDetail(controller as any, ready.id);
+    const detail = new RuntimeDetail(
+      controller as unknown as CyberShuttlePanel,
+      ready.id,
+    );
     expect(detail.node.textContent).not.toContain("Connect");
     detail.dispose();
   });

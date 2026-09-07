@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { IRuntimeCreateRequest } from "../src/Common";
 import {
   ControlClient,
   ControlError,
@@ -153,12 +154,14 @@ function formHarness() {
         }),
     ),
     sshAuthWebSocket: vi.fn((_host: string) => vi.fn()),
-    validateRuntime: vi.fn(async () => ({
-      runtimeId: "rt-012345abcdef",
-      status: "PASSED",
-      script: "#!/bin/bash\n#SBATCH --partition=test\n",
-      message: "Slurm accepted the script.",
-    })),
+    validateRuntime: vi.fn(
+      async (_request: IRuntimeCreateRequest, _signal?: AbortSignal) => ({
+        runtimeId: "rt-012345abcdef",
+        status: "PASSED",
+        script: "#!/bin/bash\n#SBATCH --partition=test\n",
+        message: "Slurm accepted the script.",
+      }),
+    ),
   };
   const form = new CreateRuntimeForm(api as any, () => {
     const operation = new FakeOperation();
@@ -206,12 +209,11 @@ async function pendingValidation(workspaceValue: string) {
   submitConfiguration(form);
   await advanceToValidation();
   await vi.waitFor(() => expect(api.validateRuntime).toHaveBeenCalledOnce());
-  return {
-    form,
-    api,
-    signal: api.validateRuntime.mock.calls[0][1] as AbortSignal,
-    resolveValidation,
-  };
+  const signal = api.validateRuntime.mock.calls[0][1];
+  if (!signal) {
+    throw new Error("validation was requested without an abort signal");
+  }
+  return { form, api, signal, resolveValidation };
 }
 
 describe("SSH CRUD and streamed runtime-first creation", () => {
@@ -220,7 +222,7 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
       configurable: true,
       value: "_xsrf=test-xsrf",
     });
-    const fetch = vi.fn(
+    const fetch = vi.fn<typeof globalThis.fetch>(
       async () =>
         new Response(
           JSON.stringify({
@@ -238,11 +240,11 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
     const client = new ControlClient(
       "http://localhost:3000/api/v1",
       fakeAuth("test-delegated-token"),
-      fetch as any,
+      fetch,
     );
     await client.listSshHosts();
     const requests = fetch.mock.calls.map(
-      ([input, init]) => new Request(input as RequestInfo, init as RequestInit),
+      ([input, init]) => new Request(input, init),
     );
     expect(requests.map((item) => item.method)).toEqual(["GET"]);
     expect(
@@ -325,7 +327,9 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
     const operation = operations[0];
     expect(operation.starts).toHaveLength(1);
     expect(api.sshAuthWebSocket).toHaveBeenCalledWith("alpha");
-    operation.starts[0].callbacks.ready();
+    const { ready } = operation.starts[0].callbacks;
+    expect(ready).toBeDefined();
+    ready?.();
     expect(discoveries).toHaveLength(2);
     await failDiscovery(
       1,
@@ -411,7 +415,7 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
     expect(
       form.node
         .querySelector<HTMLElement>('select[name="gpuType"]')
-        ?.closest(".csField")?.hidden,
+        ?.closest<HTMLElement>(".csField")?.hidden,
     ).toBe(true);
     const workspace = input(form, "rootFolder");
     workspace.value = "projects/cpu";
@@ -681,7 +685,7 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
   });
 
   it("shows create errors on the review step without losing validation", async () => {
-    const { form, api, deliver } = formHarness();
+    const { form, deliver } = formHarness();
     choose(form, "alpha");
     await deliver(0, discovery("alpha"));
     const workspace = input(form, "rootFolder");
