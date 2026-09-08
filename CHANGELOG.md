@@ -5,6 +5,31 @@ All notable changes to CyberShuttle Jupyter are recorded here. The format follow
 
 ## [Unreleased]
 
+### Added
+
+- Edit an SSH login: the paste form now serves both adding and correcting, and an edit opens prefilled with a
+  command rebuilt from what is configured, so nothing has to be retyped. The alias is the entry being edited,
+  so it is not offered for renaming.
+- A walltime countdown on the runtime card, in the detail dialog, and in the JupyterLab status bar on a
+  runtime's own page, each warning below ten minutes. Every surface ticks on a clock of its own, because a
+  settled runtime is answered `304` and emits no state to re-render from.
+- Live CPU, memory and GPU usage in the runtime detail dialog, drawn against what the allocation was given
+  rather than against each series' own maximum, and read only while that dialog is open.
+- A run report for a finished allocation — how long it ran, its peak memory, and how much of the CPU and
+  memory it was given it actually used — and a **Run history** dialog listing every run this account has
+  finished, including runs whose card has since been deleted.
+
+### Changed
+
+- Stop now asks first. It cancels the Slurm job, which is as destructive as Delete, and was the one verb doing
+  it without confirmation.
+- Deleting a running runtime takes one click. cs-control stops first and refuses until the scheduler releases
+  the job, so the intent is kept and finished on the poll that sees it released.
+
+### Removed
+
+- `previewRuntimeScript`, which posted to a route cs-control no longer serves and which nothing called.
+
 ## [0.1.0] - 2026-09-07
 
 ### Added

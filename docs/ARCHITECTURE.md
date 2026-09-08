@@ -65,6 +65,28 @@ description of them.
 cs-control provisions the Python environment on the compute host when it creates an allocation; nothing in
 this repository runs there.
 
+## Countdown, usage and history
+
+Three reads sit beside the poll, each separate from it for a reason.
+
+The countdown is not a read at all. `startedAt` is when Slurm was first seen running the allocation, so with
+`resources.wallMinutes` it is an absolute deadline the client ticks down against its own clock. That matters
+because the poll goes quiet: a settled allocation is answered `304` and emits no state for minutes at a time,
+so every surface showing the figure — the card, the detail dialog, and a status-bar item on the runtime's own
+page — runs a one-second clock of its own. The status-bar item reads cs-control directly rather than borrowing
+the Launcher's state, because JupyterLab disposes the Launcher the moment anything is opened from it, and the
+countdown has to outlive that. Below ten minutes every surface warns, on one threshold.
+
+Usage samples are their own route because they change on every tick, and folding them into the poll would
+defeat the `ETag` that makes watching a queued job cheap. They are read only while a runtime's detail dialog is
+open: cs-control keeps a window for every allocation, but reading one nobody is looking at is a round trip for
+a graph nobody sees. Each series is drawn against what the allocation was given rather than against its own
+maximum, so an idle job cannot look busy.
+
+Run history is its own collection rather than a view of the runtime list, because it outlives it: a run whose
+card was deleted is still the caller's. The same report renders for a card whose allocation just ended and for
+a run read back out of the history, because they are the same record.
+
 ## Session cache
 
 The session cache intentionally keeps the capability across same-tab reloads so an active runtime remains
