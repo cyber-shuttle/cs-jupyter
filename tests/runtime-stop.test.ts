@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { IRuntime } from "../src/Common";
 import { CyberShuttlePanel } from "../src/CyberShuttlePanel";
+import { ControlError } from "../src/ControlClient";
 import {
+  acceptDialog,
   controlFake,
   pollPanel,
   runtimeFixture,
@@ -61,6 +63,7 @@ describe("runtime stop action", () => {
     await loaded(panel);
 
     const failingStop = panel.stop(base.id);
+    await acceptDialog();
     await vi.waitFor(() =>
       expect(api.stopRuntime).toHaveBeenCalledWith(base.id),
     );
@@ -71,6 +74,7 @@ describe("runtime stop action", () => {
     expect(panel.state.error).toBe("Slurm cancellation failed.");
 
     const stopping = panel.stop(base.id);
+    await acceptDialog();
     await vi.waitFor(() => expect(api.stopRuntime).toHaveBeenCalledTimes(2));
     expect(panel.state.busyRuntimeIds.has(base.id)).toBe(true);
     stopPending.resolve({ ...base, state: "STOPPING" });
@@ -123,6 +127,49 @@ describe("runtime stop action", () => {
     expect(panel.state.error).toBe("Slurm validation failed.");
     await pollPanel(panel);
     expect(panel.state.error).toBe("Slurm validation failed.");
+    panel.dispose();
+  });
+
+  // cs-control stops first and then refuses until the scheduler has released
+  // the job, which for a live allocation is almost never the same instant.
+  // Asking the owner to click Delete a second time would be asking them to
+  // poll Slurm by hand.
+  it("keeps a delete that the scheduler has not released yet, and finishes it", async () => {
+    let state: IRuntime["state"] = "READY";
+    const api = controlFake({
+      listRuntimes: vi.fn(async () => runtimeListFixture([{ ...base, state }])),
+      stopRuntime: vi.fn(async () => ({ ...base, state: "STOPPING" as const })),
+      deleteRuntime: vi.fn(async () => {
+        if (state !== "STOPPED") {
+          throw new ControlError(
+            "runtime_not_stopped",
+            "runtime is still stopping",
+          );
+        }
+        return { ...base, state: "STOPPED" as const };
+      }),
+    });
+    const panel = new CyberShuttlePanel(
+      api as any,
+      { currentRuntimeId: undefined, select: vi.fn() } as any,
+    );
+    await loaded(panel);
+
+    const removing = panel.remove(base.id);
+    await acceptDialog();
+    await removing;
+    expect(api.deleteRuntime).toHaveBeenCalledTimes(1);
+    // The card is still there, and so is the intent.
+    expect(panel.state.runtimes.map((each) => each.id)).toEqual([base.id]);
+
+    // Still not released: nothing is retried on a runtime Slurm still holds.
+    await pollPanel(panel);
+    expect(api.deleteRuntime).toHaveBeenCalledTimes(1);
+
+    state = "STOPPED";
+    await pollPanel(panel);
+    await vi.waitFor(() => expect(api.deleteRuntime).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(panel.state.runtimes).toHaveLength(0));
     panel.dispose();
   });
 });

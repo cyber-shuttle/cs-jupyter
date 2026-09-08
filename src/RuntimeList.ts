@@ -13,6 +13,8 @@ import {
 export const emptyState = (): IRuntimeUiState => ({
   runtimes: [],
   logs: new Map(),
+  samples: new Map(),
+  runs: [],
   loading: false,
   updatesStatus: "",
   error: "",
@@ -114,6 +116,7 @@ export class RuntimeList extends Widget {
   readonly runtimeRequested = new Signal<this, string>(this);
   readonly createRequested = new Signal<this, void>(this);
   readonly sshHostsRequested = new Signal<this, void>(this);
+  readonly runHistoryRequested = new Signal<this, void>(this);
 
   private _state = emptyState();
   private _canCreate = false;
@@ -184,9 +187,14 @@ export class RuntimeList extends Widget {
     sshHosts.dataset.runtimeAction = "ssh-hosts";
     sshHosts.disabled = !this._state.signedIn || this._state.authRequired;
     sshHosts.onclick = () => this.sshHostsRequested.emit(undefined);
+    const history = button("Run history", "csTextButton csSshHostsButton");
+    history.dataset.runtimeAction = "run-history";
+    history.disabled = !this._state.signedIn || this._state.authRequired;
+    history.onclick = () => this.runHistoryRequested.emit(undefined);
     sectionHeader.append(
       serverRackIcon("jp-Launcher-sectionIcon csRuntimeSectionRack"),
       sectionTitle,
+      history,
       sshHosts,
     );
     section.appendChild(sectionHeader);

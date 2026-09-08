@@ -80,3 +80,18 @@ export function keepingFocus(node: HTMLElement, rebuild: () => void): void {
     }
   }
 }
+
+/**
+ * A sparkline over a fixed number of slots, so a filling window grows in from
+ * the left and then slides. Hand-rolled for the reason every other glyph here
+ * is: currentColor follows the theme, and a chart library would be the only
+ * dependency of its kind.
+ */
+export function sparkline(
+  points: string,
+  className = "csSparkline",
+): HTMLElement {
+  const holder = element("div", "", className);
+  holder.innerHTML = `<svg viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true" focusable="false"><polyline fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" points="${points}" /></svg>`;
+  return holder;
+}

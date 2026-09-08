@@ -14,6 +14,7 @@ import {
 } from "../src/runtime-access";
 import { CyberShuttleHeader, RuntimeList } from "../src/RuntimeList";
 import {
+  acceptDialog,
   controlFake,
   pollPanel,
   runtimeFixture,
@@ -316,7 +317,9 @@ describe("serialized runtime selection", () => {
           { ...first, generation: "g-fedcba9876543210" },
         ]);
       } else {
-        await panel.stop(first.id);
+        const stopping = panel.stop(first.id);
+        await acceptDialog();
+        await stopping;
       }
       save.resolve();
       await selecting;

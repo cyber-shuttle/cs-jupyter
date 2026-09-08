@@ -361,6 +361,47 @@ and the row is lifted. */
 .csWalltimeStatusLow {
   color: var(--jp-warn-color1);
 }
+/* Usage reads as rows of one shape: a name, the shape of the series, and the
+   figure it ends on, so the live graph and the frozen report look alike. */
+.csRuntimeUsage,
+.csRunReport {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+}
+.csRuntimeUsageRow {
+  display: grid;
+  grid-template-columns: 4.5rem 1fr auto;
+  gap: 8px;
+  align-items: center;
+  font-size: var(--jp-ui-font-size0);
+}
+.csRuntimeUsageLabel {
+  color: var(--jp-ui-font-color2);
+}
+.csRuntimeUsageValue {
+  color: var(--jp-ui-font-color1);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.csSparkline {
+  display: block;
+  height: 24px;
+  color: var(--jp-brand-color1);
+}
+.csSparkline svg {
+  width: 100%;
+  height: 100%;
+  /* The polyline is drawn in the graph's own units and stretched, so the stroke
+     is kept at its real width rather than stretched with it. */
+  overflow: visible;
+}
+.csRunReportGraphs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 .csWalltimeStatus {
   display: flex;
   align-items: center;

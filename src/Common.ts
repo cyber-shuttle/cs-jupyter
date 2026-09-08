@@ -83,6 +83,52 @@ export const runtimeKeysCoverIRuntime: [
   ? true
   : false = true;
 
+// One reading of what an allocation is actually using. Every figure is optional:
+// a host with no GPUs reports none, and a cgroup file that cannot be read is
+// absent rather than zero, which for a cumulative counter is a different claim.
+export interface IMetricSample {
+  at: string;
+  memBytes?: number;
+  cpuUsageUsec?: number;
+  gpus?: IGpuSample[];
+}
+
+export interface IGpuSample {
+  index: number;
+  utilPct: number;
+  memUsedMiB: number;
+  memTotalMiB: number;
+}
+
+export interface IRuntimeSeries {
+  runtimeId: string;
+  samples: IMetricSample[];
+}
+
+// What Slurm's accounting says a finished allocation used. Absent until the
+// flush lands, so every figure is optional.
+export interface IRunStats {
+  cores?: number;
+  requestedMemory?: string;
+  elapsedSeconds?: number;
+  maxRss?: string;
+  cpuEfficiencyPct?: number;
+  memoryEfficiencyPct?: number;
+}
+
+// What one finished allocation did. A run is named by the generation that ran
+// it, so a card accumulates runs rather than overwriting them.
+export interface IRun extends IAllocation {
+  runtimeId: string;
+  generation: string;
+  finalState: string;
+  error?: string;
+  startedAt?: string;
+  endedAt: string;
+  stats?: IRunStats;
+  samples?: IMetricSample[];
+}
+
 export interface ISshHost {
   name: string;
   hostname?: string;

@@ -1,8 +1,17 @@
 import { Widget } from "@lumino/widgets";
-import { isTerminal, type IRuntime } from "./Common";
+import { isTerminal, type IMetricSample, type IRuntime } from "./Common";
 import type { CyberShuttlePanel, IRuntimeUiState } from "./CyberShuttlePanel";
 import type { IRuntimeLogTail } from "./ControlClient";
-import { button, element, keepingFocus, notes, statePill } from "./dom";
+import {
+  button,
+  element,
+  keepingFocus,
+  notes,
+  sparkline,
+  statePill,
+} from "./dom";
+import { resourceGraphs, sparklinePoints } from "./metrics";
+import { RunReport } from "./RunReport";
 import {
   LOW_TIME_MS,
   countsDown,
@@ -204,11 +213,51 @@ export class RuntimeDetail extends Widget {
         [this._state.updatesStatus, "csStatus"],
       ]),
     );
+    // A finished allocation has a report rather than a live graph, and the
+    // report is the last thing it will ever say.
+    const run = this._state.runs.find(
+      (candidate) =>
+        candidate.runtimeId === runtime.id &&
+        candidate.generation === runtime.generation,
+    );
+    const samples = this._state.samples.get(runtime.id);
+    if (run) {
+      root.appendChild(RunReport(run));
+    } else if (samples?.length) {
+      root.appendChild(this._usage(runtime, samples));
+    }
     const tail = this._state.logs.get(runtime.id);
     if (tail) {
       root.appendChild(this._runtimeLog(runtime, tail));
     }
     return root;
+  }
+
+  // What the allocation is actually using, against what it was given: a series
+  // read on its own scale would make an idle job look busy.
+  private _usage(
+    runtime: IRuntime,
+    samples: readonly IMetricSample[],
+  ): HTMLElement {
+    const section = element("section", "", "csRuntimeUsage");
+    section.appendChild(element("h4", "Usage", "csRuntimeLogTitle"));
+    for (const graph of resourceGraphs(runtime, samples)) {
+      const row = element("div", "", "csRuntimeUsageRow");
+      const latest = graph.values[graph.values.length - 1];
+      row.append(
+        element("span", graph.label, "csRuntimeUsageLabel"),
+        sparkline(
+          sparklinePoints(graph.values, 100, 24, graph.ceiling, samples.length),
+        ),
+        element(
+          "span",
+          latest === undefined ? "—" : graph.format(latest),
+          "csRuntimeUsageValue",
+        ),
+      );
+      section.appendChild(row);
+    }
+    return section;
   }
 
   private _field(parent: HTMLElement, label: string, value: string): void {
