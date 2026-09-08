@@ -70,9 +70,8 @@ export class CyberShuttlePanel extends StackedPanel {
   private _runtimes: IRuntime[] = [];
   private _logs = new Map<string, IRuntimeLogTail>();
   // Samples are their own read, so they are held beside the list rather than in
-  // it, and only for the runtime whose detail is open.
+  // it. Every live session is read: both the card and the run history show them.
   private _samples = new Map<string, IMetricSample[]>();
-  private _watchedRuntimeId: string | undefined;
   // The history outlives the runtimes in it, so it is read as its own thing
   // rather than derived from the list.
   private _runs: IRun[] = [];
@@ -360,17 +359,6 @@ export class CyberShuttlePanel extends StackedPanel {
     }
   }
 
-  // Only the runtime being looked at is sampled: cs-control keeps a window for
-  // every allocation, but reading one nobody is watching is a round trip for a
-  // graph nobody sees.
-  watchSamples(runtimeId: string | undefined): void {
-    this._watchedRuntimeId = runtimeId;
-    if (runtimeId === undefined) {
-      return;
-    }
-    void this._pollSamples();
-  }
-
   // A run appears only when an allocation ends, so this rides the poll it is
   // already making rather than taking a timer of its own.
   private async _pollRuns(): Promise<void> {
@@ -390,13 +378,19 @@ export class CyberShuttlePanel extends StackedPanel {
   }
 
   private async _pollSamples(): Promise<void> {
-    const runtimeId = this._watchedRuntimeId;
-    if (runtimeId === undefined) {
-      return;
+    const live = this._runtimes.filter((runtime) => !isTerminal(runtime.state));
+    await Promise.all(live.map((runtime) => this._pollSample(runtime.id)));
+    for (const id of [...this._samples.keys()]) {
+      if (!live.some((runtime) => runtime.id === id)) {
+        this._samples.delete(id);
+      }
     }
+  }
+
+  private async _pollSample(runtimeId: string): Promise<void> {
     try {
       const series = await this._api.getRuntimeMetrics(runtimeId);
-      if (this.isDisposed || this._watchedRuntimeId !== runtimeId) {
+      if (this.isDisposed) {
         return;
       }
       const previous = this._samples.get(runtimeId);
@@ -454,7 +448,6 @@ export class CyberShuttlePanel extends StackedPanel {
     this._hosts = undefined;
     this._logs = new Map();
     this._samples = new Map();
-    this._watchedRuntimeId = undefined;
     this._runs = [];
     this._pendingDeletes = new Set();
     this._jupyterReady = new Set();
@@ -536,7 +529,6 @@ export class CyberShuttlePanel extends StackedPanel {
   }
 
   async openRuntime(runtimeId: string): Promise<void> {
-    this.watchSamples(runtimeId);
     const body = new Panel();
     body.addClass("csWorkspaceModal");
     body.addWidget(new RuntimeDetail(this, runtimeId));
@@ -552,7 +544,6 @@ export class CyberShuttlePanel extends StackedPanel {
     try {
       await dialog.launch().catch(() => undefined);
     } finally {
-      this.watchSamples(undefined);
       this._detailDialog = undefined;
       this._loginDock = undefined;
       dock.dispose();

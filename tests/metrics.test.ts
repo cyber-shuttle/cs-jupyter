@@ -75,7 +75,7 @@ describe("resource samples", () => {
     );
     expect(graphs.map((graph) => [graph.label, graph.ceiling])).toEqual([
       ["CPU", 8],
-      ["Memory", 16],
+      ["MEM", 16],
       ["GPU", 100],
     ]);
     expect(graphs[1].format(4)).toBe("4.0 / 16.0 GB");
@@ -86,7 +86,7 @@ describe("resource samples", () => {
       { resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 } },
       [sample(0)],
     );
-    expect(graphs.map((graph) => graph.label)).toEqual(["CPU", "Memory"]);
+    expect(graphs.map((graph) => graph.label)).toEqual(["CPU", "MEM"]);
   });
 });
 
@@ -169,6 +169,43 @@ describe("accounting state", () => {
   });
 });
 
+describe("usage plots", () => {
+  const runtime = {
+    id: "rt-012345abcdef",
+    resources: { cores: 8, memoryMb: 16384, wallMinutes: 60, gpuCount: 2 },
+  } as never;
+  const samples: IMetricSample[] = [
+    { at: "2030-01-01T00:00:00Z", memBytes: 1024 ** 3, cpuUsageUsec: 0 },
+    {
+      at: "2030-01-01T00:00:05Z",
+      memBytes: 2 * 1024 ** 3,
+      cpuUsageUsec: 10_000_000,
+    },
+  ];
+
+  it("stacks CPU, MEM and GPU in one row, each titled above its own plot", async () => {
+    const { usagePlots, latest } = await import("../src/usage");
+    const row = usagePlots(runtime, samples, latest);
+    expect(
+      [...row.querySelectorAll(".csUsageTitle")].map((n) => n.textContent),
+    ).toEqual(["CPU", "MEM", "GPU"]);
+    // One plot per series, and the panel is what carries the 3:2 shape.
+    expect(row.querySelectorAll(".csPlot svg").length).toBe(3);
+    expect(row.querySelector(".csPlot svg")?.getAttribute("viewBox")).toBe(
+      "0 0 60 40",
+    );
+    expect(row.querySelectorAll(".csPlotLine").length).toBe(3);
+  });
+
+  it("calls out the latest reading live and the peak on a finished run", async () => {
+    const { usagePlots, latest, peak } = await import("../src/usage");
+    const live = usagePlots(runtime, samples, latest);
+    expect(live.textContent).toContain("2.0 / 16.0 GB");
+    const done = usagePlots(runtime, samples, peak, "peak ");
+    expect(done.textContent).toContain("peak 2.0 / 16.0 GB");
+  });
+});
+
 describe("run history view", () => {
   const finished: IRun = {
     runtimeId: "rt-012345abcdef",
@@ -226,7 +263,9 @@ describe("run history view", () => {
     );
     // Newest first: the one still running leads.
     expect(pills).toEqual(["READY", "STOPPED"]);
-    expect(history.node.textContent).toContain("Still running");
+    // A live entry states what it is, the way a finished one states what it was.
+    expect(history.node.textContent).toContain("READY");
+    expect(history.node.textContent).toContain("Remaining");
     expect(history.node.textContent).not.toContain("not started yet");
     history.dispose();
   });

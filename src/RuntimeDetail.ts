@@ -1,5 +1,5 @@
 import { Widget } from "@lumino/widgets";
-import { isTerminal, type IMetricSample, type IRuntime } from "./Common";
+import { isTerminal, type IRuntime } from "./Common";
 import type { CyberShuttlePanel, IRuntimeUiState } from "./CyberShuttlePanel";
 import type { IRuntimeLogTail } from "./ControlClient";
 import {
@@ -9,10 +9,9 @@ import {
   keepingFocus,
   logLine,
   notes,
-  sparkline,
   statePill,
 } from "./dom";
-import { resourceGraphs, sparklinePoints } from "./metrics";
+import { latest, usagePlots } from "./usage";
 import {
   LOW_TIME_MS,
   countsDown,
@@ -188,7 +187,15 @@ export class RuntimeDetail extends Widget {
         `${runtime.resources.gpuCount} ${runtime.resources.gpuType || ""}`.trim(),
       );
     }
-    root.appendChild(details);
+    // What it is doing sits beside what it is, not under it.
+    const columns = element("div", "", "csDetailColumns");
+    columns.appendChild(details);
+    const samples = this._state.samples.get(runtime.id);
+    const live = !isTerminal(runtime.state);
+    if (live && samples?.length) {
+      columns.appendChild(usagePlots(runtime, samples, latest));
+    }
+    root.appendChild(columns);
 
     root.append(
       ...notes([
@@ -199,43 +206,11 @@ export class RuntimeDetail extends Widget {
     // The card is what this session is doing now. Once it is over there is
     // nothing live to show and its report belongs to the run history, which
     // keeps every generation rather than only the last.
-    const live = !isTerminal(runtime.state);
-    const samples = this._state.samples.get(runtime.id);
-    if (live && samples?.length) {
-      root.appendChild(this._usage(runtime, samples));
-    }
     const tail = live ? this._state.logs.get(runtime.id) : undefined;
     if (tail) {
       root.appendChild(this._runtimeLog(runtime, tail));
     }
     return root;
-  }
-
-  // What the allocation is actually using, against what it was given: a series
-  // read on its own scale would make an idle job look busy.
-  private _usage(
-    runtime: IRuntime,
-    samples: readonly IMetricSample[],
-  ): HTMLElement {
-    const section = element("section", "", "csRuntimeUsage");
-    section.appendChild(element("h4", "Usage", "csRuntimeLogTitle"));
-    for (const graph of resourceGraphs(runtime, samples)) {
-      const row = element("div", "", "csRuntimeUsageRow");
-      const latest = graph.values[graph.values.length - 1];
-      row.append(
-        element("span", graph.label, "csRuntimeUsageLabel"),
-        sparkline(
-          sparklinePoints(graph.values, 100, 24, graph.ceiling, samples.length),
-        ),
-        element(
-          "span",
-          latest === undefined ? "—" : graph.format(latest),
-          "csRuntimeUsageValue",
-        ),
-      );
-      section.appendChild(row);
-    }
-    return section;
   }
 
   private _field(parent: HTMLElement, label: string, value: string): void {

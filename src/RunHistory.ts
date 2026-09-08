@@ -3,6 +3,7 @@ import type { IRun, IRuntime } from "./Common";
 import { isTerminal } from "./Common";
 import type { CyberShuttlePanel, IRuntimeUiState } from "./CyberShuttlePanel";
 import { element, statePill } from "./dom";
+import { latest, usagePlots } from "./usage";
 import { RunReport } from "./RunReport";
 import { countsDown, formatRemaining, remainingMs } from "./walltime";
 
@@ -131,12 +132,37 @@ export class RunHistory extends Widget {
       : "not started yet";
   }
 
-  // An allocation still going has no report yet, and its card already carries
-  // the shape of it. All this has to add is that it is still going.
+  // An allocation still going has no report yet, but it does have live figures,
+  // and they are the same three series a finished run shows. Same two columns:
+  // what it is on the left, what it is doing on the right.
   private _inFlight(runtime: IRuntime): HTMLElement {
-    const left = countsDown(runtime)
-      ? `${formatRemaining(remainingMs(runtime, Date.now()))} left`
-      : "waiting for the scheduler";
-    return element("div", `Still running \u2014 ${left}.`, "csStatus");
+    const section = element("section", "", "csRunReport");
+    const columns = element("div", "", "csDetailColumns");
+    const grid = element("dl", "", "csRuntimeDetailGrid");
+    const rows: Array<[string, string]> = [
+      ["State", runtime.state],
+      ["Partition", runtime.partition],
+      ["Cores", String(runtime.resources.cores)],
+      ["Memory", `${runtime.resources.memoryMb} MB`],
+    ];
+    if (countsDown(runtime)) {
+      rows.push([
+        "Remaining",
+        formatRemaining(remainingMs(runtime, Date.now())),
+      ]);
+    }
+    for (const [label, value] of rows) {
+      grid.append(
+        element("dt", label, "csRuntimeDetailLabel"),
+        element("dd", value, "csRuntimeDetailValue"),
+      );
+    }
+    columns.appendChild(grid);
+    const samples = this._state.samples.get(runtime.id) ?? [];
+    if (samples.length) {
+      columns.appendChild(usagePlots(runtime, samples, latest));
+    }
+    section.appendChild(columns);
+    return section;
   }
 }

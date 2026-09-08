@@ -1,11 +1,7 @@
 import type { IRun } from "./Common";
-import { element, logLine, sparkline } from "./dom";
-import {
-  accountingState,
-  resourceGraphs,
-  runSummary,
-  sparklinePoints,
-} from "./metrics";
+import { element, logLine } from "./dom";
+import { accountingState, runSummary } from "./metrics";
+import { peak, usagePlots } from "./usage";
 
 /**
  * What one finished allocation did: Slurm's accounting when the flush landed,
@@ -23,7 +19,15 @@ export function RunReport(run: IRun): HTMLElement {
       element("dd", value, "csRuntimeDetailValue"),
     );
   }
-  section.appendChild(grid);
+  // The same two columns the live card uses: what the run was, beside what it
+  // did with it.
+  const columns = element("div", "", "csDetailColumns");
+  columns.appendChild(grid);
+  const samples = run.samples ?? [];
+  if (samples.length) {
+    columns.appendChild(usagePlots(run, samples, peak, "peak "));
+  }
+  section.appendChild(columns);
   const accounting = accountingState(run, Date.now());
   if (accounting !== "present") {
     section.appendChild(
@@ -35,27 +39,6 @@ export function RunReport(run: IRun): HTMLElement {
         "csStatus",
       ),
     );
-  }
-  const samples = run.samples ?? [];
-  if (samples.length) {
-    const graphs = element("div", "", "csRunReportGraphs");
-    for (const graph of resourceGraphs(run, samples)) {
-      const row = element("div", "", "csRuntimeUsageRow");
-      const peak = graph.values.length ? Math.max(...graph.values) : undefined;
-      row.append(
-        element("span", graph.label, "csRuntimeUsageLabel"),
-        sparkline(
-          sparklinePoints(graph.values, 100, 24, graph.ceiling, samples.length),
-        ),
-        element(
-          "span",
-          peak === undefined ? "—" : `peak ${graph.format(peak)}`,
-          "csRuntimeUsageValue",
-        ),
-      );
-      graphs.appendChild(row);
-    }
-    section.appendChild(graphs);
   }
   if (run.error) {
     section.appendChild(element("div", run.error, "csError"));

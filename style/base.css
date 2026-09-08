@@ -361,8 +361,14 @@ and the row is lifted. */
 .csWalltimeStatusLow {
   color: var(--jp-warn-color1);
 }
-/* Usage reads as rows of one shape: a name, the shape of the series, and the
-   figure it ends on, so the live graph and the frozen report look alike. */
+/* What a session is beside what it is doing: details left, usage right, and the
+   same pair in a finished run's report. One column under a narrow dialog. */
+.csDetailColumns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: 16px;
+  align-items: start;
+}
 .csRuntimeUsage,
 .csRunReport {
   display: flex;
@@ -370,37 +376,76 @@ and the row is lifted. */
   gap: 6px;
   margin-top: 12px;
 }
-.csRuntimeUsageRow {
+/* CPU, MEM and GPU stacked in one row, each panel the same width. */
+.csUsageRow {
   display: grid;
-  grid-template-columns: 4.5rem 1fr auto;
-  gap: 8px;
-  align-items: center;
-  font-size: var(--jp-ui-font-size0);
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 10px;
 }
-.csRuntimeUsageLabel {
-  color: var(--jp-ui-font-color2);
-}
-.csRuntimeUsageValue {
-  color: var(--jp-ui-font-color1);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-.csSparkline {
-  display: block;
-  height: 24px;
-  color: var(--jp-brand-color1);
-}
-.csSparkline svg {
-  width: 100%;
-  height: 100%;
-  /* The polyline is drawn in the graph's own units and stretched, so the stroke
-     is kept at its real width rather than stretched with it. */
-  overflow: visible;
-}
-.csRunReportGraphs {
+.csUsagePlot {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 3px;
+  margin: 0;
+  /* The series colour lives on the figure so the per-series rules below can
+     override it; setting it on the plot itself would outrank inheritance. */
+  color: var(--jp-brand-color1);
+}
+.csUsageTitle {
+  color: var(--jp-ui-font-color2);
+  font-size: var(--jp-ui-font-size0);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.csUsageValue {
+  color: var(--jp-ui-font-color1);
+  font-size: var(--jp-ui-font-size0);
+  font-variant-numeric: tabular-nums;
+}
+/* A 3:2 panel, so every series is read at the same scale. */
+.csPlot {
+  width: 100%;
+  aspect-ratio: 3 / 2;
+}
+.csPlot svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+/* The stroke is drawn in the plot's own units and stretched with it, so it is
+   held at its real width rather than stretched too. */
+.csPlotGrid,
+.csPlotFrame,
+.csPlotLine {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+}
+.csPlotGrid {
+  stroke: var(--jp-border-color2);
+  stroke-width: 1;
+}
+.csPlotFrame {
+  stroke: var(--jp-border-color1);
+  stroke-width: 1;
+}
+.csPlotLine {
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+/* One colour per series, as cs-bridge distinguishes the same three. */
+.csUsagePlot-MEM {
+  color: var(--jp-warn-color1);
+}
+.csUsagePlot-GPU {
+  color: var(--jp-success-color1);
+}
+@media (width <= 720px) {
+  .csDetailColumns {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 .csWalltimeStatus {
   display: flex;

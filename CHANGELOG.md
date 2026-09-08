@@ -13,8 +13,10 @@ All notable changes to CyberShuttle Jupyter are recorded here. The format follow
 - A walltime countdown on the runtime card, in the detail dialog, and in the JupyterLab status bar on a
   runtime's own page, each warning below ten minutes. Every surface ticks on a clock of its own, because a
   settled runtime is answered `304` and emits no state to re-render from.
-- Live CPU, memory and GPU usage in the runtime detail dialog, drawn against what the allocation was given
-  rather than against each series' own maximum, and read only while that dialog is open.
+- Live CPU, MEM and GPU usage as three 3:2 plots in one row, each titled above its own panel and drawn against
+  what the allocation was given rather than against its own maximum. They sit beside the details rather than
+  under them, in the same two columns a finished run's report uses, and every live session is read — the run
+  history shows the same figures for a session that is still going.
 - Run History lists an allocation that is still going in its live state rather than leaving it out. A run is a
   generation, so the generation a card is on now is a run like any other — it simply has no outcome yet, and
   showing only the finished ones beside it made a previous run read as the live session.

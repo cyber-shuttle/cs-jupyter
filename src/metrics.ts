@@ -38,17 +38,20 @@ export const gpuUtilisation = (samples: readonly IMetricSample[]): number[] =>
 export interface IResourceGraph {
   label: string;
   values: number[];
-  // The full height of the graph, so a series is read against what was
-  // allocated rather than against its own maximum.
+  // The full height of the plot, so a series is read against what was allocated
+  // rather than against its own maximum.
   ceiling: number;
   format: (value: number) => string;
 }
 
+// CPU, MEM and GPU, in that order and under those names, the way cs-bridge
+// labels the same three series.
 export function resourceGraphs(
   allocation: Pick<IRuntime, "resources">,
   samples: readonly IMetricSample[],
 ): IResourceGraph[] {
   const { cores, memoryMb, gpuCount = 0 } = allocation.resources;
+  const memoryGb = memoryMb / 1024;
   const graphs: IResourceGraph[] = [
     {
       label: "CPU",
@@ -57,11 +60,10 @@ export function resourceGraphs(
       format: (value) => `${value.toFixed(1)} / ${cores} cores`,
     },
     {
-      label: "Memory",
+      label: "MEM",
       values: memoryGigabytes(samples),
-      ceiling: memoryMb / 1024,
-      format: (value) =>
-        `${value.toFixed(1)} / ${(memoryMb / 1024).toFixed(1)} GB`,
+      ceiling: memoryGb,
+      format: (value) => `${value.toFixed(1)} / ${memoryGb.toFixed(1)} GB`,
     },
   ];
   if (gpuCount > 0) {
@@ -69,7 +71,7 @@ export function resourceGraphs(
       label: "GPU",
       values: gpuUtilisation(samples),
       ceiling: 100,
-      format: (value) => `${Math.round(value)}%`,
+      format: (value) => `${Math.round(value)}% util`,
     });
   }
   return graphs;
