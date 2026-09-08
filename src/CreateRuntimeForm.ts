@@ -254,7 +254,7 @@ export class CreateRuntimeForm extends Widget {
   private _buildReviewStep(): HTMLElement {
     const request = this._reviewRequest;
     if (!request) {
-      throw new Error("Runtime review request is unavailable.");
+      throw new Error("Session review request is unavailable.");
     }
     // One way back, beside the action it undoes.
     const container = element("div");

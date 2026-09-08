@@ -446,7 +446,7 @@ export function createRuntimeServerSettings(
 
 export function validRuntimeId(value: string): string {
   if (!RUNTIME_ID.test(value)) {
-    throw new Error("Invalid runtime id.");
+    throw new Error("Invalid session id.");
   }
   return value;
 }

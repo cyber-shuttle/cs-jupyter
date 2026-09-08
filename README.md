@@ -32,10 +32,12 @@ can change without notice. [CHANGELOG.md](CHANGELOG.md) records what has landed 
 
 ## Using it
 
-Start `csctl serve` on your machine, then open the site. The Launcher's **Runtimes** section offers
-**Sign in**, which shows a Microsoft device code to enter. **Add Runtime** submits a Slurm allocation, and its
+Start `csctl serve` on your machine, then open the site. The Launcher's **Sessions** section offers
+**Sign in**, which shows a Microsoft device code to enter. **Add Session** submits a Slurm allocation, and its
 card tracks the job's state. Open that card and choose **Connect** once it reads `READY`; notebooks and
-terminals then run inside the job.
+terminals then run inside the job. A card shows what its session is doing now — its remaining wall time, what
+it is using, and what it is saying. Once a session ends that moves to **Run History**, which keeps every run
+of every card, including runs whose card has since been deleted.
 
 ## Deploy
 

@@ -70,6 +70,12 @@ describe("walltime status bar item", () => {
   const client = (value: IRuntime) =>
     ({ getRuntime: vi.fn(async () => value) }) as never;
 
+  // The read is a resolved promise, so its effect lands on the microtask queue.
+  // Polling the wall clock for it only made this slow, and flaky under load.
+  const settled = async () => {
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+  };
+
   it("shows the remaining time for the runtime this page is attached to", async () => {
     const { WalltimeStatus } = await import("../src/walltime-status");
     vi.setSystemTime(Date.parse("2030-01-01T00:30:00Z"));
@@ -77,7 +83,8 @@ describe("walltime status bar item", () => {
       client(runtime({ startedAt: "2030-01-01T00:00:00Z" })),
       "rt-012345abcdef",
     );
-    await vi.waitFor(() => expect(item.node.textContent).toContain("30m 0s"));
+    await settled();
+    expect(item.node.textContent).toContain("30m 0s");
     expect(item.isHidden).toBe(false);
     expect(item.hasClass("csWalltimeStatusLow")).toBe(false);
     item.dispose();
@@ -90,16 +97,16 @@ describe("walltime status bar item", () => {
       client(runtime({ startedAt: "2030-01-01T00:00:00Z" })),
       "rt-012345abcdef",
     );
-    await vi.waitFor(() =>
-      expect(low.hasClass("csWalltimeStatusLow")).toBe(true),
-    );
+    await settled();
+    expect(low.hasClass("csWalltimeStatusLow")).toBe(true);
     low.dispose();
 
     const over = new WalltimeStatus(
       client(runtime({ state: "STOPPED", startedAt: "2030-01-01T00:00:00Z" })),
       "rt-012345abcdef",
     );
-    await vi.waitFor(() => expect(over.isHidden).toBe(true));
+    await settled();
+    expect(over.isHidden).toBe(true);
     expect(over.node.textContent).toBe("");
     over.dispose();
   });

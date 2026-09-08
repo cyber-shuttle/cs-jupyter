@@ -1,5 +1,5 @@
 import type { IRun } from "./Common";
-import { element, sparkline } from "./dom";
+import { element, logLine, sparkline } from "./dom";
 import {
   accountingState,
   resourceGraphs,
@@ -59,6 +59,20 @@ export function RunReport(run: IRun): HTMLElement {
   }
   if (run.error) {
     section.appendChild(element("div", run.error, "csError"));
+  }
+  const logs = run.logs ?? [];
+  if (logs.length) {
+    // What the allocation said, kept with the run rather than with the card: the
+    // live tail is dropped the moment a run ends, and a card outlives its runs.
+    const log = element("section", "", "csRuntimeLog");
+    log.appendChild(element("h4", "Status", "csRuntimeLogTitle"));
+    const scroller = element("div", "", "csRuntimeLogScroll");
+    scroller.role = "log";
+    for (const line of logs) {
+      scroller.appendChild(logLine(line));
+    }
+    log.appendChild(scroller);
+    section.appendChild(log);
   }
   return section;
 }

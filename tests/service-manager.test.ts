@@ -113,7 +113,7 @@ describe("remote service manager registry", () => {
       content: [],
     });
     await expect(manager.contents.get("example.ipynb")).rejects.toThrow(
-      "Select a READY CyberShuttle runtime",
+      "Select a READY CyberShuttle session",
     );
     await expect(
       manager.contents.save("example.txt", {
@@ -121,7 +121,7 @@ describe("remote service manager registry", () => {
         format: "text",
         content: "blocked",
       }),
-    ).rejects.toThrow("Select a READY CyberShuttle runtime");
+    ).rejects.toThrow("Select a READY CyberShuttle session");
     expect(manager.events).toBe(supportManagers.events);
     expect(manager.nbconvert).toBe(supportManagers.nbconvert);
     expect(manager.settings).toBe(supportManagers.settings);

@@ -348,3 +348,76 @@ describe("runtime detail modal body", () => {
     expect(detail.node.textContent).not.toContain("FAILED");
   });
 });
+
+describe("what belongs to a session and what belongs to its run", () => {
+  // A session that is over has nothing live to show. Its narration moved into
+  // the run when it was frozen, so keeping a copy on the card would show the
+  // same lines twice and outlive the thing that produced them.
+  it("shows no log once the session is no longer running", () => {
+    const running = runtimeDetail(runtimeInState("READY"));
+    expect(
+      running.detail.node.querySelector(".csRuntimeLogScroll"),
+    ).not.toBeNull();
+    running.detail.dispose();
+
+    for (const state of ["STOPPED", "FAILED"] as const) {
+      const { detail } = runtimeDetail(runtimeInState(state));
+      expect(detail.node.querySelector(".csRuntimeLogScroll")).toBeNull();
+      // The report is the run history's, not the card's.
+      expect(detail.node.querySelector(".csRunReport")).toBeNull();
+      expect(detail.node.textContent).not.toContain("Run report");
+      detail.dispose();
+    }
+  });
+});
+
+describe("a run keeps what its session said", () => {
+  it("renders the frozen log in the report", async () => {
+    const { RunReport } = await import("../src/RunReport");
+    const report = RunReport({
+      runtimeId: "rt-012345abcdef",
+      generation: "g-0123456789abcdef",
+      sshHost: "delta",
+      partition: "cpu",
+      rootFolder: "$HOME/project",
+      resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 },
+      finalState: "STOPPED",
+      endedAt: "2030-01-01T01:00:00Z",
+      logs: [
+        {
+          stream: "status",
+          text: "Allocation is running",
+          at: "2030-01-01T00:00:05Z",
+        },
+        {
+          stream: "stderr",
+          text: "a warning from the job",
+          at: "2030-01-01T00:00:07Z",
+        },
+      ],
+    } as never);
+    const lines = [...report.querySelectorAll(".csRuntimeLogLine")].map(
+      (node) => node.textContent,
+    );
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain("Allocation is running");
+    expect(lines[1]).toContain("a warning from the job");
+    // The stream is what colours the line, so it has to survive the freeze.
+    expect(report.querySelector(".csRuntimeLog-stderr")).not.toBeNull();
+  });
+
+  it("shows no log section for a run that never said anything", async () => {
+    const { RunReport } = await import("../src/RunReport");
+    const report = RunReport({
+      runtimeId: "rt-012345abcdef",
+      generation: "g-0123456789abcdef",
+      sshHost: "delta",
+      partition: "cpu",
+      rootFolder: "$HOME/project",
+      resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 },
+      finalState: "STOPPED",
+      endedAt: "2030-01-01T01:00:00Z",
+    } as never);
+    expect(report.querySelector(".csRuntimeLogScroll")).toBeNull();
+  });
+});

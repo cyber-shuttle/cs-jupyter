@@ -24,6 +24,12 @@ All notable changes to CyberShuttle Jupyter are recorded here. The format follow
 
 ### Changed
 
+- The terminology follows cs-bridge: what you launch is a **session**. Wire fields and routes keep
+  cs-control's own noun, so `runtimeId` and `/runtimes` are unchanged — the rename is what you read.
+- A session's card shows only what it is doing now. Its log appears while it is running and not after, and the
+  run report moved to Run History, which keeps every generation rather than only the last.
+- A run report carries the log its session produced, so what an allocation said survives the card it ran on.
+
 - A run report no longer promises accounting that will never arrive. cs-control chases Slurm's accounting for
   ten minutes and then leaves the record alone, so a run older than that says the figures are unknown instead
   of saying they will appear.

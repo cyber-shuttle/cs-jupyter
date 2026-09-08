@@ -127,6 +127,15 @@ export interface IRun extends IAllocation {
   endedAt: string;
   stats?: IRunStats;
   samples?: IMetricSample[];
+  // What the allocation said while it ran. The live tail is dropped when a run
+  // ends, so this is the only place it survives.
+  logs?: IRunLogLine[];
+}
+
+export interface IRunLogLine {
+  stream: "status" | "stdout" | "stderr";
+  text: string;
+  at: string;
 }
 
 export interface ISshHost {

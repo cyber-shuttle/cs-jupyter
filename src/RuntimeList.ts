@@ -182,7 +182,7 @@ export class RuntimeList extends Widget {
       "jp-Launcher-section csRuntimeSection",
     );
     const sectionHeader = element("header", "", "jp-Launcher-sectionHeader");
-    const sectionTitle = element("h2", "Runtimes", "jp-Launcher-sectionTitle");
+    const sectionTitle = element("h2", "Sessions", "jp-Launcher-sectionTitle");
     const sshHosts = button("SSH Hosts", "csTextButton csSshHostsButton");
     sshHosts.dataset.runtimeAction = "ssh-hosts";
     sshHosts.disabled = !this._state.signedIn || this._state.authRequired;
@@ -207,7 +207,7 @@ export class RuntimeList extends Widget {
       ]),
     );
     if (this._state.loading && this._state.runtimes.length === 0) {
-      const status = element("div", "Loading runtimes…", "csStatus");
+      const status = element("div", "Loading sessions…", "csStatus");
       section.appendChild(status);
     }
 
@@ -215,7 +215,7 @@ export class RuntimeList extends Widget {
       section.appendChild(
         element(
           "div",
-          "Sign in to see your runtimes and SSH hosts.",
+          "Sign in to see your sessions and SSH hosts.",
           "csSignedOutNotice",
         ),
       );
@@ -228,17 +228,17 @@ export class RuntimeList extends Widget {
       cards.appendChild(this._runtimeCard(runtime));
     }
     const add = button("", "jp-LauncherCard csRuntimeAddCard");
-    add.ariaLabel = "Add Runtime";
+    add.ariaLabel = "Add Session";
     add.dataset.runtimeAction = "add-runtime";
     add.disabled =
       !this._state.signedIn ||
       this._state.authRequired ||
       !this._canCreate ||
       this._state.loading;
-    add.title = this._createUnavailableReason || "Add Runtime";
+    add.title = this._createUnavailableReason || "Add Session";
     add.append(
       element("div", "+", "jp-LauncherCard-icon csRuntimeAddIcon"),
-      element("div", "Add Runtime", "jp-LauncherCard-label"),
+      element("div", "Add Session", "jp-LauncherCard-label"),
     );
     add.onclick = () => this.createRequested.emit(undefined);
     cards.appendChild(add);
@@ -255,7 +255,7 @@ export class RuntimeList extends Widget {
     );
     card.ariaLabel = `${runtime.sshHost}, ${runtime.state}${current ? ", current session" : ""}`;
     card.title = card.ariaLabel;
-    card.dataset.category = "CyberShuttle Runtimes";
+    card.dataset.category = "CyberShuttle Sessions";
     card.dataset.runtimeAction = runtime.id;
     card.onclick = () => this.runtimeRequested.emit(runtime.id);
     const label = element(

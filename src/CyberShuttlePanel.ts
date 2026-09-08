@@ -107,7 +107,7 @@ export class CyberShuttlePanel extends StackedPanel {
   ) {
     super();
     this.id = "cybershuttle-runtime-panel";
-    this.title.label = "Remote Runtimes";
+    this.title.label = "Remote Sessions";
     this.title.closable = false;
     this.addClass("csShell");
     this._list = new RuntimeList(_controller.currentRuntimeId);
@@ -245,7 +245,7 @@ export class CyberShuttlePanel extends StackedPanel {
   private _selectedRuntime(id: string): IRuntime | undefined {
     const runtime = this._runtime(id);
     if (!runtime) {
-      this._setError("Runtime is no longer available.");
+      this._setError("Session is no longer available.");
     }
     return runtime;
   }
@@ -354,7 +354,7 @@ export class CyberShuttlePanel extends StackedPanel {
         this._requireAuthentication();
         return;
       }
-      this._setStreamStatus("Runtime updates unavailable.");
+      this._setStreamStatus("Session updates unavailable.");
     } finally {
       this._polling = false;
     }
@@ -503,7 +503,7 @@ export class CyberShuttlePanel extends StackedPanel {
     if (this.isDisposed) return;
     this._authRequired = true;
     this._stopPolling();
-    this._setStreamStatus("Sign in again to resume runtime updates.");
+    this._setStreamStatus("Sign in again to resume session updates.");
   }
 
   dispose(): void {
@@ -522,7 +522,7 @@ export class CyberShuttlePanel extends StackedPanel {
       this._emitState();
       this._list.setCanCreate(
         hosts.length > 0,
-        hosts.length ? "" : "Add an SSH host before creating a runtime.",
+        hosts.length ? "" : "Add an SSH host before creating a session.",
       );
     } catch (error) {
       if (this._hosts === undefined) {
@@ -541,7 +541,7 @@ export class CyberShuttlePanel extends StackedPanel {
     body.addClass("csWorkspaceModal");
     body.addWidget(new RuntimeDetail(this, runtimeId));
     const dialog = new Dialog({
-      title: "CyberShuttle Runtime",
+      title: "CyberShuttle Session",
       body,
       buttons: [Dialog.cancelButton({ label: "Close" })],
     });
@@ -604,7 +604,7 @@ export class CyberShuttlePanel extends StackedPanel {
       const access = await this._api.getRuntimeAccess(runtime.id);
       if (!this._jupyterOperationCurrent(operation)) return;
       if (access.generation !== operation.generation) {
-        throw new Error("Runtime access generation changed.");
+        throw new Error("Session access generation changed.");
       }
       cacheRuntimeAccess(access);
     }
@@ -679,7 +679,7 @@ export class CyberShuttlePanel extends StackedPanel {
     // open detail modal would queue behind it and never reach the owner.
     this._detailDialog?.resolve(0);
     const confirmed = await showDialog({
-      title: "Stop runtime",
+      title: "Stop session",
       body: `Cancels the Slurm job on ${runtime.sshHost}. Anything unsaved in this runtime's kernels and terminals is lost.`,
       buttons: [
         Dialog.cancelButton({ label: "Cancel" }),
@@ -728,7 +728,7 @@ export class CyberShuttlePanel extends StackedPanel {
     // open detail modal would queue behind it and never reach the owner.
     this._detailDialog?.resolve(0);
     const confirmed = await showDialog({
-      title: "Delete runtime",
+      title: "Delete session",
       body: live
         ? `${runtime.rootFolder} on ${runtime.sshHost} is ${runtime.state.toLowerCase()}. Deleting it cancels the Slurm job and removes the card.`
         : `Remove ${runtime.rootFolder} on ${runtime.sshHost} from this list? Its allocation has already ended.`,
@@ -788,7 +788,7 @@ export class CyberShuttlePanel extends StackedPanel {
     body.addWidget(form);
     form.setHosts(this._hosts ?? []);
     const dialog = new Dialog({
-      title: "Add Runtime",
+      title: "Add Session",
       body,
       buttons: [],
       hasClose: true,

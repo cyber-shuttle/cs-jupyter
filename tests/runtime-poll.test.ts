@@ -97,7 +97,7 @@ describe("runtime polling", () => {
     await panel.signIn();
     await pollPanel(panel);
     await pollPanel(panel);
-    expect(panel.state.updatesStatus).toBe("Runtime updates unavailable.");
+    expect(panel.state.updatesStatus).toBe("Session updates unavailable.");
     expect(panel.state.runtimes.map((item) => item.id)).toEqual([runtime.id]);
     panel.dispose();
   });

@@ -86,7 +86,7 @@ const CLOCK_GLYPH = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="fals
 export const walltimeStatusPlugin: JupyterFrontEndPlugin<void> = {
   id: "@cybershuttle/jupyter:walltime-status",
   description:
-    "Count the selected runtime's remaining walltime down in the status bar.",
+    "Count the selected session's remaining walltime down in the status bar.",
   autoStart: true,
   requires: [IStatusBar],
   activate: (_app, statusBar: IStatusBar) => {

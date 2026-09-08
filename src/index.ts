@@ -41,7 +41,7 @@ import { walltimeStatusPlugin } from "./walltime-status.js";
 
 export const IRemoteServerSettings = new Token<ServerConnection.ISettings>(
   "@cybershuttle/jupyter:IRemoteServerSettings",
-  "Server settings for the selected READY CyberShuttle runtime.",
+  "Server settings for the selected READY CyberShuttle session.",
 );
 
 function failClosedServerSettings(): ServerConnection.ISettings {
@@ -79,7 +79,7 @@ function failClosedServerSettings(): ServerConnection.ISettings {
       }
     }
     return jsonResponse(
-      { message: "Select a READY CyberShuttle runtime first." },
+      { message: "Select a READY CyberShuttle session first." },
       503,
     );
   };
@@ -105,7 +105,7 @@ const remoteServerSettingsPlugin: ServiceManagerPlugin<
 > = {
   id: "@cybershuttle/jupyter:remote-server-settings",
   description:
-    "Provide a READY cs-control runtime or the fail-closed controller bootstrap to compute managers.",
+    "Provide a READY cs-control session or the fail-closed controller bootstrap to compute managers.",
   autoStart: true,
   provides: IRemoteServerSettings,
   activate: async () => {
@@ -113,7 +113,7 @@ const remoteServerSettingsPlugin: ServiceManagerPlugin<
     try {
       const selected = selectedRuntime();
       if (!selected) {
-        throw new Error("No runtime selected.");
+        throw new Error("No session selected.");
       }
       const { runtimeId, generation } = selected;
       // cs-control issues access only once the allocation is up, so its response
@@ -124,7 +124,7 @@ const remoteServerSettingsPlugin: ServiceManagerPlugin<
           runtimeId,
         );
         if (access.generation !== generation)
-          throw new Error("Selected runtime access generation changed.");
+          throw new Error("Selected session access generation changed.");
         cacheRuntimeAccess(access);
       }
       PageConfig.setOption("terminalsAvailable", "true");
@@ -140,7 +140,7 @@ const remoteServerSettingsPlugin: ServiceManagerPlugin<
 
 const defaultDrivePlugin: ServiceManagerPlugin<Contents.IDrive> = {
   id: "@cybershuttle/jupyter:default-drive",
-  description: "Use the selected runtime's Jupyter Contents REST API.",
+  description: "Use the selected session's Jupyter Contents REST API.",
   autoStart: true,
   provides: IDefaultDrive,
   requires: [IRemoteServerSettings],
@@ -149,7 +149,7 @@ const defaultDrivePlugin: ServiceManagerPlugin<Contents.IDrive> = {
 
 const contentsManagerPlugin: ServiceManagerPlugin<Contents.IManager> = {
   id: "@cybershuttle/jupyter:contents-manager",
-  description: "Use the selected runtime's Jupyter Contents REST API manager.",
+  description: "Use the selected session's Jupyter Contents REST API manager.",
   autoStart: true,
   provides: IContentsManager,
   requires: [IDefaultDrive, IRemoteServerSettings],
@@ -159,7 +159,7 @@ const contentsManagerPlugin: ServiceManagerPlugin<Contents.IManager> = {
 
 const kernelManagerPlugin: ServiceManagerPlugin<Kernel.IManager> = {
   id: "@cybershuttle/jupyter:kernel-manager",
-  description: "Use the selected runtime's Kernels REST and WebSocket APIs.",
+  description: "Use the selected session's Kernels REST and WebSocket APIs.",
   autoStart: true,
   provides: IKernelManager,
   requires: [IRemoteServerSettings],
@@ -168,7 +168,7 @@ const kernelManagerPlugin: ServiceManagerPlugin<Kernel.IManager> = {
 
 const kernelSpecManagerPlugin: ServiceManagerPlugin<KernelSpec.IManager> = {
   id: "@cybershuttle/jupyter:kernel-spec-manager",
-  description: "Populate kernel specifications from the selected runtime.",
+  description: "Populate kernel specifications from the selected session.",
   autoStart: true,
   provides: IKernelSpecManager,
   requires: [IRemoteServerSettings],
@@ -177,7 +177,7 @@ const kernelSpecManagerPlugin: ServiceManagerPlugin<KernelSpec.IManager> = {
 
 const sessionManagerPlugin: ServiceManagerPlugin<Session.IManager> = {
   id: "@cybershuttle/jupyter:session-manager",
-  description: "Use the selected runtime's Jupyter Sessions REST API.",
+  description: "Use the selected session's Jupyter Sessions REST API.",
   autoStart: true,
   provides: ISessionManager,
   requires: [IKernelManager, IRemoteServerSettings],
@@ -189,7 +189,7 @@ const terminalManagerPlugin: ServiceManagerPlugin<
   ServiceManagerType.IManager["terminals"]
 > = {
   id: "@cybershuttle/jupyter:terminal-manager",
-  description: "Use terminals only on a selected READY remote runtime.",
+  description: "Use terminals only on a selected READY remote session.",
   autoStart: true,
   provides: ITerminalManager,
   requires: [IRemoteServerSettings],
@@ -203,7 +203,7 @@ const terminalManagerPlugin: ServiceManagerPlugin<
 
 const remoteTerminalUiPlugin: JupyterFrontEndPlugin<void> = {
   id: "@cybershuttle/jupyter:remote-terminal-ui",
-  description: "Activate JupyterLab terminals only for a READY remote runtime.",
+  description: "Activate JupyterLab terminals only for a READY remote session.",
   autoStart: true,
   requires: [IServiceManager],
   activate: async (app, services) => {

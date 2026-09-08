@@ -6,12 +6,12 @@ import {
   button,
   element,
   keepingFocus,
+  logLine,
   notes,
   sparkline,
   statePill,
 } from "./dom";
 import { resourceGraphs, sparklinePoints } from "./metrics";
-import { RunReport } from "./RunReport";
 import {
   LOW_TIME_MS,
   countsDown,
@@ -105,7 +105,7 @@ export class RuntimeDetail extends Widget {
     this.node.appendChild(
       this._runtime
         ? this._buildRuntime(this._runtime)
-        : element("div", "Waiting for live runtime state…", "csStatus"),
+        : element("div", "Waiting for live session state…", "csStatus"),
     );
     this._restoreLogScroll();
   }
@@ -213,20 +213,15 @@ export class RuntimeDetail extends Widget {
         [this._state.updatesStatus, "csStatus"],
       ]),
     );
-    // A finished allocation has a report rather than a live graph, and the
-    // report is the last thing it will ever say.
-    const run = this._state.runs.find(
-      (candidate) =>
-        candidate.runtimeId === runtime.id &&
-        candidate.generation === runtime.generation,
-    );
+    // The card is what this session is doing now. Once it is over there is
+    // nothing live to show and its report belongs to the run history, which
+    // keeps every generation rather than only the last.
+    const live = !isTerminal(runtime.state);
     const samples = this._state.samples.get(runtime.id);
-    if (run) {
-      root.appendChild(RunReport(run));
-    } else if (samples?.length) {
+    if (live && samples?.length) {
       root.appendChild(this._usage(runtime, samples));
     }
-    const tail = this._state.logs.get(runtime.id);
+    const tail = live ? this._state.logs.get(runtime.id) : undefined;
     if (tail) {
       root.appendChild(this._runtimeLog(runtime, tail));
     }
@@ -284,24 +279,7 @@ export class RuntimeDetail extends Widget {
       view.atBottom = this._atBottom(scroller);
     };
     for (const line of tail.lines) {
-      const row = element(
-        "div",
-        "",
-        `csRuntimeLogLine csRuntimeLog-${line.stream}`,
-      );
-      const at = new Date(line.at);
-      const stamp = Number.isFinite(at.getTime())
-        ? at.toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-          })
-        : "";
-      const time = element("time", stamp, "csRuntimeLogTime");
-      if (stamp) time.dateTime = line.at;
-      time.title = line.stream;
-      row.append(time, element("span", line.text, "csRuntimeLogText"));
-      scroller.appendChild(row);
+      scroller.appendChild(logLine(line));
     }
     section.appendChild(scroller);
     return section;

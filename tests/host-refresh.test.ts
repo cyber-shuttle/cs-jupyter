@@ -101,7 +101,7 @@ describe("host refresh while the runtime wizard is active", () => {
     );
     await vi.waitFor(() =>
       expect(document.body.textContent).toContain(
-        "Waiting for live runtime state…",
+        "Waiting for live session state…",
       ),
     );
     expect([Dialog.tracker.size, first.isDisposed]).toEqual([1, false]);

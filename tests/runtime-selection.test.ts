@@ -163,13 +163,13 @@ describe("serialized runtime selection", () => {
       cards[1].ariaLabel?.includes("FAILED"),
       cards[0].querySelector(".csRuntimeState-ready")?.textContent,
       cards[2].classList.contains("csRuntimeAddCard"),
-      cards[2].textContent?.includes("Add Runtime"),
+      cards[2].textContent?.includes("Add Session"),
     ]).toEqual([3, true, true, true, true, "READY", true, true]);
     expect(
       [...panel.node.querySelectorAll("h2")].map((heading) =>
         heading.textContent?.trim(),
       ),
-    ).toEqual(["Runtimes"]);
+    ).toEqual(["Sessions"]);
     expect(
       [...panel.header.node.querySelectorAll("h2")].map((h) =>
         h.textContent?.trim(),
@@ -495,7 +495,7 @@ describe("identity control", () => {
     list.setControllerState(state);
     header.setControllerState(state);
     expect(list.node.textContent).toContain(
-      "Sign in to see your runtimes and SSH hosts.",
+      "Sign in to see your sessions and SSH hosts.",
     );
     expect(list.node.querySelector(".csRuntimeAddCard")).toBeNull();
     expect(list.node.querySelector(".csRuntimeCard")).toBeNull();
@@ -538,7 +538,7 @@ describe("identity control", () => {
     setRuntimes(list, [first]);
     const sshHosts = list.node.querySelector(".csSshHostsButton")!;
     expect(sshHosts.closest("header")?.querySelector("h2")?.textContent).toBe(
-      "Runtimes",
+      "Sessions",
     );
   });
 });

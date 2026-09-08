@@ -77,6 +77,6 @@ export function clearRuntimeAccess(runtimeId: string): void {
 }
 
 function cacheKey(runtimeId: string): string {
-  if (!RUNTIME_ID.test(runtimeId)) throw new Error("Invalid runtime id.");
+  if (!RUNTIME_ID.test(runtimeId)) throw new Error("Invalid session id.");
   return `${CACHE_PREFIX}${runtimeId}`;
 }

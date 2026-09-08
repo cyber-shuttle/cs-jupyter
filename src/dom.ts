@@ -95,3 +95,33 @@ export function sparkline(
   holder.innerHTML = `<svg viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true" focusable="false"><polyline fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" points="${points}" /></svg>`;
   return holder;
 }
+
+/**
+ * One line of an allocation's narration. The live tail on a running session and
+ * the frozen one on a finished run are the same lines, so they are built here
+ * rather than twice.
+ */
+export function logLine(line: {
+  stream: string;
+  text: string;
+  at: string;
+}): HTMLElement {
+  const row = element(
+    "div",
+    "",
+    `csRuntimeLogLine csRuntimeLog-${line.stream}`,
+  );
+  const at = new Date(line.at);
+  const stamp = Number.isFinite(at.getTime())
+    ? at.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      })
+    : "";
+  const time = element("time", stamp, "csRuntimeLogTime");
+  if (stamp) time.dateTime = line.at;
+  time.title = line.stream;
+  row.append(time, element("span", line.text, "csRuntimeLogText"));
+  return row;
+}
