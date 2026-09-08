@@ -15,11 +15,18 @@ All notable changes to CyberShuttle Jupyter are recorded here. The format follow
   settled runtime is answered `304` and emits no state to re-render from.
 - Live CPU, memory and GPU usage in the runtime detail dialog, drawn against what the allocation was given
   rather than against each series' own maximum, and read only while that dialog is open.
+- Run History lists an allocation that is still going in its live state rather than leaving it out. A run is a
+  generation, so the generation a card is on now is a run like any other — it simply has no outcome yet, and
+  showing only the finished ones beside it made a previous run read as the live session.
 - A run report for a finished allocation — how long it ran, its peak memory, and how much of the CPU and
   memory it was given it actually used — and a **Run history** dialog listing every run this account has
   finished, including runs whose card has since been deleted.
 
 ### Changed
+
+- A run report no longer promises accounting that will never arrive. cs-control chases Slurm's accounting for
+  ten minutes and then leaves the record alone, so a run older than that says the figures are unknown instead
+  of saying they will appear.
 
 - Stop now asks first. It cancels the Slurm job, which is as destructive as Delete, and was the one verb doing
   it without confirmation.

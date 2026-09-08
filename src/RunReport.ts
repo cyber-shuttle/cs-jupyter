@@ -1,7 +1,7 @@
 import type { IRun } from "./Common";
 import { element, sparkline } from "./dom";
 import {
-  awaitingAccounting,
+  accountingState,
   resourceGraphs,
   runSummary,
   sparklinePoints,
@@ -24,11 +24,14 @@ export function RunReport(run: IRun): HTMLElement {
     );
   }
   section.appendChild(grid);
-  if (awaitingAccounting(run)) {
+  const accounting = accountingState(run, Date.now());
+  if (accounting !== "present") {
     section.appendChild(
       element(
         "div",
-        "Slurm's accounting for this run has not flushed yet; peak memory and efficiency will appear here.",
+        accounting === "pending"
+          ? "Slurm's accounting for this run has not flushed yet; peak memory and efficiency will appear here."
+          : "Slurm recorded no accounting for this run, so peak memory and efficiency are unknown.",
         "csStatus",
       ),
     );

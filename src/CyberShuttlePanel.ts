@@ -98,7 +98,7 @@ export class CyberShuttlePanel extends StackedPanel {
   private _detailDialog: Dialog<unknown> | undefined;
   private _loginDock: SshLoginDock | undefined;
   private _sshHostsWidget = (): SshHosts => new SshHosts(this._api);
-  private _runHistoryWidget = (): RunHistory => new RunHistory(this._api);
+  private _runHistoryWidget = (): RunHistory => new RunHistory(this);
   private _loginDockWidget = (): SshLoginDock => new SshLoginDock();
 
   constructor(
@@ -827,7 +827,6 @@ export class CyberShuttlePanel extends StackedPanel {
   async openRunHistory(): Promise<void> {
     const history = this._runHistoryWidget();
     history.addClass("csWorkspaceModal");
-    void history.refresh();
     await new Dialog({
       title: "Run History",
       body: history,

@@ -1,41 +1,75 @@
 import { Widget } from "@lumino/widgets";
-import type { IRun } from "./Common";
-import { ControlClient, errorMessage } from "./ControlClient";
+import type { IRun, IRuntime } from "./Common";
+import { isTerminal } from "./Common";
+import type { CyberShuttlePanel, IRuntimeUiState } from "./CyberShuttlePanel";
 import { element, statePill } from "./dom";
 import { RunReport } from "./RunReport";
+import { countsDown, formatRemaining, remainingMs } from "./walltime";
+
+// One allocation, finished or in flight. A run is a generation, so the
+// generation a card is on now is a run like any other -- it simply has no
+// outcome yet, and saying it stopped would be a lie.
+interface IHistoryEntry {
+  key: string;
+  sshHost: string;
+  state: string;
+  run?: IRun;
+  runtime?: IRuntime;
+}
 
 /**
- * Every allocation this account has finished, newest first. The history
- * outlives the cards in it, so a run whose runtime was deleted is still here.
+ * Every allocation this account has run, newest first: the ones still going,
+ * then the ones that finished. The history outlives the cards in it, so a run
+ * whose runtime was deleted is still here.
  */
 export class RunHistory extends Widget {
-  private _runs: IRun[] = [];
-  private _busy = false;
-  private _error = "";
+  private _state: IRuntimeUiState;
   // Keyed by generation, so a re-render leaves the reader where they were.
   private _open = new Set<string>();
 
-  constructor(private _api: ControlClient) {
+  constructor(private _controller: CyberShuttlePanel) {
     super();
     this.id = "cybershuttle-run-history";
     this.addClass("csRuntimePanel");
+    this._state = _controller.state;
+    this._controller.stateChanged.connect(this._onStateChanged, this);
     this._render();
   }
 
-  async refresh(): Promise<void> {
-    this._busy = true;
-    this._error = "";
-    this._render();
-    try {
-      this._runs = await this._api.listRuns();
-    } catch (error) {
-      this._error = errorMessage(error);
-    } finally {
-      this._busy = false;
-      if (!this.isDisposed) {
-        this._render();
-      }
+  dispose(): void {
+    if (this.isDisposed) {
+      return;
     }
+    this._controller.stateChanged.disconnect(this._onStateChanged, this);
+    super.dispose();
+  }
+
+  private _onStateChanged(
+    _sender: CyberShuttlePanel,
+    state: IRuntimeUiState,
+  ): void {
+    this._state = state;
+    this._render();
+  }
+
+  // A live allocation is listed under the generation it is on; the runs behind
+  // it are the generations that already ended.
+  private _entries(): IHistoryEntry[] {
+    const running = this._state.runtimes
+      .filter((runtime) => !isTerminal(runtime.state) && runtime.generation)
+      .map((runtime) => ({
+        key: `${runtime.id}/${runtime.generation}`,
+        sshHost: runtime.sshHost,
+        state: runtime.state,
+        runtime,
+      }));
+    const finished = this._state.runs.map((run) => ({
+      key: `${run.runtimeId}/${run.generation}`,
+      sshHost: run.sshHost,
+      state: run.finalState,
+      run,
+    }));
+    return [...running, ...finished];
   }
 
   private _render(): void {
@@ -44,52 +78,84 @@ export class RunHistory extends Widget {
     root.append(
       element(
         "div",
-        "Every allocation you have finished, newest first. A run is kept even after its card is deleted.",
+        "Every allocation you have run, newest first. A run is kept even after its card is deleted.",
         "csModalSubtitle",
       ),
       element("hr", "", "csModalRule"),
     );
     const scroll = element("div", "", "csModalScroll");
-    if (this._error) {
-      scroll.appendChild(element("div", this._error, "csError"));
+    if (this._state.error) {
+      scroll.appendChild(element("div", this._state.error, "csError"));
     }
     const card = element("div", "", "csCard");
-    for (const run of this._runs) {
-      card.appendChild(this._entry(run));
+    const entries = this._entries();
+    for (const entry of entries) {
+      card.appendChild(this._entry(entry));
     }
-    if (!this._busy && this._runs.length === 0) {
-      card.appendChild(
-        element("div", "No runs have finished yet.", "csStatus"),
-      );
+    if (entries.length === 0) {
+      card.appendChild(element("div", "No runs yet.", "csStatus"));
     }
     scroll.appendChild(card);
     root.appendChild(scroll);
     this.node.appendChild(root);
   }
 
-  private _entry(run: IRun): HTMLElement {
-    const entry = document.createElement("details");
-    entry.className = "csSshHostEntry";
-    entry.open = this._open.has(run.generation);
-    entry.ontoggle = () =>
-      entry.open
-        ? this._open.add(run.generation)
-        : this._open.delete(run.generation);
+  private _entry(entry: IHistoryEntry): HTMLElement {
+    const element_ = document.createElement("details");
+    element_.className = "csSshHostEntry";
+    element_.open = this._open.has(entry.key);
+    element_.ontoggle = () =>
+      element_.open ? this._open.add(entry.key) : this._open.delete(entry.key);
     const summary = document.createElement("summary");
     summary.className = "csSshHostSummary";
     summary.append(
-      element("span", run.sshHost, "csCardTitle"),
-      element(
-        "span",
-        new Date(run.endedAt).toLocaleString(),
-        "csMeta csSshHostTarget",
-      ),
-      statePill(run.finalState),
+      element("span", entry.sshHost, "csCardTitle"),
+      element("span", this._when(entry), "csMeta csSshHostTarget"),
+      statePill(entry.state),
     );
     const body = element("div", "", "csSshHostBody");
-    // The report is built once and read the same way wherever it appears.
-    body.appendChild(RunReport(run));
-    entry.append(summary, body);
-    return entry;
+    body.appendChild(
+      entry.run ? RunReport(entry.run) : this._inFlight(entry.runtime!),
+    );
+    element_.append(summary, body);
+    return element_;
+  }
+
+  private _when(entry: IHistoryEntry): string {
+    if (entry.run) {
+      return new Date(entry.run.endedAt).toLocaleString();
+    }
+    const started = entry.runtime?.startedAt;
+    return started
+      ? `started ${new Date(started).toLocaleString()}`
+      : "not started yet";
+  }
+
+  // An allocation still going has no report to show: what it is doing is on its
+  // own card, so this says what it is and how much of it is left.
+  private _inFlight(runtime: IRuntime): HTMLElement {
+    const section = element("section", "", "csRunReport");
+    section.appendChild(element("h4", "Running now", "csRuntimeLogTitle"));
+    const grid = element("dl", "", "csRuntimeDetailGrid");
+    const rows: Array<[string, string]> = [
+      ["Partition", runtime.partition],
+      ["Cores", String(runtime.resources.cores)],
+      ["Memory", `${runtime.resources.memoryMb} MB`],
+      ["Walltime", `${runtime.resources.wallMinutes} min`],
+    ];
+    if (countsDown(runtime)) {
+      rows.push([
+        "Remaining",
+        formatRemaining(remainingMs(runtime, Date.now())),
+      ]);
+    }
+    for (const [label, value] of rows) {
+      grid.append(
+        element("dt", label, "csRuntimeDetailLabel"),
+        element("dd", value, "csRuntimeDetailValue"),
+      );
+    }
+    section.appendChild(grid);
+    return section;
   }
 }

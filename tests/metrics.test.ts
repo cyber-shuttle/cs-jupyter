@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
-import type { IMetricSample, IRun } from "../src/Common";
-import type { ControlClient } from "../src/ControlClient";
+import { describe, expect, it } from "vitest";
+import type { IMetricSample, IRun, IRuntime } from "../src/Common";
+import { uiState } from "./fakes";
 import {
+  accountingState,
   cpuCoreSeries,
   gpuUtilisation,
   memoryGigabytes,
@@ -151,40 +152,99 @@ describe("run report", () => {
   });
 });
 
+describe("accounting state", () => {
+  const ran = (endedAt: string, stats?: IRun["stats"]): IRun =>
+    ({ endedAt, stats }) as IRun;
+
+  // The flush lands a beat after the job ends, so a fresh run is waiting.
+  it("is pending only while the flush could still land", () => {
+    const now = Date.parse("2030-01-01T01:00:00Z");
+    expect(accountingState(ran("2030-01-01T00:59:00Z"), now)).toBe("pending");
+    // Long past the window cs-control gives up on: promising it "will appear"
+    // would be a promise nothing keeps.
+    expect(accountingState(ran("2030-01-01T00:00:00Z"), now)).toBe("never");
+    expect(
+      accountingState(ran("2030-01-01T00:00:00Z", { maxRss: "1.0 GB" }), now),
+    ).toBe("present");
+  });
+});
+
 describe("run history view", () => {
-  it("lists finished runs newest first and shows each report", async () => {
+  const finished: IRun = {
+    runtimeId: "rt-012345abcdef",
+    generation: "g-0123456789abcdef",
+    sshHost: "delta",
+    partition: "cpu",
+    rootFolder: "$HOME/project",
+    resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 },
+    finalState: "STOPPED",
+    startedAt: "2030-01-01T00:00:00Z",
+    endedAt: "2030-01-01T01:00:00Z",
+    stats: { maxRss: "2.0 GB", elapsedSeconds: 3600 },
+  } as IRun;
+
+  const live = {
+    id: "rt-999999999999",
+    generation: "g-fedcba9876543210",
+    state: "READY",
+    sshHost: "deltaTest",
+    partition: "cpu",
+    rootFolder: "$HOME/project",
+    resources: { cores: 4, memoryMb: 8192, wallMinutes: 120 },
+    createdAt: "2030-01-01T00:00:00Z",
+    updatedAt: "2030-01-01T00:00:00Z",
+    startedAt: "2030-01-01T00:00:00Z",
+  } as IRuntime;
+
+  const panelWith = (runs: IRun[], runtimes: IRuntime[]) => {
+    const listeners: Array<(s: unknown, v: unknown) => void> = [];
+    return {
+      state: { ...uiState(), runs, runtimes },
+      stateChanged: {
+        connect: (fn: (s: unknown, v: unknown) => void) => listeners.push(fn),
+        disconnect: () => undefined,
+      },
+    } as never;
+  };
+
+  it("lists finished runs with their report", async () => {
     const { RunHistory } = await import("../src/RunHistory");
-    const runs: IRun[] = [
-      {
-        runtimeId: "rt-012345abcdef",
-        generation: "g-0123456789abcdef",
-        sshHost: "delta",
-        partition: "cpu",
-        rootFolder: "$HOME/project",
-        resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 },
-        finalState: "STOPPED",
-        startedAt: "2030-01-01T00:00:00Z",
-        endedAt: "2030-01-01T01:00:00Z",
-        stats: { maxRss: "2.0 GB", elapsedSeconds: 3600 },
-      } as IRun,
-    ];
-    const history = new RunHistory({
-      listRuns: vi.fn(async () => runs),
-    } as unknown as ControlClient);
-    await history.refresh();
+    const history = new RunHistory(panelWith([finished], []));
     expect(history.node.textContent).toContain("delta");
     expect(history.node.textContent).toContain("2.0 GB");
     expect(history.node.querySelector(".csRunReport")).not.toBeNull();
     history.dispose();
   });
 
-  it("says so plainly when nothing has finished", async () => {
+  // A generation still going is a run like any other; calling it STOPPED, or
+  // leaving it out, both misrepresent what the account is actually running.
+  it("shows an allocation still going in its live state, not as stopped", async () => {
     const { RunHistory } = await import("../src/RunHistory");
-    const history = new RunHistory({
-      listRuns: vi.fn(async () => []),
-    } as unknown as ControlClient);
-    await history.refresh();
-    expect(history.node.textContent).toContain("No runs have finished yet.");
+    const history = new RunHistory(panelWith([finished], [live]));
+    const pills = [...history.node.querySelectorAll(".csRuntimeState")].map(
+      (node) => node.textContent,
+    );
+    // Newest first: the one still running leads.
+    expect(pills).toEqual(["READY", "STOPPED"]);
+    expect(history.node.textContent).toContain("Running now");
+    expect(history.node.textContent).not.toContain("not started yet");
+    history.dispose();
+  });
+
+  // A terminal card is already represented by its frozen run; listing it twice
+  // would show the same allocation as both finished and in flight.
+  it("does not list a terminal runtime as if it were still going", async () => {
+    const { RunHistory } = await import("../src/RunHistory");
+    const stopped = { ...live, state: "STOPPED" } as IRuntime;
+    const history = new RunHistory(panelWith([], [stopped]));
+    expect(history.node.textContent).toContain("No runs yet.");
+    history.dispose();
+  });
+
+  it("says so plainly when nothing has run", async () => {
+    const { RunHistory } = await import("../src/RunHistory");
+    const history = new RunHistory(panelWith([], []));
+    expect(history.node.textContent).toContain("No runs yet.");
     history.dispose();
   });
 });

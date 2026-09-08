@@ -138,7 +138,20 @@ function elapsedLabel(run: IRun): string {
   return hours ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
-// Slurm's accounting flushes a beat after a job ends, so a run frozen without
-// it is waiting rather than incomplete, and the report says so.
-export const awaitingAccounting = (run: IRun): boolean =>
-  run.stats === undefined;
+// cs-control chases Slurm's accounting for ten minutes after a run ends and then
+// leaves the record as it is.
+const ACCOUNTING_WINDOW_MS = 10 * 60_000;
+
+// Absent accounting means two different things. Just after a run ends the flush
+// has not landed yet and is still coming; long after, it never arrived and never
+// will, and saying it "will appear here" would be a promise nothing keeps.
+export function accountingState(
+  run: IRun,
+  now: number,
+): "present" | "pending" | "never" {
+  if (run.stats) return "present";
+  const ended = Date.parse(run.endedAt);
+  return Number.isFinite(ended) && now - ended < ACCOUNTING_WINDOW_MS
+    ? "pending"
+    : "never";
+}
