@@ -3,11 +3,9 @@
 All notable changes to CyberShuttle Jupyter are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-No version has been released: the repository carries no tags and publishes no package. `package.json` and
-`pyproject.toml` both read `0.1.0`, and a deployment picks changes up by rebuilding and redeploying `dist/`.
-Everything below is therefore unreleased.
-
 ## [Unreleased]
+
+## [0.1.0] - 2026-09-07
 
 ### Added
 
@@ -21,6 +19,8 @@ Everything below is therefore unreleased.
 - An action refused because its host wants an interactive login now opens that login and retries once (#7).
 - CI over the unit tests and a Chromium end-to-end run of the pipeline (#5), extended to the built `dist/`
   contract (#9).
+- Architecture, deployment and contributing documentation, a security policy, issue and pull request
+  templates, and the full Apache 2.0 license text in place of the short notice (#12).
 
 ### Changed
 
@@ -44,3 +44,8 @@ Everything below is therefore unreleased.
 - 23 defects found by an adversarial review, each covered by a regression test (#9).
 - The Launcher header and the runtime card category read "Cybershuttle", and the discovery interface read
   "SLURM" (#11).
+- A control API or WebSocket URL on the IPv6 loopback host, such as `http://[::1]:8045/api/v1`, was rejected
+  as insecure: the accepted loopback hosts held `::1`, while a URL reports that hostname as `[::1]` (#13).
+
+[Unreleased]: https://github.com/cyber-shuttle/cs-jupyter/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/cyber-shuttle/cs-jupyter/releases/tag/v0.1.0
