@@ -473,7 +473,12 @@ export class CyberShuttlePanel extends StackedPanel {
       () => void this._poll(),
       RUNTIME_POLL_INTERVAL_MS,
     );
-    if (this._controlInitialized) {
+    // Hosts are read once per session, but "once" must mean once successfully:
+    // a first activation from a stale cached credential fails this read, and
+    // the poll that follows only ever refreshes runtimes. Without the second
+    // condition a later sign-in returns here and the host list stays empty for
+    // the life of the page.
+    if (this._controlInitialized && this._hosts !== undefined) {
       void this._poll();
       return;
     }

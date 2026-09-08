@@ -190,4 +190,39 @@ describe("host refresh while the runtime wizard is active", () => {
       state.panel.dispose();
     },
   );
+
+  // A page that loads with a stale cached credential activates once, fails this
+  // read, and leaves _controlInitialized set. Before the fix a later sign-in
+  // returned early and the host list stayed empty for the life of the page --
+  // the poll only ever refreshes runtimes.
+  it("re-reads hosts when the first activation could not", async () => {
+    let fail = true;
+    const api = {
+      signIn: vi.fn(async () => undefined),
+      resumeSession: vi.fn(async () => undefined),
+      listRuntimes: vi.fn(async () => runtimeListFixture()),
+      listSshHosts: vi.fn(async () => {
+        if (fail) {
+          throw new Error("cs-control returned 401");
+        }
+        return [alpha];
+      }),
+    };
+    const panel = new CyberShuttlePanel(api as any, { select: vi.fn() } as any);
+
+    // The page-load path: a credential that no longer works.
+    await panel.resume();
+    await vi.waitFor(() => expect(api.listSshHosts).toHaveBeenCalled());
+    expect(panel.state.error).toContain("401");
+    const afterResume = api.listSshHosts.mock.calls.length;
+
+    // The owner signs in properly. Hosts must be read again.
+    fail = false;
+    await panel.signIn();
+    await vi.waitFor(() =>
+      expect(api.listSshHosts.mock.calls.length).toBeGreaterThan(afterResume),
+    );
+    await vi.waitFor(() => expect(panel.state.error).toBe(""));
+    panel.dispose();
+  });
 });
