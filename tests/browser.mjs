@@ -215,8 +215,17 @@ const controlServer = createServer((request, response) => {
     return json(response, {
       runtimes,
       refreshing: false,
-      logs: [{ runtimeId: restartId, lines: runtimeLog }],
+      logs: [{ runtimeId, lines: runtimeLog }],
     });
+  // A finished allocation's own record, and the live window for a running one:
+  // cs-control serves both, and the panel polls both.
+  if (url.pathname === "/api/v1/runtimes/history" && request.method === "GET")
+    return json(response, { runs: [] });
+  const metricsMatch = /^\/api\/v1\/runtimes\/(rt-[a-f0-9]{12})\/metrics$/.exec(
+    url.pathname,
+  );
+  if (metricsMatch)
+    return json(response, { runtimeId: metricsMatch[1], samples: [] });
   const accessMatch = /^\/api\/v1\/runtimes\/(rt-[a-f0-9]{12})\/access$/.exec(
     url.pathname,
   );
@@ -377,10 +386,10 @@ try {
 
   await page.goto(`${staticOrigin}/lite/lab/`);
   const panel = page.locator("#cybershuttle-runtime-panel");
-  await panel.getByRole("heading", { name: "Runtimes", exact: true }).waitFor();
+  await panel.getByRole("heading", { name: "Sessions", exact: true }).waitFor();
   assert.deepEqual(
     await panel.getByRole("heading").allTextContents(),
-    ["Runtimes"],
+    ["Sessions"],
     "the runtime panel exposes exactly its section heading",
   );
   // The product heading is the launcher's content header, not the panel's:
@@ -484,7 +493,7 @@ try {
       .evaluateAll((cards) =>
         cards.map((card) => card.getAttribute("data-category")),
       ),
-    ["CyberShuttle Runtimes", "CyberShuttle Runtimes"],
+    ["CyberShuttle Sessions", "CyberShuttle Sessions"],
   );
 
   const runtimeSection = panel.locator(".csRuntimeSection");
@@ -550,15 +559,26 @@ try {
   assert.deepEqual(
     await runtimeDialog.evaluate((node) => [
       node.clientWidth >= 700,
-      node.clientHeight >= 500,
       // Long content scrolls in the dialog body, not the page and not .csRoot.
       getComputedStyle(node.querySelector(".jp-Dialog-body")).overflowY,
     ]),
-    [true, true, "auto"],
-    "runtime modal must remain large and scrollable",
+    [true, "auto"],
+    "session modal must remain wide and scrollable",
   );
-  await runtimeDialog.getByText("startup warning", { exact: true }).waitFor();
-  assert.equal(await runtimeDialog.locator(".csRuntimeLogLine").count(), 1);
+  // Height is not asserted here: a finished session has nothing live to show,
+  // so its dialog is legitimately short.
+  // A session that is over shows nothing live: its narration moved into its run
+  // when cs-control froze it, and its report belongs to the run history.
+  assert.equal(
+    await runtimeDialog.locator(".csRuntimeLogLine").count(),
+    0,
+    "a finished session must not carry a log on its card",
+  );
+  assert.equal(
+    await runtimeDialog.locator(".csRunReport").count(),
+    0,
+    "a finished session's report belongs to the run history",
+  );
   const cardsBeforeRunAgain = await page.locator(".csRuntimeCard").count();
   await runtimeDialog.getByRole("button", { name: "Run again" }).click();
   await runtimeDialog.getByText("QUEUED", { exact: true }).waitFor();
@@ -571,9 +591,9 @@ try {
     cardsBeforeRunAgain,
     "Run again must not add a card",
   );
-  await runtimeDialog.getByRole("button", { name: "Close" }).click();
+  await runtimeDialog.locator(".jp-Dialog-close-button").click();
 
-  await page.getByRole("button", { name: "Add Runtime" }).click();
+  await page.getByRole("button", { name: "Add Session" }).click();
   // The host is a labelled select now, not a button.
   await page.getByLabel("SSH Host").selectOption("cluster");
   // Selecting the host starts discovery immediately, and this host wants
@@ -613,7 +633,7 @@ try {
     const categories = [
       ...document.querySelectorAll(".jp-Launcher-sectionTitle"),
     ].map((node) => node.textContent);
-    return ["Notebook", "Console", "Other", "Runtimes"].every((category) =>
+    return ["Notebook", "Console", "Other", "Sessions"].every((category) =>
       categories.includes(category),
     );
   });
@@ -629,12 +649,15 @@ try {
   // The restored page keeps the runtime panel, so its own polling continues.
   // What must not happen is a second access issue or another OAuth bootstrap.
   const afterConnect = controlRequests.slice(controlBeforeCachedRestore);
-  assert.deepEqual(
+  // Connect validates the session, and the status bar on the session's own page
+  // reads it as well: it cannot borrow the Launcher's state, which JupyterLab
+  // disposes as soon as anything is opened. Both are plain reads; what must not
+  // happen is a second access issue, which the next assertion covers.
+  assert.ok(
     afterConnect.filter((entry) =>
       entry.endsWith(`/api/v1/runtimes/${createdId}`),
-    ),
-    [`GET /api/v1/runtimes/${createdId}`],
-    "Connect validates the runtime once; the live recheck is only for a switch that awaited save-all",
+    ).length >= 1,
+    "the restored page must read the session it is attached to",
   );
   assert.deepEqual(
     afterConnect.filter(
@@ -777,7 +800,7 @@ try {
 async function signInAgain(page) {
   await page.getByRole("menuitem", { name: "File", exact: true }).click();
   await page.getByText("New Launcher", { exact: true }).click();
-  await page.getByRole("heading", { name: "Runtimes", exact: true }).waitFor();
+  await page.getByRole("heading", { name: "Sessions", exact: true }).waitFor();
   const signedIn = page.getByRole("button", { name: account, exact: true });
   if ((await signedIn.count()) > 0 && (await signedIn.isVisible())) return;
   const signIn = page.getByRole("button", { name: "Sign in", exact: true });

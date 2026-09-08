@@ -49,7 +49,7 @@ async function opened(startRuntime: unknown, operation: FakeOperation) {
     panel,
     api,
     close: async () => {
-      (panel as any)._detailDialog?.resolve(0);
+      (panel as any)._detailDialog?.reject();
       await open;
       panel.dispose();
     },

@@ -28,6 +28,8 @@ All notable changes to CyberShuttle Jupyter are recorded here. The format follow
 
 - The terminology follows cs-bridge: what you launch is a **session**. Wire fields and routes keep
   cs-control's own noun, so `runtimeId` and `/runtimes` are unchanged — the rename is what you read.
+- A session's dialog closes from the × in its header, like every other dialog here, rather than from a button
+  along the bottom.
 - A session's card shows only what it is doing now. Its log appears while it is running and not after, and the
   run report moved to Run History, which keeps every generation rather than only the last.
 - A run report carries the log its session produced, so what an allocation said survives the card it ran on.

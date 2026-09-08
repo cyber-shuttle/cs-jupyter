@@ -535,7 +535,8 @@ export class CyberShuttlePanel extends StackedPanel {
     const dialog = new Dialog({
       title: "CyberShuttle Session",
       body,
-      buttons: [Dialog.cancelButton({ label: "Close" })],
+      buttons: [],
+      hasClose: true,
     });
     this._detailDialog = dialog;
     const dock = this._loginDockWidget();
@@ -668,7 +669,7 @@ export class CyberShuttlePanel extends StackedPanel {
     }
     // JupyterLab shows one dialog at a time, so a confirmation raised from the
     // open detail modal would queue behind it and never reach the owner.
-    this._detailDialog?.resolve(0);
+    this._detailDialog?.reject();
     const confirmed = await showDialog({
       title: "Stop session",
       body: `Cancels the Slurm job on ${runtime.sshHost}. Anything unsaved in this runtime's kernels and terminals is lost.`,
@@ -717,7 +718,7 @@ export class CyberShuttlePanel extends StackedPanel {
     const live = !isTerminal(runtime.state);
     // JupyterLab shows one dialog at a time, so a confirmation raised from the
     // open detail modal would queue behind it and never reach the owner.
-    this._detailDialog?.resolve(0);
+    this._detailDialog?.reject();
     const confirmed = await showDialog({
       title: "Delete session",
       body: live
