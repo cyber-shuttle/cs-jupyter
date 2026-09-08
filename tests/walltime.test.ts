@@ -3,7 +3,6 @@ import type { IRuntime } from "../src/Common";
 import {
   LOW_TIME_MS,
   countsDown,
-  deadline,
   formatRemaining,
   remainingMs,
 } from "../src/walltime";
@@ -25,7 +24,6 @@ const runtime = (over: Partial<IRuntime> = {}): IRuntime =>
 describe("walltime countdown", () => {
   it("counts from when Slurm started the job, not from when it was created", () => {
     const started = runtime({ startedAt: "2030-01-01T00:00:00Z" });
-    expect(deadline(started)).toBe(Date.parse("2030-01-01T01:00:00Z"));
     expect(remainingMs(started, Date.parse("2030-01-01T00:45:00Z"))).toBe(
       15 * 60_000,
     );
@@ -34,7 +32,6 @@ describe("walltime countdown", () => {
   // A queued allocation is waiting under no deadline: the whole limit is still
   // ahead of it, which is what is actually left.
   it("shows the whole limit while the allocation has not started", () => {
-    expect(deadline(runtime())).toBeUndefined();
     expect(remainingMs(runtime(), Date.now())).toBe(60 * 60_000);
   });
 

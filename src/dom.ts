@@ -125,3 +125,28 @@ export function logLine(line: {
   row.append(time, element("span", line.text, "csRuntimeLogText"));
   return row;
 }
+
+/**
+ * A one-second tick for the surfaces that count down. cs-control answers 304
+ * while a running allocation is unchanged, so state alone would leave the
+ * figure sitting still.
+ */
+export class Clock {
+  private id: number | undefined;
+
+  constructor(private tick: () => void) {}
+
+  // Ticking is worth a re-render only while something is actually counting.
+  sync(active: boolean): void {
+    if (!active) return this.stop();
+    this.id ??= window.setInterval(this.tick, 1000);
+  }
+
+  stop(): void {
+    window.clearInterval(this.id);
+    this.id = undefined;
+  }
+}
+
+// One clock face for the card and the status bar.
+export const CLOCK_GLYPH = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"><circle cx="8" cy="8" r="5.6" /><path d="M8 4.9V8l2.1 1.6" /></g></svg>`;

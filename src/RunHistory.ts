@@ -131,31 +131,12 @@ export class RunHistory extends Widget {
       : "not started yet";
   }
 
-  // An allocation still going has no report to show: what it is doing is on its
-  // own card, so this says what it is and how much of it is left.
+  // An allocation still going has no report yet, and its card already carries
+  // the shape of it. All this has to add is that it is still going.
   private _inFlight(runtime: IRuntime): HTMLElement {
-    const section = element("section", "", "csRunReport");
-    section.appendChild(element("h4", "Running now", "csRuntimeLogTitle"));
-    const grid = element("dl", "", "csRuntimeDetailGrid");
-    const rows: Array<[string, string]> = [
-      ["Partition", runtime.partition],
-      ["Cores", String(runtime.resources.cores)],
-      ["Memory", `${runtime.resources.memoryMb} MB`],
-      ["Walltime", `${runtime.resources.wallMinutes} min`],
-    ];
-    if (countsDown(runtime)) {
-      rows.push([
-        "Remaining",
-        formatRemaining(remainingMs(runtime, Date.now())),
-      ]);
-    }
-    for (const [label, value] of rows) {
-      grid.append(
-        element("dt", label, "csRuntimeDetailLabel"),
-        element("dd", value, "csRuntimeDetailValue"),
-      );
-    }
-    section.appendChild(grid);
-    return section;
+    const left = countsDown(runtime)
+      ? `${formatRemaining(remainingMs(runtime, Date.now()))} left`
+      : "waiting for the scheduler";
+    return element("div", `Still running \u2014 ${left}.`, "csStatus");
   }
 }

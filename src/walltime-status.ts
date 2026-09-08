@@ -4,7 +4,7 @@ import { IStatusBar } from "@jupyterlab/statusbar";
 import { Widget } from "@lumino/widgets";
 import type { IRuntime } from "./Common";
 import { ControlClient } from "./ControlClient";
-import { element } from "./dom";
+import { Clock, CLOCK_GLYPH, element } from "./dom";
 import { selectedRuntime } from "./runtime-ui";
 import {
   LOW_TIME_MS,
@@ -23,7 +23,7 @@ const REFRESH_MS = 30_000;
 // itself rather than borrowing the panel's state.
 export class WalltimeStatus extends Widget {
   private _runtime: IRuntime | undefined;
-  private _clock: number | undefined;
+  private _clock = new Clock(() => this._render());
   private _refresh: number | undefined;
 
   constructor(
@@ -35,14 +35,14 @@ export class WalltimeStatus extends Widget {
     this._render();
     void this._reload();
     this._refresh = window.setInterval(() => void this._reload(), REFRESH_MS);
-    this._clock = window.setInterval(() => this._render(), 1000);
+    this._clock.sync(true);
   }
 
   dispose(): void {
     if (this.isDisposed) {
       return;
     }
-    window.clearInterval(this._clock);
+    this._clock.stop();
     window.clearInterval(this._refresh);
     super.dispose();
   }
@@ -80,8 +80,6 @@ export class WalltimeStatus extends Widget {
     this.node.appendChild(item);
   }
 }
-
-const CLOCK_GLYPH = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"><circle cx="8" cy="8" r="5.6" /><path d="M8 4.9V8l2.1 1.6" /></g></svg>`;
 
 export const walltimeStatusPlugin: JupyterFrontEndPlugin<void> = {
   id: "@cybershuttle/jupyter:walltime-status",

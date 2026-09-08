@@ -2,7 +2,15 @@ import { Signal } from "@lumino/signaling";
 import { Widget } from "@lumino/widgets";
 import type { IRuntime } from "./Common";
 import type { IRuntimeUiState } from "./CyberShuttlePanel";
-import { button, element, keepingFocus, notes, statePill } from "./dom";
+import {
+  button,
+  Clock,
+  CLOCK_GLYPH,
+  element,
+  keepingFocus,
+  notes,
+  statePill,
+} from "./dom";
 import {
   LOW_TIME_MS,
   countsDown,
@@ -121,9 +129,7 @@ export class RuntimeList extends Widget {
   private _state = emptyState();
   private _canCreate = false;
   private _createUnavailableReason = "";
-  // cs-control answers 304 while a running allocation is unchanged, so the
-  // countdown needs a clock of its own or it sits still between transitions.
-  private _clock: number | undefined;
+  private _clock = new Clock(() => this._render());
 
   constructor(private _currentRuntimeId?: string) {
     super();
@@ -133,25 +139,8 @@ export class RuntimeList extends Widget {
   }
 
   dispose(): void {
-    this._stopClock();
+    this._clock.stop();
     super.dispose();
-  }
-
-  private _stopClock(): void {
-    if (this._clock !== undefined) {
-      window.clearInterval(this._clock);
-      this._clock = undefined;
-    }
-  }
-
-  // Ticking is worth a re-render only while something is actually counting.
-  private _syncClock(): void {
-    const ticking = this._state.runtimes.some(countsDown);
-    if (ticking && this._clock === undefined) {
-      this._clock = window.setInterval(() => this._render(), 1000);
-    } else if (!ticking) {
-      this._stopClock();
-    }
   }
 
   setControllerState(state: IRuntimeUiState): void {
@@ -166,7 +155,7 @@ export class RuntimeList extends Widget {
   }
 
   private _render(): void {
-    this._syncClock();
+    this._clock.sync(this._state.runtimes.some(countsDown));
     keepingFocus(this.node, () => {
       this.node.textContent = "";
       this.node.appendChild(this._build());
@@ -301,8 +290,6 @@ function countdown(runtime: IRuntime): HTMLElement {
   row.appendChild(measure);
   return row;
 }
-
-const CLOCK_GLYPH = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"><circle cx="8" cy="8" r="5.6" /><path d="M8 4.9V8l2.1 1.6" /></g></svg>`;
 
 const RESOURCE_GLYPHS = {
   cpu: `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"><rect x="4.75" y="4.75" width="6.5" height="6.5" rx="1" /><path d="M6.5 2.6v2.15M9.5 2.6v2.15M6.5 11.25v2.15M9.5 11.25v2.15M2.6 6.5h2.15M2.6 9.5h2.15M11.25 6.5h2.15M11.25 9.5h2.15" /></g></svg>`,

@@ -226,7 +226,7 @@ describe("run history view", () => {
     );
     // Newest first: the one still running leads.
     expect(pills).toEqual(["READY", "STOPPED"]);
-    expect(history.node.textContent).toContain("Running now");
+    expect(history.node.textContent).toContain("Still running");
     expect(history.node.textContent).not.toContain("not started yet");
     history.dispose();
   });

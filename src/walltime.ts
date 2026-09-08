@@ -4,23 +4,13 @@ import type { IRuntime } from "./Common";
 // minutes, and one threshold serves every surface that shows the number here.
 export const LOW_TIME_MS = 10 * 60_000;
 
-// Slurm measures --time from the moment the allocation starts running, so a
-// queued one has a length and no deadline yet.
-export function deadline(runtime: IRuntime): number | undefined {
-  const started = runtime.startedAt ? Date.parse(runtime.startedAt) : NaN;
-  return Number.isFinite(started)
-    ? started + runtime.resources.wallMinutes * 60_000
-    : undefined;
-}
-
-// Before the allocation starts the whole limit is still ahead of it, which is
-// what is actually left; after the deadline nothing is.
+// Slurm measures --time from the moment the allocation starts running, so
+// before it starts the whole limit is still ahead of it -- which is what is
+// actually left. After the deadline nothing is.
 export function remainingMs(runtime: IRuntime, now: number): number {
-  const end = deadline(runtime);
-  return Math.max(
-    0,
-    end === undefined ? runtime.resources.wallMinutes * 60_000 : end - now,
-  );
+  const limit = runtime.resources.wallMinutes * 60_000;
+  const started = runtime.startedAt ? Date.parse(runtime.startedAt) : NaN;
+  return Math.max(0, Number.isFinite(started) ? started + limit - now : limit);
 }
 
 // "1h 30m" above an hour, "0m 45s" below, so the figure never changes width
