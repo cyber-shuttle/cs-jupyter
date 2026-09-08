@@ -449,6 +449,9 @@ describe("runtime card contract", () => {
       ["8 CPU", "8", true],
       ["2 GPU", "2", true],
       ["32G memory", "32G", true],
+      // A running allocation also shows what it has left; see the countdown
+      // tests below for the figure itself.
+      ["30m 0s of walltime left", "30m 0s left", true],
     ]);
     expect(card.querySelector(".csRuntimeCardMeta")?.textContent).toBe(
       "8·2·32G",
@@ -459,7 +462,12 @@ describe("runtime card contract", () => {
       [...card.querySelectorAll(".csRuntimeCardLabel > *")].map(
         (node) => node.className.split(" ")[0],
       ),
-    ).toEqual(["csRuntimeCardIdentity", "csRuntimeState", "csRuntimeCardMeta"]);
+    ).toEqual([
+      "csRuntimeCardIdentity",
+      "csRuntimeState",
+      "csRuntimeCardMeta",
+      "csRuntimeCardCountdown",
+    ]);
     // The allocation sits with the host, not as another block.
     expect(
       [...card.querySelectorAll(".csRuntimeCardIdentity > *")].map(

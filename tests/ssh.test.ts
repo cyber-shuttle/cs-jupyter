@@ -765,15 +765,16 @@ describe("SSH hosts modal chrome", () => {
       "Port2222",
       "ProxyJumpbastion",
     ]);
-    const [test, remove] = [
-      ...entries[0].querySelectorAll<HTMLButtonElement>("button"),
-    ];
-    // Only the entry CyberShuttle wrote is CyberShuttle's to remove.
-    expect(remove.disabled).toBe(false);
-    expect(
-      [...entries[1].querySelectorAll<HTMLButtonElement>("button")][1].disabled,
-    ).toBe(true);
-    test.click();
+    const action = (entry: Element, label: string): HTMLButtonElement =>
+      [...entry.querySelectorAll<HTMLButtonElement>("button")].find(
+        (item) => item.textContent === label,
+      )!;
+    // Only the entry CyberShuttle wrote is CyberShuttle's to edit or remove.
+    expect(action(entries[0], "Edit").disabled).toBe(false);
+    expect(action(entries[0], "Delete").disabled).toBe(false);
+    expect(action(entries[1], "Edit").disabled).toBe(true);
+    expect(action(entries[1], "Delete").disabled).toBe(true);
+    action(entries[0], "Test connection").click();
     await vi.waitFor(() =>
       expect(hosts.node.textContent).toContain("Connected."),
     );
@@ -806,6 +807,56 @@ describe("SSH hosts modal chrome", () => {
     remove().click();
     await vi.waitFor(() =>
       expect(api.removeSshHost).toHaveBeenCalledWith("delta"),
+    );
+    hosts.dispose();
+  });
+
+  it("edits a host by re-pasting a command prefilled from what is configured", async () => {
+    const { SshHosts } = await import("../src/SshHosts");
+    const api = {
+      listSshHosts: vi.fn(async () => [
+        {
+          name: "delta",
+          hostname: "login.example.edu",
+          user: "me",
+          port: 2222,
+          identityFile: "~/.ssh/id_ed25519",
+          extraDirectives: ["ProxyJump bastion", "ForwardAgent yes"],
+          managed: true,
+        },
+      ]),
+      updateSshHost: vi.fn(async () => ({
+        name: "delta",
+        extraDirectives: [],
+      })),
+    };
+    const hosts = new SshHosts(api as unknown as ControlClient);
+    await hosts.refresh();
+    const named = (label: string): HTMLButtonElement =>
+      [...hosts.node.querySelectorAll<HTMLButtonElement>("button")].find(
+        (item) => item.textContent === label,
+      )!;
+    named("Edit").click();
+    const command = hosts.node.querySelector<HTMLInputElement>(
+      'input[name="sshHostCommand"]',
+    )!;
+    // The whole entry comes back as a command, so an edit starts from what ssh
+    // already uses rather than from an empty box.
+    expect(command.value).toBe(
+      "ssh -p 2222 -i ~/.ssh/id_ed25519 -J bastion -o ForwardAgent=yes me@login.example.edu",
+    );
+    // The alias is the entry being edited, so it is not offered for renaming.
+    expect(hosts.node.querySelector('input[name="sshHostName"]')).toBeNull();
+    command.value = "ssh -p 22 me@login2.example.edu";
+    command.dispatchEvent(new Event("input"));
+    hosts.node
+      .querySelector("form")!
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() =>
+      expect(api.updateSshHost).toHaveBeenCalledWith(
+        "delta",
+        "ssh -p 22 me@login2.example.edu",
+      ),
     );
     hosts.dispose();
   });

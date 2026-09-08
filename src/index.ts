@@ -37,6 +37,7 @@ import { cacheRuntimeAccess, loadRuntimeAccess } from "./runtime-access.js";
 
 import { getActiveRuntimeId, setActiveRuntimeId } from "./runtime-state.js";
 import { runtimeUiPlugin, selectedRuntime } from "./runtime-ui.js";
+import { walltimeStatusPlugin } from "./walltime-status.js";
 
 export const IRemoteServerSettings = new Token<ServerConnection.ISettings>(
   "@cybershuttle/jupyter:IRemoteServerSettings",
@@ -281,4 +282,5 @@ export default [
   ...remoteServicePlugins,
   remoteTerminalUiPlugin,
   runtimeUiPlugin,
+  walltimeStatusPlugin,
 ];

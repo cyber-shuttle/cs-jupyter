@@ -346,6 +346,35 @@ and the row is lifted. */
 .csResourceSeparator {
   color: var(--jp-ui-font-color3);
 }
+/* What the allocation has left. The same warning colour serves the card, the
+   detail row and the status bar, so one threshold reads one way everywhere. */
+.csRuntimeCardCountdown {
+  display: flex;
+  justify-content: center;
+  color: var(--jp-ui-font-color2);
+  font-size: var(--jp-ui-font-size0);
+  line-height: 1.35;
+}
+.csRuntimeCardCountdownLow,
+.csRuntimeCardCountdownLow .csResourceMeasure svg,
+.csRuntimeDetailLow,
+.csWalltimeStatusLow {
+  color: var(--jp-warn-color1);
+}
+.csWalltimeStatus {
+  display: flex;
+  align-items: center;
+}
+.csWalltimeStatusItem {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  font-size: var(--jp-ui-font-size1);
+}
+.csWalltimeStatusItem svg {
+  width: 14px;
+  height: 14px;
+}
 .csPill,
 .csRuntimeState,
 .csCurrentPill {

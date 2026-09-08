@@ -3,6 +3,12 @@ import { isTerminal, type IRuntime } from "./Common";
 import type { CyberShuttlePanel, IRuntimeUiState } from "./CyberShuttlePanel";
 import type { IRuntimeLogTail } from "./ControlClient";
 import { button, element, keepingFocus, notes, statePill } from "./dom";
+import {
+  LOW_TIME_MS,
+  countsDown,
+  formatRemaining,
+  remainingMs,
+} from "./walltime";
 
 // Where the status log was scrolled, so a re-render keeps the reader's place.
 interface IRuntimeLogView {
@@ -14,6 +20,9 @@ export class RuntimeDetail extends Widget {
   private _state: IRuntimeUiState;
   private _runtime: IRuntime | undefined;
   private _logView: IRuntimeLogView | undefined;
+  // Its own clock, for the same reason the list has one: a settled runtime is
+  // answered 304 and emits no state to re-render from.
+  private _clock: number | undefined;
 
   constructor(
     private _controller: CyberShuttlePanel,
@@ -31,6 +40,7 @@ export class RuntimeDetail extends Widget {
       return;
     }
     this._controller.stateChanged.disconnect(this._onStateChanged, this);
+    this._stopClock();
     super.dispose();
   }
 
@@ -50,6 +60,23 @@ export class RuntimeDetail extends Widget {
 
   private _render(): void {
     keepingFocus(this.node, () => this._rebuild());
+    this._syncClock();
+  }
+
+  private _stopClock(): void {
+    if (this._clock !== undefined) {
+      window.clearInterval(this._clock);
+      this._clock = undefined;
+    }
+  }
+
+  private _syncClock(): void {
+    const ticking = this._runtime !== undefined && countsDown(this._runtime);
+    if (ticking && this._clock === undefined) {
+      this._clock = window.setInterval(() => this._render(), 1000);
+    } else if (!ticking) {
+      this._stopClock();
+    }
   }
 
   private _rebuild(): void {
@@ -154,6 +181,14 @@ export class RuntimeDetail extends Widget {
     this._field(details, "Cores", String(runtime.resources.cores));
     this._field(details, "Memory", `${runtime.resources.memoryMb} MB`);
     this._field(details, "Walltime", `${runtime.resources.wallMinutes} min`);
+    if (countsDown(runtime)) {
+      const left = remainingMs(runtime, Date.now());
+      this._field(details, "Remaining", formatRemaining(left));
+      details.lastElementChild?.classList.toggle(
+        "csRuntimeDetailLow",
+        left <= LOW_TIME_MS,
+      );
+    }
     if (runtime.resources.gpuCount) {
       this._field(
         details,

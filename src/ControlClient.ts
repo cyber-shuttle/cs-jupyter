@@ -177,6 +177,18 @@ export class ControlClient {
     );
   }
 
+  // The alias names the entry being edited, so an edit cannot rename what it
+  // edits; the command is parsed by cs-control exactly as an added one is.
+  async updateSshHost(alias: string, command: string): Promise<ISshHost> {
+    return validateHost(
+      await this._request(`ssh/${encodeURIComponent(alias)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command }),
+      }),
+    );
+  }
+
   async removeSshHost(alias: string): Promise<void> {
     await this._request(`ssh/${encodeURIComponent(alias)}`, {
       method: "DELETE",
@@ -240,23 +252,6 @@ export class ControlClient {
       runtimes: value.runtimes.map(validateRuntime),
       logs: (value.logs ?? []).map(validateRuntimeLogTail),
     };
-  }
-
-  // The script alone, readable while Slurm is being asked about it.
-  async previewRuntimeScript(
-    request: IRuntimeCreateRequest,
-    signal?: AbortSignal,
-  ): Promise<string> {
-    const value = await this._request("runtimes/script", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request),
-      signal,
-    });
-    if (!isPlainObject(value) || typeof value.script !== "string") {
-      throw new Error("cs-control returned an invalid runtime script.");
-    }
-    return value.script;
   }
 
   async validateRuntime(

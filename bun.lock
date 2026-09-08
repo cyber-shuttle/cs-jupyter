@@ -9,6 +9,7 @@
         "@jupyterlab/apputils": "~4.7.3",
         "@jupyterlab/coreutils": "~6.6.3",
         "@jupyterlab/services": "~7.6.3",
+        "@jupyterlab/statusbar": "~4.6.3",
         "@jupyterlab/ui-components": "4.6.3",
         "@lumino/coreutils": "2.2.3",
         "@lumino/signaling": "2.1.6",

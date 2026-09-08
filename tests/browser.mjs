@@ -181,16 +181,6 @@ const controlServer = createServer((request, response) => {
       partitions: [{ name: "debug", cpuCount: 16, memoryMb: 32768, gres: [] }],
     });
   }
-  // The review step asks cs-control to build the script before validating it.
-  if (url.pathname === "/api/v1/runtimes/script" && request.method === "POST") {
-    return readRequestJSON(request).then((body) => {
-      assert.equal(body.rootFolder, "projects/browser-created");
-      return json(response, {
-        runtimeId: createdId,
-        script: "#!/bin/bash\n#SBATCH --partition=debug\n",
-      });
-    });
-  }
   if (
     url.pathname === "/api/v1/runtimes/validate" &&
     request.method === "POST"

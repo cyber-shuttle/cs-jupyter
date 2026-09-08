@@ -56,6 +56,9 @@ export interface IRuntime extends IAllocation {
   state: RuntimeState;
   error?: string;
   createdAt: string;
+  // When Slurm was first seen running the allocation. Absent until it starts,
+  // so a queue wait is never mistaken for a countdown.
+  startedAt?: string;
   updatedAt: string;
 }
 
@@ -70,6 +73,7 @@ export const RUNTIME_KEYS = [
   "resources",
   "error",
   "createdAt",
+  "startedAt",
   "updatedAt",
 ] as const satisfies readonly (keyof IRuntime)[];
 
