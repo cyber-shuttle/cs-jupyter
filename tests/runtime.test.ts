@@ -1,3 +1,4 @@
+import type { ReadonlyPartialJSONObject } from "@lumino/coreutils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ControlClient,
@@ -9,19 +10,10 @@ import {
   installRuntimeCommandGuard,
   RuntimeController,
 } from "../src/RuntimeController";
-import type { IRuntime } from "../src/Common";
 import { cacheRuntimeAccess, type IRuntimeAccess } from "../src/runtime-access";
 import { fakeAuth, runtimeFixture } from "./fakes";
 
 const auth = fakeAuth("test-delegated-token");
-
-const runtimeRequest = {
-  idempotencyKey: "idem",
-  sshHost: "delta",
-  partition: "debug",
-  rootFolder: "projects/demo",
-  resources: { cores: 1, memoryMb: 1024, wallMinutes: 30 },
-};
 
 const access: IRuntimeAccess = {
   runtimeId: "rt-012345abcdef",
@@ -246,6 +238,16 @@ describe("shared cs-control client", () => {
     expect(() => validControlApiUrl("")).toThrow("cybershuttleControlApiUrl");
   });
 
+  it("accepts plain http on every loopback host a URL reports, and nowhere else", () => {
+    for (const host of ["localhost", "127.0.0.1", "[::1]"]) {
+      const url = `http://${host}:8045/api/v1`;
+      expect(validControlApiUrl(url)).toBe(url);
+    }
+    expect(() => validControlApiUrl("http://other.example/api/v1")).toThrow(
+      "HTTPS or loopback HTTP",
+    );
+  });
+
   it("rejects unsafe control API URLs and malformed runtime ids", () => {
     expect(validControlApiUrl("http://localhost:3000/gateway/api/v1")).toBe(
       "http://localhost:3000/gateway/api/v1",
@@ -294,7 +296,7 @@ describe("shared cs-control client", () => {
       const settings = createRuntimeServerSettings(access, {
         fetch: vi.fn(async () => new Response(null, { status })) as any,
       });
-      await settings.fetch(new URL("api/status", settings.baseUrl));
+      await settings.fetch(new URL("api/status", settings.baseUrl).href);
       expect(window.sessionStorage.length).toBe(0);
     },
   );
@@ -302,7 +304,9 @@ describe("shared cs-control client", () => {
 
 describe("runtime command guard", () => {
   it("opens the chooser for notebooks, consoles, and terminals until selected", async () => {
-    const execute = vi.fn(async () => undefined);
+    const execute = vi.fn<
+      (command: string, args?: ReadonlyPartialJSONObject) => Promise<void>
+    >(async () => undefined);
     const app = {
       commands: { execute, hasCommand: vi.fn(() => true) },
       shell: { currentWidget: null },

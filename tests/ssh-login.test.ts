@@ -59,6 +59,12 @@ async function opened(startRuntime: unknown, operation: FakeOperation) {
 const awaitingLogin = (operation: FakeOperation): Promise<void> =>
   vi.waitFor(() => expect(operation.starts.length).toBe(1));
 
+const completeLogin = (operation: FakeOperation): void => {
+  const { ready } = operation.starts[0].callbacks;
+  expect(ready).toBeDefined();
+  ready?.();
+};
+
 describe("a runtime action a host refuses for a login", () => {
   it("offers the login and runs the action again once it is done", async () => {
     const operation = new FakeOperation();
@@ -75,7 +81,7 @@ describe("a runtime action a host refuses for a login", () => {
     expect(api.sshAuthWebSocket).toHaveBeenCalledWith("nexus");
     expect(panel.state.error).toBe("");
 
-    operation.starts[0].callbacks.ready();
+    completeLogin(operation);
     await running;
     expect(api.startRuntime).toHaveBeenCalledTimes(2);
     expect(panel.state.runtimes[0].state).toBe("QUEUED");
@@ -93,7 +99,7 @@ describe("a runtime action a host refuses for a login", () => {
 
     const running = panel.runAgain(base.id);
     await awaitingLogin(operation);
-    operation.starts[0].callbacks.ready();
+    completeLogin(operation);
     await running;
     expect(api.startRuntime).toHaveBeenCalledTimes(2);
     expect(operation.starts).toHaveLength(1);
