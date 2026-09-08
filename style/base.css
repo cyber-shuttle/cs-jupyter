@@ -1,3 +1,10 @@
+/* The brand fill stays blue in both themes, so anything on it is white in both.
+   --jp-ui-inverse-font-color1 inverts the UI text instead, which in the dark
+   theme is dark: black on blue. Defined at the root because the dialogs render
+   outside the panel. */
+:root {
+  --cs-on-brand: #fff;
+}
 .csShell,
 .csRuntimePanel {
   width: 100%;
@@ -491,7 +498,7 @@ and the row is lifted. */
 /* The session this page is attached to is an identity, not a scheduler state. */
 .csCurrentPill {
   background: var(--jp-brand-color1);
-  color: var(--jp-ui-inverse-font-color1);
+  color: var(--cs-on-brand);
 }
 .csRuntimeCardCurrent {
   border-color: var(--jp-brand-color1);
@@ -649,7 +656,7 @@ and the row is lifted. */
 .csPrimaryButton {
   border: 1px solid var(--jp-brand-color1);
   background: var(--jp-brand-color1);
-  color: #fff;
+  color: var(--cs-on-brand);
 }
 .csPrimaryButton .csSpinner {
   border-color: rgb(255 255 255 / 45%);
@@ -785,7 +792,7 @@ and the row is lifted. */
 .csResourceTypeOption input:checked + span {
   border-color: var(--jp-brand-color1);
   background: var(--jp-brand-color1);
-  color: var(--jp-ui-inverse-font-color1);
+  color: var(--cs-on-brand);
 }
 .csResourceTypeOption input:focus-visible + span {
   outline: 2px solid var(--jp-brand-color1);
