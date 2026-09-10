@@ -62,8 +62,9 @@ description of them.
    JupyterLab's own `ServerConnection` token handling: `Authorization: token <capability>` on REST and
    `?token=` on the Jupyter WebSocket URLs.
 
-cs-control provisions the Python environment on the compute host when it creates an allocation; nothing in
-this repository runs there.
+cs-control asks Linkspan, the allocation's main process, for the Jupyter server; Linkspan builds the Python
+environment on the compute host and starts the server on the port cs-control declared. Nothing in this
+repository runs there.
 
 ## Countdown, usage and history
 
