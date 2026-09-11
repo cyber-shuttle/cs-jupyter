@@ -80,3 +80,69 @@ export function keepingFocus(node: HTMLElement, rebuild: () => void): void {
     }
   }
 }
+
+/**
+ * One usage plot: a 3:2 panel with a faint grid behind a native SVG polyline.
+ * Hand-rolled for the reason every other glyph here is -- currentColor follows
+ * the theme, and a chart library would be the only dependency of its kind.
+ */
+export function plot(points: string, title: string): HTMLElement {
+  const holder = element("div", "", "csPlot");
+  holder.innerHTML = `<svg viewBox="0 0 60 40" preserveAspectRatio="none" role="img"><title>${title}</title><path class="csPlotGrid" d="M0 10H60M0 20H60M0 30H60M15 0V40M30 0V40M45 0V40" /><rect class="csPlotFrame" x="0.5" y="0.5" width="59" height="39" /><polyline class="csPlotLine" points="${points}" /></svg>`;
+  return holder;
+}
+
+/**
+ * One line of an allocation's narration. The live tail on a running session and
+ * the frozen one on a finished run are the same lines, so they are built here
+ * rather than twice.
+ */
+export function logLine(line: {
+  stream: string;
+  text: string;
+  at: string;
+}): HTMLElement {
+  const row = element(
+    "div",
+    "",
+    `csRuntimeLogLine csRuntimeLog-${line.stream}`,
+  );
+  const at = new Date(line.at);
+  const stamp = Number.isFinite(at.getTime())
+    ? at.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      })
+    : "";
+  const time = element("time", stamp, "csRuntimeLogTime");
+  if (stamp) time.dateTime = line.at;
+  time.title = line.stream;
+  row.append(time, element("span", line.text, "csRuntimeLogText"));
+  return row;
+}
+
+/**
+ * A one-second tick for the surfaces that count down. cs-control answers 304
+ * while a running allocation is unchanged, so state alone would leave the
+ * figure sitting still.
+ */
+export class Clock {
+  private id: number | undefined;
+
+  constructor(private tick: () => void) {}
+
+  // Ticking is worth a re-render only while something is actually counting.
+  sync(active: boolean): void {
+    if (!active) return this.stop();
+    this.id ??= window.setInterval(this.tick, 1000);
+  }
+
+  stop(): void {
+    window.clearInterval(this.id);
+    this.id = undefined;
+  }
+}
+
+// One clock face for the card and the status bar.
+export const CLOCK_GLYPH = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"><circle cx="8" cy="8" r="5.6" /><path d="M8 4.9V8l2.1 1.6" /></g></svg>`;

@@ -14,6 +14,7 @@ import {
 } from "../src/runtime-access";
 import { CyberShuttleHeader, RuntimeList } from "../src/RuntimeList";
 import {
+  acceptDialog,
   controlFake,
   pollPanel,
   runtimeFixture,
@@ -162,13 +163,13 @@ describe("serialized runtime selection", () => {
       cards[1].ariaLabel?.includes("FAILED"),
       cards[0].querySelector(".csRuntimeState-ready")?.textContent,
       cards[2].classList.contains("csRuntimeAddCard"),
-      cards[2].textContent?.includes("Add Runtime"),
+      cards[2].textContent?.includes("Add Session"),
     ]).toEqual([3, true, true, true, true, "READY", true, true]);
     expect(
       [...panel.node.querySelectorAll("h2")].map((heading) =>
         heading.textContent?.trim(),
       ),
-    ).toEqual(["Runtimes"]);
+    ).toEqual(["Sessions"]);
     expect(
       [...panel.header.node.querySelectorAll("h2")].map((h) =>
         h.textContent?.trim(),
@@ -316,7 +317,9 @@ describe("serialized runtime selection", () => {
           { ...first, generation: "g-fedcba9876543210" },
         ]);
       } else {
-        await panel.stop(first.id);
+        const stopping = panel.stop(first.id);
+        await acceptDialog();
+        await stopping;
       }
       save.resolve();
       await selecting;
@@ -449,6 +452,9 @@ describe("runtime card contract", () => {
       ["8 CPU", "8", true],
       ["2 GPU", "2", true],
       ["32G memory", "32G", true],
+      // A running allocation also shows what it has left; see the countdown
+      // tests below for the figure itself.
+      ["30m 0s of walltime left", "30m 0s left", true],
     ]);
     expect(card.querySelector(".csRuntimeCardMeta")?.textContent).toBe(
       "8·2·32G",
@@ -459,7 +465,12 @@ describe("runtime card contract", () => {
       [...card.querySelectorAll(".csRuntimeCardLabel > *")].map(
         (node) => node.className.split(" ")[0],
       ),
-    ).toEqual(["csRuntimeCardIdentity", "csRuntimeState", "csRuntimeCardMeta"]);
+    ).toEqual([
+      "csRuntimeCardIdentity",
+      "csRuntimeState",
+      "csRuntimeCardMeta",
+      "csRuntimeCardCountdown",
+    ]);
     // The allocation sits with the host, not as another block.
     expect(
       [...card.querySelectorAll(".csRuntimeCardIdentity > *")].map(
@@ -484,7 +495,7 @@ describe("identity control", () => {
     list.setControllerState(state);
     header.setControllerState(state);
     expect(list.node.textContent).toContain(
-      "Sign in to see your runtimes and SSH hosts.",
+      "Sign in to see your sessions and SSH hosts.",
     );
     expect(list.node.querySelector(".csRuntimeAddCard")).toBeNull();
     expect(list.node.querySelector(".csRuntimeCard")).toBeNull();
@@ -527,7 +538,7 @@ describe("identity control", () => {
     setRuntimes(list, [first]);
     const sshHosts = list.node.querySelector(".csSshHostsButton")!;
     expect(sshHosts.closest("header")?.querySelector("h2")?.textContent).toBe(
-      "Runtimes",
+      "Sessions",
     );
   });
 });

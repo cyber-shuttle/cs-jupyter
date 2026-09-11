@@ -89,3 +89,23 @@ export function fakeAuth(accessToken = "delegated-token") {
     interactiveLogin: vi.fn(credentials),
   } satisfies IControlAuth;
 }
+
+/**
+ * Accepts the JupyterLab confirmation a destructive action raises. Stopping and
+ * deleting both cancel a Slurm job, so both ask first; a test driving either
+ * has to answer.
+ */
+export async function acceptDialog(): Promise<void> {
+  const { vi } = await import("vitest");
+  let accept: HTMLButtonElement | undefined;
+  await vi.waitFor(() => {
+    const buttons = [
+      ...document.querySelectorAll<HTMLButtonElement>(".jp-Dialog button"),
+    ];
+    accept = buttons[buttons.length - 1];
+    if (!accept) {
+      throw new Error("no confirmation is open");
+    }
+  });
+  accept!.click();
+}

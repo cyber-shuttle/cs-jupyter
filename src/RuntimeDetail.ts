@@ -2,7 +2,22 @@ import { Widget } from "@lumino/widgets";
 import { isTerminal, type IRuntime } from "./Common";
 import type { CyberShuttlePanel, IRuntimeUiState } from "./CyberShuttlePanel";
 import type { IRuntimeLogTail } from "./ControlClient";
-import { button, element, keepingFocus, notes, statePill } from "./dom";
+import {
+  button,
+  Clock,
+  element,
+  keepingFocus,
+  logLine,
+  notes,
+  statePill,
+} from "./dom";
+import { latest, usagePlots } from "./usage";
+import {
+  LOW_TIME_MS,
+  countsDown,
+  formatRemaining,
+  remainingMs,
+} from "./walltime";
 
 // Where the status log was scrolled, so a re-render keeps the reader's place.
 interface IRuntimeLogView {
@@ -14,6 +29,7 @@ export class RuntimeDetail extends Widget {
   private _state: IRuntimeUiState;
   private _runtime: IRuntime | undefined;
   private _logView: IRuntimeLogView | undefined;
+  private _clock = new Clock(() => this._render());
 
   constructor(
     private _controller: CyberShuttlePanel,
@@ -31,6 +47,7 @@ export class RuntimeDetail extends Widget {
       return;
     }
     this._controller.stateChanged.disconnect(this._onStateChanged, this);
+    this._clock.stop();
     super.dispose();
   }
 
@@ -50,6 +67,7 @@ export class RuntimeDetail extends Widget {
 
   private _render(): void {
     keepingFocus(this.node, () => this._rebuild());
+    this._clock.sync(this._runtime !== undefined && countsDown(this._runtime));
   }
 
   private _rebuild(): void {
@@ -69,7 +87,7 @@ export class RuntimeDetail extends Widget {
     this.node.appendChild(
       this._runtime
         ? this._buildRuntime(this._runtime)
-        : element("div", "Waiting for live runtime state…", "csStatus"),
+        : element("div", "Waiting for live session state…", "csStatus"),
     );
     this._restoreLogScroll();
   }
@@ -154,6 +172,14 @@ export class RuntimeDetail extends Widget {
     this._field(details, "Cores", String(runtime.resources.cores));
     this._field(details, "Memory", `${runtime.resources.memoryMb} MB`);
     this._field(details, "Walltime", `${runtime.resources.wallMinutes} min`);
+    if (countsDown(runtime)) {
+      const left = remainingMs(runtime, Date.now());
+      this._field(details, "Remaining", formatRemaining(left));
+      details.lastElementChild?.classList.toggle(
+        "csRuntimeDetailLow",
+        left <= LOW_TIME_MS,
+      );
+    }
     if (runtime.resources.gpuCount) {
       this._field(
         details,
@@ -161,7 +187,15 @@ export class RuntimeDetail extends Widget {
         `${runtime.resources.gpuCount} ${runtime.resources.gpuType || ""}`.trim(),
       );
     }
-    root.appendChild(details);
+    // What it is doing sits beside what it is, not under it.
+    const columns = element("div", "", "csDetailColumns");
+    columns.appendChild(details);
+    const samples = this._state.samples.get(runtime.id);
+    const live = !isTerminal(runtime.state);
+    if (live && samples?.length) {
+      columns.appendChild(usagePlots(runtime, samples, latest));
+    }
+    root.appendChild(columns);
 
     root.append(
       ...notes([
@@ -169,7 +203,10 @@ export class RuntimeDetail extends Widget {
         [this._state.updatesStatus, "csStatus"],
       ]),
     );
-    const tail = this._state.logs.get(runtime.id);
+    // The card is what this session is doing now. Once it is over there is
+    // nothing live to show and its report belongs to the run history, which
+    // keeps every generation rather than only the last.
+    const tail = live ? this._state.logs.get(runtime.id) : undefined;
     if (tail) {
       root.appendChild(this._runtimeLog(runtime, tail));
     }
@@ -200,24 +237,7 @@ export class RuntimeDetail extends Widget {
       view.atBottom = this._atBottom(scroller);
     };
     for (const line of tail.lines) {
-      const row = element(
-        "div",
-        "",
-        `csRuntimeLogLine csRuntimeLog-${line.stream}`,
-      );
-      const at = new Date(line.at);
-      const stamp = Number.isFinite(at.getTime())
-        ? at.toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-          })
-        : "";
-      const time = element("time", stamp, "csRuntimeLogTime");
-      if (stamp) time.dateTime = line.at;
-      time.title = line.stream;
-      row.append(time, element("span", line.text, "csRuntimeLogText"));
-      scroller.appendChild(row);
+      scroller.appendChild(logLine(line));
     }
     section.appendChild(scroller);
     return section;

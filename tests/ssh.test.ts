@@ -656,7 +656,7 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
     ).toBe("projects/preserved-review");
   });
 
-  it("waits on validation before showing the script it validated", async () => {
+  it("keeps the script out of sight unless validation fails", async () => {
     const { form, deliver } = formHarness();
     choose(form, "alpha");
     await deliver(0, discovery("alpha"));
@@ -669,7 +669,8 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
     await vi.waitFor(() =>
       expect(form.node.textContent).toContain("Validating with Slurm"),
     );
-    expect(form.node.querySelector(".csSlurmScript")?.textContent).toBe("");
+    const script = form.node.querySelector<HTMLElement>(".csSlurmScript")!;
+    expect(script.hidden).toBe(true);
     validation.resolve({
       runtimeId: "rt-012345abcdef",
       status: "PASSED",
@@ -677,10 +678,33 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
       message: "Slurm accepted the script.",
     });
     await vi.waitFor(() =>
-      expect(form.node.querySelector(".csSlurmScript")?.textContent).toContain(
-        "#!/bin/bash",
-      ),
+      expect(form.node.textContent).toContain("Validation passed."),
     );
+    expect(script.hidden).toBe(true);
+    form.dispose();
+  });
+
+  it("shows the script when validation fails", async () => {
+    const { form, deliver } = formHarness();
+    choose(form, "alpha");
+    await deliver(0, discovery("alpha"));
+    (form as any)._api.validateRuntime = async () => ({
+      runtimeId: "rt-012345abcdef",
+      status: "FAILED",
+      script: "#!/bin/bash\n#SBATCH --partition=missing\n",
+      message: "Slurm rejected the script.",
+      stderr: "sbatch: error: invalid partition specified: missing",
+    });
+    const workspace = input(form, "rootFolder");
+    workspace.value = "$HOME";
+    workspace.dispatchEvent(new Event("input"));
+    submitConfiguration(form);
+    await vi.waitFor(() =>
+      expect(form.node.textContent).toContain("Validation failed."),
+    );
+    const script = form.node.querySelector<HTMLElement>(".csSlurmScript")!;
+    expect(script.hidden).toBe(false);
+    expect(script.textContent).toContain("--partition=missing");
     form.dispose();
   });
 
@@ -765,15 +789,16 @@ describe("SSH hosts modal chrome", () => {
       "Port2222",
       "ProxyJumpbastion",
     ]);
-    const [test, remove] = [
-      ...entries[0].querySelectorAll<HTMLButtonElement>("button"),
-    ];
-    // Only the entry CyberShuttle wrote is CyberShuttle's to remove.
-    expect(remove.disabled).toBe(false);
-    expect(
-      [...entries[1].querySelectorAll<HTMLButtonElement>("button")][1].disabled,
-    ).toBe(true);
-    test.click();
+    const action = (entry: Element, label: string): HTMLButtonElement =>
+      [...entry.querySelectorAll<HTMLButtonElement>("button")].find(
+        (item) => item.textContent === label,
+      )!;
+    // Only the entry CyberShuttle wrote is CyberShuttle's to edit or remove.
+    expect(action(entries[0], "Edit").disabled).toBe(false);
+    expect(action(entries[0], "Delete").disabled).toBe(false);
+    expect(action(entries[1], "Edit").disabled).toBe(true);
+    expect(action(entries[1], "Delete").disabled).toBe(true);
+    action(entries[0], "Test connection").click();
     await vi.waitFor(() =>
       expect(hosts.node.textContent).toContain("Connected."),
     );
@@ -806,6 +831,56 @@ describe("SSH hosts modal chrome", () => {
     remove().click();
     await vi.waitFor(() =>
       expect(api.removeSshHost).toHaveBeenCalledWith("delta"),
+    );
+    hosts.dispose();
+  });
+
+  it("edits a host by re-pasting a command prefilled from what is configured", async () => {
+    const { SshHosts } = await import("../src/SshHosts");
+    const api = {
+      listSshHosts: vi.fn(async () => [
+        {
+          name: "delta",
+          hostname: "login.example.edu",
+          user: "me",
+          port: 2222,
+          identityFile: "~/.ssh/id_ed25519",
+          extraDirectives: ["ProxyJump bastion", "ForwardAgent yes"],
+          managed: true,
+        },
+      ]),
+      updateSshHost: vi.fn(async () => ({
+        name: "delta",
+        extraDirectives: [],
+      })),
+    };
+    const hosts = new SshHosts(api as unknown as ControlClient);
+    await hosts.refresh();
+    const named = (label: string): HTMLButtonElement =>
+      [...hosts.node.querySelectorAll<HTMLButtonElement>("button")].find(
+        (item) => item.textContent === label,
+      )!;
+    named("Edit").click();
+    const command = hosts.node.querySelector<HTMLInputElement>(
+      'input[name="sshHostCommand"]',
+    )!;
+    // The whole entry comes back as a command, so an edit starts from what ssh
+    // already uses rather than from an empty box.
+    expect(command.value).toBe(
+      "ssh -p 2222 -i ~/.ssh/id_ed25519 -J bastion -o ForwardAgent=yes me@login.example.edu",
+    );
+    // The alias is the entry being edited, so it is not offered for renaming.
+    expect(hosts.node.querySelector('input[name="sshHostName"]')).toBeNull();
+    command.value = "ssh -p 22 me@login2.example.edu";
+    command.dispatchEvent(new Event("input"));
+    hosts.node
+      .querySelector("form")!
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() =>
+      expect(api.updateSshHost).toHaveBeenCalledWith(
+        "delta",
+        "ssh -p 22 me@login2.example.edu",
+      ),
     );
     hosts.dispose();
   });

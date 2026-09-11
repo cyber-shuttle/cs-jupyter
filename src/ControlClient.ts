@@ -16,8 +16,11 @@ import {
   validDevTunnelRoot,
 } from "./runtime-access";
 import {
+  IMetricSample,
+  IRun,
   IRuntime,
   IRuntimeCreateRequest,
+  IRuntimeSeries,
   IRuntimeValidation,
   ISlurmInfo,
   ISshHost,
@@ -177,6 +180,18 @@ export class ControlClient {
     );
   }
 
+  // The alias names the entry being edited, so an edit cannot rename what it
+  // edits; the command is parsed by cs-control exactly as an added one is.
+  async updateSshHost(alias: string, command: string): Promise<ISshHost> {
+    return validateHost(
+      await this._request(`ssh/${encodeURIComponent(alias)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command }),
+      }),
+    );
+  }
+
   async removeSshHost(alias: string): Promise<void> {
     await this._request(`ssh/${encodeURIComponent(alias)}`, {
       method: "DELETE",
@@ -242,23 +257,6 @@ export class ControlClient {
     };
   }
 
-  // The script alone, readable while Slurm is being asked about it.
-  async previewRuntimeScript(
-    request: IRuntimeCreateRequest,
-    signal?: AbortSignal,
-  ): Promise<string> {
-    const value = await this._request("runtimes/script", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request),
-      signal,
-    });
-    if (!isPlainObject(value) || typeof value.script !== "string") {
-      throw new Error("cs-control returned an invalid runtime script.");
-    }
-    return value.script;
-  }
-
   async validateRuntime(
     request: IRuntimeCreateRequest,
     signal?: AbortSignal,
@@ -318,6 +316,26 @@ export class ControlClient {
     }
     clearRuntimeAccess(runtimeId);
     return runtime;
+  }
+
+  // Samples are their own read: they change on every tick, so cs-control keeps
+  // them out of the poll whose ETag makes a queued job cheap to watch.
+  async getRuntimeMetrics(id: string): Promise<IRuntimeSeries> {
+    return validateRuntimeSeries(
+      await this._request(
+        `runtimes/${encodeURIComponent(validRuntimeId(id))}/metrics`,
+      ),
+    );
+  }
+
+  // The history outlives the runtimes in it, so it is its own collection: a run
+  // whose card was deleted is still the caller's.
+  async listRuns(): Promise<IRun[]> {
+    const value = await this._request("runtimes/history");
+    if (!isPlainObject(value) || !Array.isArray(value.runs)) {
+      throw new Error("cs-control returned an invalid run history.");
+    }
+    return value.runs.map(validateRun);
   }
 
   async getRuntimeAccess(id: string): Promise<IRuntimeAccess> {
@@ -428,7 +446,7 @@ export function createRuntimeServerSettings(
 
 export function validRuntimeId(value: string): string {
   if (!RUNTIME_ID.test(value)) {
-    throw new Error("Invalid runtime id.");
+    throw new Error("Invalid session id.");
   }
   return value;
 }
@@ -498,6 +516,41 @@ function validateRuntime(value: unknown): IRuntime {
     throw new Error("cs-control returned an invalid runtime.");
   }
   return value as unknown as IRuntime;
+}
+
+function validateSample(value: unknown): IMetricSample {
+  if (!isPlainObject(value) || typeof value.at !== "string") {
+    throw new Error("cs-control returned an invalid metric sample.");
+  }
+  return value as unknown as IMetricSample;
+}
+
+function validateRuntimeSeries(value: unknown): IRuntimeSeries {
+  if (
+    !isPlainObject(value) ||
+    !RUNTIME_ID.test(String(value.runtimeId)) ||
+    !(value.samples === undefined || Array.isArray(value.samples))
+  ) {
+    throw new Error("cs-control returned an invalid metric series.");
+  }
+  return {
+    runtimeId: value.runtimeId as string,
+    samples: ((value.samples ?? []) as unknown[]).map(validateSample),
+  };
+}
+
+function validateRun(value: unknown): IRun {
+  if (
+    !isPlainObject(value) ||
+    !RUNTIME_ID.test(String(value.runtimeId)) ||
+    typeof value.generation !== "string" ||
+    typeof value.finalState !== "string" ||
+    typeof value.endedAt !== "string" ||
+    !isPlainObject(value.resources)
+  ) {
+    throw new Error("cs-control returned an invalid run.");
+  }
+  return value as unknown as IRun;
 }
 
 function validateHost(value: unknown): ISshHost {

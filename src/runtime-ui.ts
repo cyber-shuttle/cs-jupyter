@@ -33,7 +33,7 @@ export function runtimeLiteUrl(
 ): string {
   const id = validRuntimeId(runtimeId);
   if (!GENERATION.test(generation))
-    throw new Error("Invalid runtime generation.");
+    throw new Error("Invalid session generation.");
   const url = new URL(location.href);
   url.searchParams.set("runtime", id);
   url.searchParams.set("generation", generation);
@@ -130,8 +130,8 @@ export const runtimeUiPlugin: JupyterFrontEndPlugin<void> = {
     });
     app.commands.addCommand(SELECT_RUNTIME_COMMAND, {
       label: controller.currentRuntimeId
-        ? "Switch Remote Runtime…"
-        : "Select Remote Runtime…",
+        ? "Switch Remote Session…"
+        : "Select Remote Session…",
       execute: openLauncher,
     });
     palette?.addItem({

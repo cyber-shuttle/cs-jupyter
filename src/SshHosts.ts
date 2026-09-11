@@ -14,8 +14,9 @@ export class SshHosts extends Widget {
   private _hosts: ISshHost[] = [];
   private _busy = false;
   private _error = "";
-  private _adding = false;
-  private _draft = { name: "", command: "" };
+  // One paste form serves both: a blank alias adds, a named one replaces that
+  // entry. Undefined means no form is open.
+  private _form: { alias: string; name: string; command: string } | undefined;
   private _addError = "";
   private _saving = false;
   // Keyed by alias, so a re-render leaves the reader where they were.
@@ -47,20 +48,22 @@ export class SshHosts extends Widget {
     }
   }
 
-  private async _add(): Promise<void> {
+  private async _save(form: {
+    alias: string;
+    name: string;
+    command: string;
+  }): Promise<void> {
     this._saving = true;
     this._addError = "";
     this._sync();
     try {
-      await this._api.addSshHost(
-        this._draft.name.trim(),
-        this._draft.command.trim(),
-      );
+      await (form.alias
+        ? this._api.updateSshHost(form.alias, form.command.trim())
+        : this._api.addSshHost(form.name.trim(), form.command.trim()));
       if (this.isDisposed) {
         return;
       }
-      this._adding = false;
-      this._draft = { name: "", command: "" };
+      this._form = undefined;
       this._saving = false;
       await this.refresh();
     } catch (error) {
@@ -68,6 +71,12 @@ export class SshHosts extends Widget {
       this._saving = false;
       this._sync();
     }
+  }
+
+  private _openForm(form: typeof this._form): void {
+    this._form = form;
+    this._addError = "";
+    this._render();
   }
 
   private async _remove(host: ISshHost): Promise<void> {
@@ -136,33 +145,38 @@ export class SshHosts extends Widget {
   }
 
   private _addSection(): HTMLElement {
+    const adding = this._form?.alias === "";
     const section = element("div", "", "csSshAdd");
-    const toggle = button(
-      this._adding ? "Cancel" : "Add SSH Host",
-      "csSecondaryButton csSshAddToggle",
-      () => {
-        this._adding = !this._adding;
-        this._addError = "";
-        this._render();
-      },
+    section.appendChild(
+      button(
+        adding ? "Cancel" : "Add SSH Host",
+        "csSecondaryButton csSshAddToggle",
+        () =>
+          this._openForm(
+            adding ? undefined : { alias: "", name: "", command: "" },
+          ),
+      ),
     );
-    section.appendChild(toggle);
-    if (!this._adding) {
-      return section;
+    if (this._form && adding) {
+      section.appendChild(this._pasteForm(this._form));
     }
+    return section;
+  }
+
+  // The alias is fixed while editing — the entry keeps its name — so the name
+  // field belongs to adding alone.
+  private _pasteForm(draft: {
+    alias: string;
+    name: string;
+    command: string;
+  }): HTMLElement {
     const form = element("form", "", "csForm csSshAddForm");
-    const name = element("input", "", "csInput");
-    name.name = "sshHostName";
-    name.required = true;
-    name.placeholder = "delta";
-    name.value = this._draft.name;
-    name.oninput = () => (this._draft.name = name.value);
     const command = element("input", "", "csInput");
     command.name = "sshHostCommand";
     command.required = true;
     command.placeholder = "ssh -p 2222 me@login.example.edu";
-    command.value = this._draft.command;
-    command.oninput = () => (this._draft.command = command.value);
+    command.value = draft.command;
+    command.oninput = () => (draft.command = command.value);
     const help = element(
       "div",
       "Paste the ssh command that already works. Host, user, port, identity, jump host, and -o options are kept.",
@@ -172,27 +186,29 @@ export class SshHosts extends Widget {
     error.hidden = !this._addError;
     const footer = element("div", "", "csFormFooter");
     const save = button(
-      this._saving ? "Saving…" : "Save host",
+      this._saving ? "Saving…" : draft.alias ? "Save changes" : "Save host",
       "csPrimaryButton",
     );
     save.type = "submit";
     save.disabled = this._saving;
     footer.appendChild(save);
-    form.append(
-      field("Name", name),
-      field("SSH command", command),
-      help,
-      error,
-      footer,
-    );
+    if (!draft.alias) {
+      const name = element("input", "", "csInput");
+      name.name = "sshHostName";
+      name.required = true;
+      name.placeholder = "delta";
+      name.value = draft.name;
+      name.oninput = () => (draft.name = name.value);
+      form.appendChild(field("Name", name));
+    }
+    form.append(field("SSH command", command), help, error, footer);
     form.onsubmit = (event) => {
       event.preventDefault();
       if (form.reportValidity() && !this._saving) {
-        void this._add();
+        void this._save(draft);
       }
     };
-    section.appendChild(form);
-    return section;
+    return form;
   }
 
   private _hostEntry(host: ISshHost): HTMLElement {
@@ -241,23 +257,37 @@ export class SshHosts extends Widget {
       entry.append(summary, body);
       return entry;
     }
+    const editing = this._form?.alias === host.name;
     const testButton = button(
       "Test connection",
       "csSecondaryButton",
       () => void this._test(host),
     );
     testButton.disabled = test?.busy ?? false;
+    const edit = button(editing ? "Cancel" : "Edit", "csSecondaryButton", () =>
+      this._openForm(
+        editing
+          ? undefined
+          : { alias: host.name, name: host.name, command: hostCommand(host) },
+      ),
+    );
     const remove = button("Delete", "csDangerButton", () => {
       this._confirming = host.name;
       this._render();
     });
-    // Only entries CyberShuttle wrote are ours to remove.
+    // Only entries CyberShuttle wrote are ours to edit or remove.
+    edit.disabled = !host.managed;
     remove.disabled = !host.managed;
     if (!host.managed) {
-      remove.title = "This host comes from your own SSH configuration.";
+      const own = "This host comes from your own SSH configuration.";
+      edit.title = own;
+      remove.title = own;
     }
-    actions.append(testButton, remove);
+    actions.append(testButton, edit, remove);
     body.appendChild(actions);
+    if (this._form && editing) {
+      body.appendChild(this._pasteForm(this._form));
+    }
     entry.append(summary, body);
     return entry;
   }
@@ -285,4 +315,22 @@ function hostArguments(host: ISshHost): Array<[string, string]> {
     rows.push([key, rest.join(" ")]);
   }
   return rows;
+}
+
+// The command that reproduces a stored host, so an edit starts from what is
+// configured rather than from an empty box. It is a display string the server
+// re-parses, not configuration text the browser composes.
+function hostCommand(host: ISshHost): string {
+  const parts = ["ssh"];
+  if (host.port && host.port !== 22) parts.push("-p", String(host.port));
+  if (host.identityFile) parts.push("-i", host.identityFile);
+  for (const [key, value] of hostArguments(host)) {
+    if (["HostName", "User", "Port", "IdentityFile"].includes(key)) continue;
+    parts.push(
+      ...(key === "ProxyJump" ? ["-J", value] : ["-o", `${key}=${value}`]),
+    );
+  }
+  const target = host.hostname || host.name;
+  parts.push(host.user ? `${host.user}@${target}` : target);
+  return parts.join(" ");
 }

@@ -175,7 +175,7 @@ describe("shared cs-control client", () => {
       fetch as any,
     );
     await expect(client.stopRuntime("rt-invalid!")).rejects.toThrow(
-      "Invalid runtime id.",
+      "Invalid session id.",
     );
     // Reporting a failure for an allocation that was actually stopped leaves
     // the user with no way to tell what state it is in.

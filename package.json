@@ -25,6 +25,7 @@
     "@jupyterlab/apputils": "~4.7.3",
     "@jupyterlab/coreutils": "~6.6.3",
     "@jupyterlab/services": "~7.6.3",
+    "@jupyterlab/statusbar": "~4.6.3",
     "@jupyterlab/ui-components": "4.6.3",
     "@lumino/coreutils": "2.2.3",
     "@lumino/signaling": "2.1.6",
@@ -54,6 +55,9 @@
       },
       "@jupyterlab/services": {
         "requiredVersion": "^7.6.0"
+      },
+      "@jupyterlab/statusbar": {
+        "requiredVersion": "^4.6.0"
       },
       "@lumino/signaling": {
         "requiredVersion": "^2.1.5"
