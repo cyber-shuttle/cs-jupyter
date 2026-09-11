@@ -656,7 +656,7 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
     ).toBe("projects/preserved-review");
   });
 
-  it("waits on validation before showing the script it validated", async () => {
+  it("keeps the script out of sight unless validation fails", async () => {
     const { form, deliver } = formHarness();
     choose(form, "alpha");
     await deliver(0, discovery("alpha"));
@@ -669,7 +669,8 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
     await vi.waitFor(() =>
       expect(form.node.textContent).toContain("Validating with Slurm"),
     );
-    expect(form.node.querySelector(".csSlurmScript")?.textContent).toBe("");
+    const script = form.node.querySelector<HTMLElement>(".csSlurmScript")!;
+    expect(script.hidden).toBe(true);
     validation.resolve({
       runtimeId: "rt-012345abcdef",
       status: "PASSED",
@@ -677,10 +678,33 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
       message: "Slurm accepted the script.",
     });
     await vi.waitFor(() =>
-      expect(form.node.querySelector(".csSlurmScript")?.textContent).toContain(
-        "#!/bin/bash",
-      ),
+      expect(form.node.textContent).toContain("Validation passed."),
     );
+    expect(script.hidden).toBe(true);
+    form.dispose();
+  });
+
+  it("shows the script when validation fails", async () => {
+    const { form, deliver } = formHarness();
+    choose(form, "alpha");
+    await deliver(0, discovery("alpha"));
+    (form as any)._api.validateRuntime = async () => ({
+      runtimeId: "rt-012345abcdef",
+      status: "FAILED",
+      script: "#!/bin/bash\n#SBATCH --partition=missing\n",
+      message: "Slurm rejected the script.",
+      stderr: "sbatch: error: invalid partition specified: missing",
+    });
+    const workspace = input(form, "rootFolder");
+    workspace.value = "$HOME";
+    workspace.dispatchEvent(new Event("input"));
+    submitConfiguration(form);
+    await vi.waitFor(() =>
+      expect(form.node.textContent).toContain("Validation failed."),
+    );
+    const script = form.node.querySelector<HTMLElement>(".csSlurmScript")!;
+    expect(script.hidden).toBe(false);
+    expect(script.textContent).toContain("--partition=missing");
     form.dispose();
   });
 
