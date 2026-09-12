@@ -21,3 +21,4 @@ dist/
 # Local agent runtime
 .pi/
 .pi-subagents/
+CLAUDE.md
