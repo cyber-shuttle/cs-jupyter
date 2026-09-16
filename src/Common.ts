@@ -141,8 +141,15 @@ export interface ISshHost {
   user?: string;
   port?: number;
   identityFile?: string;
+  key?: string;
   extraDirectives: string[];
   managed?: boolean;
+}
+
+export interface ISshKey {
+  name: string;
+  type: string;
+  fingerprint: string;
 }
 
 export interface ISshHostTest {

@@ -7,6 +7,9 @@ All notable changes to CyberShuttle Jupyter are recorded here. The format follow
 
 ### Added
 
+- Login keys in the SSH Hosts dialog: upload a private key file under a name, delete it, and pick it as a
+  host's login key when adding or editing the host. A host assigned a key signs in with it, and the dialog
+  lists the keys with their type and fingerprint.
 - Edit an SSH host entry: the paste form now serves both adding and correcting, and an edit opens prefilled with a
   command rebuilt from what is configured, so nothing has to be retyped. The alias is the entry being edited,
   so it is not offered for renaming.

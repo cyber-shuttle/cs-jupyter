@@ -738,11 +738,16 @@ describe("SSH CRUD and session-first creation", () => {
   });
 });
 
+const withKeys = <T extends object>(api: T) => ({
+  listSshKeys: vi.fn(async () => []),
+  ...api,
+});
+
 describe("SSH hosts modal chrome", () => {
   it("opens with its meaning and a rule, and carries no close of its own", async () => {
-    const hosts = new SshHosts({
-      listSshHosts: async () => [],
-    } as unknown as ControlClient);
+    const hosts = new SshHosts(
+      withKeys({ listSshHosts: async () => [] }) as unknown as ControlClient,
+    );
     const root = hosts.node.querySelector(".csRoot")!;
     expect(root.querySelector(".csDialogClose")).toBeNull();
     expect(
@@ -771,7 +776,7 @@ describe("SSH hosts modal chrome", () => {
       ]),
       testSshHost: vi.fn(async () => ({ ok: true, message: "Connected." })),
     };
-    const hosts = new SshHosts(api as unknown as ControlClient);
+    const hosts = new SshHosts(withKeys(api) as unknown as ControlClient);
     await hosts.refresh();
     const entries = [
       ...hosts.node.querySelectorAll<HTMLDetailsElement>(".csSshHostEntry"),
@@ -815,7 +820,7 @@ describe("SSH hosts modal chrome", () => {
       ]),
       removeSshHost: vi.fn(async () => undefined),
     };
-    const hosts = new SshHosts(api as unknown as ControlClient);
+    const hosts = new SshHosts(withKeys(api) as unknown as ControlClient);
     await hosts.refresh();
     const remove = (): HTMLButtonElement =>
       [...hosts.node.querySelectorAll<HTMLButtonElement>("button")].filter(
@@ -849,7 +854,7 @@ describe("SSH hosts modal chrome", () => {
         extraDirectives: [],
       })),
     };
-    const hosts = new SshHosts(api as unknown as ControlClient);
+    const hosts = new SshHosts(withKeys(api) as unknown as ControlClient);
     await hosts.refresh();
     const named = (label: string): HTMLButtonElement =>
       [...hosts.node.querySelectorAll<HTMLButtonElement>("button")].find(
@@ -872,6 +877,7 @@ describe("SSH hosts modal chrome", () => {
       expect(api.updateSshHost).toHaveBeenCalledWith(
         "delta",
         "ssh -p 22 me@login2.example.edu",
+        "",
       ),
     );
     hosts.dispose();
@@ -882,7 +888,7 @@ describe("SSH hosts modal chrome", () => {
       listSshHosts: vi.fn(async () => []),
       addSshHost: vi.fn(async () => ({ name: "delta", extraDirectives: [] })),
     };
-    const hosts = new SshHosts(api as unknown as ControlClient);
+    const hosts = new SshHosts(withKeys(api) as unknown as ControlClient);
     [...hosts.node.querySelectorAll<HTMLButtonElement>("button")]
       .find((item) => item.textContent === "Add SSH Host")!
       .click();
@@ -903,6 +909,7 @@ describe("SSH hosts modal chrome", () => {
       expect(api.addSshHost).toHaveBeenCalledWith(
         "delta",
         "ssh -p 2222 me@login.example.edu",
+        "",
       ),
     );
     hosts.dispose();
@@ -916,7 +923,7 @@ describe("SSH hosts modal chrome", () => {
       ]),
       testSshHost: vi.fn(() => test.promise),
     };
-    const hosts = new SshHosts(api as unknown as ControlClient);
+    const hosts = new SshHosts(withKeys(api) as unknown as ControlClient);
     await hosts.refresh();
     document.body.appendChild(hosts.node);
 
@@ -952,7 +959,7 @@ describe("SSH hosts modal chrome", () => {
         },
       ]),
     };
-    const hosts = new SshHosts(api as unknown as ControlClient);
+    const hosts = new SshHosts(withKeys(api) as unknown as ControlClient);
     await hosts.refresh();
     document.body.replaceChildren(hosts.node);
 
@@ -972,7 +979,7 @@ describe("SSH hosts modal chrome", () => {
 
   it("keeps focus on the Add SSH Host toggle through its own render", async () => {
     const api = { listSshHosts: vi.fn(async () => []) };
-    const hosts = new SshHosts(api as unknown as ControlClient);
+    const hosts = new SshHosts(withKeys(api) as unknown as ControlClient);
     await hosts.refresh();
     document.body.replaceChildren(hosts.node);
 
@@ -987,6 +994,126 @@ describe("SSH hosts modal chrome", () => {
     )!;
     expect(recreated.textContent).toBe("Cancel");
     expect(document.activeElement).toBe(recreated);
+    hosts.dispose();
+  });
+
+  it("assigns a stored key from the host form and shows it on the host", async () => {
+    const api = withKeys({
+      listSshHosts: vi.fn(async () => [
+        {
+          name: "delta",
+          hostname: "login.example.edu",
+          identityFile: "/state/hosts/x/keys/delta-key",
+          key: "delta-key",
+          extraDirectives: ["IdentitiesOnly yes", "ProxyJump bastion"],
+          managed: true,
+        },
+      ]),
+      listSshKeys: vi.fn(async () => [
+        { name: "delta-key", type: "ssh-ed25519", fingerprint: "SHA256:abc" },
+      ]),
+      updateSshHost: vi.fn(async () => ({
+        name: "delta",
+        extraDirectives: [],
+      })),
+    });
+    const hosts = new SshHosts(api as unknown as ControlClient);
+    await hosts.refresh();
+    expect(
+      [...hosts.node.querySelectorAll(".csSshArgRow")].map(
+        (row) => row.textContent,
+      ),
+    ).toEqual([
+      "HostNamelogin.example.edu",
+      "Login keydelta-key",
+      "ProxyJumpbastion",
+    ]);
+    expect(hosts.node.textContent).toContain("ssh-ed25519 SHA256:abc");
+    hosts.node
+      .querySelector<HTMLButtonElement>('[data-session-action="edit-delta"]')!
+      .click();
+    const command = hosts.node.querySelector<HTMLInputElement>(
+      'input[name="sshHostCommand"]',
+    )!;
+    expect(command.value).toBe("ssh -J bastion login.example.edu");
+    const key = hosts.node.querySelector<HTMLSelectElement>(
+      'select[name="sshHostKey"]',
+    )!;
+    expect(key.value).toBe("delta-key");
+    key.value = "";
+    key.dispatchEvent(new Event("change"));
+    hosts.node
+      .querySelector("form")!
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() =>
+      expect(api.updateSshHost).toHaveBeenCalledWith(
+        "delta",
+        "ssh -J bastion login.example.edu",
+        "",
+      ),
+    );
+    hosts.dispose();
+  });
+
+  it("uploads a private key file under a name and confirms before deleting one", async () => {
+    const api = withKeys({
+      listSshHosts: vi.fn(async () => []),
+      listSshKeys: vi.fn(async () => [
+        { name: "old", type: "ssh-rsa", fingerprint: "SHA256:old" },
+      ]),
+      addSshKey: vi.fn(async () => ({
+        name: "delta-key",
+        type: "ssh-ed25519",
+        fingerprint: "SHA256:new",
+      })),
+      removeSshKey: vi.fn(async () => undefined),
+    });
+    const hosts = new SshHosts(api as unknown as ControlClient);
+    await hosts.refresh();
+    hosts.node
+      .querySelector<HTMLButtonElement>(
+        '[data-session-action="upload-ssh-key-toggle"]',
+      )!
+      .click();
+    const name = hosts.node.querySelector<HTMLInputElement>(
+      'input[name="sshKeyName"]',
+    )!;
+    name.value = "delta-key";
+    name.dispatchEvent(new Event("input"));
+    const file = hosts.node.querySelector<HTMLInputElement>(
+      'input[name="sshKeyFile"]',
+    )!;
+    Object.defineProperty(file, "files", {
+      value: [
+        new File(["-----BEGIN OPENSSH PRIVATE KEY-----\n"], "id_ed25519"),
+      ],
+    });
+    file.dispatchEvent(new Event("change"));
+    file
+      .closest("form")!
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() =>
+      expect(api.addSshKey).toHaveBeenCalledWith(
+        "delta-key",
+        "-----BEGIN OPENSSH PRIVATE KEY-----\n",
+      ),
+    );
+
+    hosts.node
+      .querySelector<HTMLButtonElement>(
+        '[data-session-action="delete-key-old"]',
+      )!
+      .click();
+    expect(hosts.node.textContent).toContain("unassign it?");
+    expect(api.removeSshKey).not.toHaveBeenCalled();
+    hosts.node
+      .querySelector<HTMLButtonElement>(
+        '[data-session-action="confirm-delete-key-old"]',
+      )!
+      .click();
+    await vi.waitFor(() =>
+      expect(api.removeSshKey).toHaveBeenCalledWith("old"),
+    );
     hosts.dispose();
   });
 });

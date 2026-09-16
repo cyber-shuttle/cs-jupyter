@@ -102,6 +102,7 @@ export function controlFake<T extends object>(overrides = {} as T) {
     resumeSignIn: vi.fn(async () => undefined),
     listSessions: vi.fn(async () => sessionListFixture()),
     listSshHosts: vi.fn(async () => []),
+    listSshKeys: vi.fn(async () => []),
     ...overrides,
   };
 }

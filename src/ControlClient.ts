@@ -28,6 +28,7 @@ import {
   ISessionValidation,
   ISlurmInfo,
   ISshHost,
+  ISshKey,
   ISshHostTest,
   ITokenProvider,
   SESSION_ID,
@@ -157,24 +158,52 @@ export class ControlClient {
       .hosts;
   }
 
-  async addSshHost(name: string, command: string): Promise<ISshHost> {
+  async addSshHost(name: string, command: string, key = ""): Promise<ISshHost> {
     return validateHost(
       await this._request("ssh", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, command }),
+        body: JSON.stringify({ name, command, key }),
       }),
     );
   }
 
-  async updateSshHost(alias: string, command: string): Promise<ISshHost> {
+  async updateSshHost(
+    alias: string,
+    command: string,
+    key = "",
+  ): Promise<ISshHost> {
     return validateHost(
       await this._request(`ssh/${encodeURIComponent(alias)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command }),
+        body: JSON.stringify({ command, key }),
       }),
     );
+  }
+
+  async listSshKeys(): Promise<ISshKey[]> {
+    return expect(sshKeyListShape, "SSH key list")(await this._request("keys"))
+      .keys;
+  }
+
+  async addSshKey(name: string, privateKey: string): Promise<ISshKey> {
+    return expect(
+      sshKeyShape,
+      "SSH key",
+    )(
+      await this._request("keys", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, privateKey }),
+      }),
+    );
+  }
+
+  async removeSshKey(name: string): Promise<void> {
+    await this._request(`keys/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    });
   }
 
   async removeSshHost(alias: string): Promise<void> {
@@ -551,10 +580,21 @@ const hostShape = vObject<ISshHost>({
   user: vOptional(vString()),
   port: vOptional(vNumber),
   identityFile: vOptional(vString()),
+  key: vOptional(vString()),
   extraDirectives: vArray(vString()),
   managed: vOptional(vBoolean),
 });
 const validateHost = expect(hostShape, "SSH host");
+
+const sshKeyShape = vObject<ISshKey>({
+  name: vString(),
+  type: vString(),
+  fingerprint: vString(),
+});
+
+const sshKeyListShape = vObject<{ keys: ISshKey[] }>({
+  keys: vArray(sshKeyShape),
+});
 
 const sshHostTestShape = vObject<ISshHostTest>({
   host: vString(),
