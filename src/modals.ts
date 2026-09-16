@@ -1,7 +1,8 @@
 // The panel's dialogs: session detail, Add Session, SSH Hosts, SSH Keys and Run history.
 // Each is one view, closed by the dialog's own control, with the view's action
-// instead of a footer. The login dock lives outside the detail dialog because
-// closing that dialog would destroy it.
+// instead of a footer. The login dock sits at the top of the open dialog but
+// is never the dialog's child, since closing it would destroy the dock; it
+// parks on the body when the dialog goes.
 import { Dialog } from "@jupyterlab/apputils";
 import { Panel, Widget } from "@lumino/widgets";
 import {
@@ -17,6 +18,7 @@ import { SessionDetail } from "./SessionDetail";
 import { SshHosts } from "./SshHosts";
 import { SshKeys } from "./SshKeys";
 import { SshLoginDock } from "./ssh";
+import { mount } from "./dom";
 
 function openDialog(title: string, widget: Widget): Dialog<unknown> {
   widget.addClass("csWorkspaceDialog");
@@ -25,6 +27,7 @@ function openDialog(title: string, widget: Widget): Dialog<unknown> {
 
 export class SessionModals {
   private _detailDialogs = new Set<Dialog<unknown>>();
+  private _dialogBody: Panel | undefined;
   private _loginDock: SshLoginDock | undefined;
   private _createForm: () => CreateSessionForm = () =>
     new CreateSessionForm(this._api);
@@ -37,10 +40,8 @@ export class SessionModals {
   ) {}
 
   get loginDock(): SshLoginDock {
-    if (!this._loginDock) {
-      this._loginDock = this._loginDockWidget();
-      Widget.attach(this._loginDock, document.body);
-    }
+    this._loginDock ??= this._loginDockWidget();
+    mount(this._loginDock, this._dialogBody?.node ?? document.body);
     return this._loginDock;
   }
 
@@ -54,8 +55,18 @@ export class SessionModals {
     this._loginDock?.dispose();
   }
 
-  private async _launchTracked(dialog: Dialog<unknown>): Promise<void> {
+  private async _launchTracked(
+    dialog: Dialog<unknown>,
+    body: Panel,
+  ): Promise<void> {
     this._detailDialogs.add(dialog);
+    this._dialogBody = body;
+    dialog.disposed.connect(() => {
+      if (this._dialogBody === body) this._dialogBody = undefined;
+      if (this._loginDock?.node.parentElement === body.node) {
+        mount(this._loginDock, document.body);
+      }
+    });
     try {
       await dialog.launch().catch(() => undefined);
     } finally {
@@ -66,7 +77,7 @@ export class SessionModals {
   async openSession(sessionId: string): Promise<void> {
     const body = new Panel();
     body.addWidget(new SessionDetail(this._panel, sessionId));
-    await this._launchTracked(openDialog("CyberShuttle Session", body));
+    await this._launchTracked(openDialog("CyberShuttle Session", body), body);
   }
 
   async openCreate(hosts: readonly ISshHost[]): Promise<void> {
@@ -89,7 +100,7 @@ export class SessionModals {
       void this._createInDialog(intent, form, body, show);
     });
     show(form);
-    await this._launchTracked(dialog);
+    await this._launchTracked(dialog, body);
   }
 
   async openSshHosts(): Promise<void> {

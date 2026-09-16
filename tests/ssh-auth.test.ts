@@ -167,9 +167,9 @@ describe("SSH operation console protocol", () => {
   });
 });
 
-// .csSshAuth is SlurmDiscovery's in-form progress row; the login dock has its
-// own fixed-position class, .csSshLoginDock. Pinning .csSshAuth to position
-// fixed would float the in-form progress row and terminal over the shell.
+// .csSshAuth is SlurmDiscovery's in-form progress row; the login dock floats
+// only while parked on the body, not inside a dialog. Pinning .csSshAuth to
+// position fixed would float the in-form progress row over the shell.
 describe("SSH auth CSS", () => {
   const css = readFileSync(join(__dirname, "../style/base.css"), "utf8");
 
@@ -183,8 +183,9 @@ describe("SSH auth CSS", () => {
     return match[1];
   }
 
-  it("gives the login dock its own fixed-position class", () => {
-    expect(rule(".csSshLoginDock")).toContain("position: fixed");
+  it("floats the login dock only while it is parked on the body", () => {
+    expect(rule("body > .csSshLoginDock")).toContain("position: fixed");
+    expect(rule(".csSshLoginDock")).not.toContain("position: fixed");
   });
 
   it("keeps .csSshAuth inline, not fixed, for SlurmDiscovery's in-form area", () => {

@@ -1,7 +1,7 @@
 // Session actions that a host refuses pending an SSH login through the login
 // dock. Stop and Delete open their own confirmation by rejecting the detail
-// dialog first, including through its own close control. The dock survives
-// that rejection because it is attached to document.body, not to the dialog.
+// dialog first, including through its own close control. The dock sits inside
+// the open dialog without being its child, so it survives that rejection.
 import { describe, expect, it, vi } from "vitest";
 import { ControlError } from "../src/ControlClient";
 import { SshLoginDock } from "../src/ssh";
@@ -194,7 +194,9 @@ describe("a session action a host refuses for a login", () => {
     const running = panel.actions.runAgain(base.id);
     await awaitingLogin(operation);
     const dock = panel.modals.loginDock;
-    expect(document.body.contains(dock.node)).toBe(true);
+    expect(document.querySelector(".jp-Dialog")!.contains(dock.node)).toBe(
+      true,
+    );
 
     for (const dialog of (panel as any)._modals._detailDialogs) {
       dialog.reject();
@@ -203,7 +205,7 @@ describe("a session action a host refuses for a login", () => {
       expect(document.querySelector(".jp-Dialog")).toBeNull(),
     );
     expect(dock.isDisposed).toBe(false);
-    expect(document.body.contains(dock.node)).toBe(true);
+    expect(dock.node.parentElement).toBe(document.body);
 
     operation.starts[0].callbacks.ready?.();
     await running;

@@ -5,6 +5,8 @@
 // running, so the full limit shows until then, and the formatted figure
 // switches from hours and minutes to minutes and seconds at the one-hour
 // mark.
+import { MessageLoop } from "@lumino/messaging";
+import { Widget } from "@lumino/widgets";
 import type { ILogLine, ISession } from "./Common";
 
 export const LOW_TIME_MS = 10 * 60_000;
@@ -81,6 +83,22 @@ export function field(label: string, control: HTMLElement): HTMLElement {
   const value = element("label", "", "csField");
   value.append(element("span", label, "csLabel"), control);
   return value;
+}
+
+export function detach(widget: Widget): void {
+  if (widget.node.isConnected) {
+    Widget.detach(widget);
+    return;
+  }
+  MessageLoop.sendMessage(widget, Widget.Msg.BeforeDetach);
+  widget.node.remove();
+  MessageLoop.sendMessage(widget, Widget.Msg.AfterDetach);
+}
+
+export function mount(widget: Widget, host: HTMLElement): void {
+  if (widget.node.parentElement === host) return;
+  if (widget.isAttached) detach(widget);
+  Widget.attach(widget, host, host.firstElementChild as HTMLElement);
 }
 
 export function formFooter(

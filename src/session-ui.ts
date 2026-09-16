@@ -5,7 +5,6 @@
 import type { JupyterFrontEndPlugin } from "@jupyterlab/application";
 import { ICommandPalette } from "@jupyterlab/apputils";
 import type { ReactWidget } from "@jupyterlab/ui-components";
-import { MessageLoop } from "@lumino/messaging";
 import { BoxPanel, Widget } from "@lumino/widgets";
 import { ControlClient } from "./ControlClient.js";
 import { CyberShuttlePanel } from "./CyberShuttlePanel.js";
@@ -13,6 +12,7 @@ import {
   SessionController,
   installSessionCommandGuard,
 } from "./SessionController.js";
+import { detach, mount } from "./dom.js";
 import { getActiveSessionId, sessionLiteUrl } from "./session.js";
 
 const SELECT_SESSION_COMMAND = "@cybershuttle/jupyter:select-session";
@@ -34,23 +34,12 @@ export const sessionUiPlugin: JupyterFrontEndPlugin<void> = {
       (widget as MainWidget | null)?.content?.hasClass("jp-Launcher")
         ? (widget as MainWidget)
         : undefined;
-    const detach = (widget: Widget): void => {
-      if (widget.node.isConnected) {
-        Widget.detach(widget);
-        return;
-      }
-      MessageLoop.sendMessage(widget, Widget.Msg.BeforeDetach);
-      widget.node.remove();
-      MessageLoop.sendMessage(widget, Widget.Msg.AfterDetach);
-    };
     const mountSection = async (launcher: MainWidget): Promise<void> => {
       await (launcher.content as ReactWidget).renderPromise;
       const content = launcher.content.node.querySelector<HTMLElement>(
         ".jp-Launcher-content",
       );
-      if (!panel || !content || panel.node.parentElement === content) return;
-      if (panel.isAttached) detach(panel);
-      Widget.attach(panel, content, content.firstElementChild as HTMLElement);
+      if (panel && content) mount(panel, content);
     };
 
     const releaseFrom = (launcher: MainWidget): void => {
