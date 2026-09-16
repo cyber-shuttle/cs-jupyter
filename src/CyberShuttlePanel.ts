@@ -11,6 +11,7 @@ import {
   ISession,
   ISshHost,
   isTerminal,
+  type SignInProvider,
 } from "./Common";
 import { AuthInteractionRequiredError } from "./AuthClient";
 import { ControlClient, ISessionLogTail, UNCHANGED } from "./ControlClient";
@@ -30,7 +31,7 @@ import { button, element } from "./dom";
 const SESSION_POLL_INTERVAL_MS = 1000;
 
 export class CyberShuttleHeader extends RebuildingWidget {
-  readonly signInRequested = new Signal<this, void>(this);
+  readonly signInRequested = new Signal<this, SignInProvider>(this);
   readonly signOutRequested = new Signal<this, void>(this);
   readonly sshKeysRequested = new Signal<this, void>(this);
 
@@ -66,24 +67,24 @@ export class CyberShuttleHeader extends RebuildingWidget {
 
   private _identityControl(): HTMLElement {
     const holder = element("div", "", "csIdentity");
-    if (!this._state.signedIn) {
-      const signIn = button("", "csTextButton csIdentityButton csSignInButton");
-      signIn.append(
-        userGlyph(),
-        element("span", this._state.signingIn ? "Signing in…" : "Sign in"),
-      );
-      signIn.dataset.sessionAction = "sign-in";
-      signIn.disabled = this._state.signingIn;
-      signIn.onclick = () => this.signInRequested.emit(undefined);
-      holder.appendChild(signIn);
-      return holder;
-    }
-    const trigger = button("", "csTextButton csIdentityButton csAccountButton");
+    const { signedIn, signingIn, account } = this._state;
+    const trigger = button(
+      "",
+      `csTextButton csIdentityButton ${signedIn ? "csAccountButton" : "csSignInButton"}`,
+    );
     trigger.append(
       userGlyph(),
-      element("span", this._state.account ?? "Account"),
+      element(
+        "span",
+        signedIn
+          ? (account ?? "Account")
+          : signingIn
+            ? "Signing in…"
+            : "Sign in",
+      ),
     );
-    trigger.dataset.sessionAction = "account";
+    trigger.dataset.sessionAction = signedIn ? "account" : "sign-in";
+    trigger.disabled = signingIn;
     trigger.setAttribute("aria-haspopup", "menu");
     trigger.setAttribute("aria-expanded", String(this._accountMenuOpen));
     trigger.onclick = () => {
@@ -94,18 +95,26 @@ export class CyberShuttleHeader extends RebuildingWidget {
     if (this._accountMenuOpen) {
       const menu = element("div", "", "csAccountMenu", { role: "menu" });
       menu.append(
-        this._menuItem(
-          "SSH Keys",
-          "ssh-keys",
-          KEY_GLYPH,
-          this.sshKeysRequested,
-        ),
-        this._menuItem(
-          "Sign out",
-          "sign-out",
-          SIGN_OUT_GLYPH,
-          this.signOutRequested,
-        ),
+        ...(signedIn
+          ? [
+              this._menuItem("SSH Keys", "ssh-keys", KEY_GLYPH, () =>
+                this.sshKeysRequested.emit(undefined),
+              ),
+              this._menuItem("Sign out", "sign-out", SIGN_OUT_GLYPH, () =>
+                this.signOutRequested.emit(undefined),
+              ),
+            ]
+          : [
+              this._menuItem(
+                "Microsoft",
+                "sign-in-microsoft",
+                MICROSOFT_GLYPH,
+                () => this.signInRequested.emit("microsoft"),
+              ),
+              this._menuItem("GitHub", "sign-in-github", GITHUB_GLYPH, () =>
+                this.signInRequested.emit("github"),
+              ),
+            ]),
       );
       holder.appendChild(menu);
     }
@@ -116,7 +125,7 @@ export class CyberShuttleHeader extends RebuildingWidget {
     label: string,
     action: string,
     glyph: string,
-    signal: Signal<this, void>,
+    choose: () => void,
   ): HTMLButtonElement {
     const item = button("", "csAccountMenuItem");
     item.innerHTML = glyph;
@@ -125,11 +134,14 @@ export class CyberShuttleHeader extends RebuildingWidget {
     item.setAttribute("role", "menuitem");
     item.onclick = () => {
       this._accountMenuOpen = false;
-      signal.emit(undefined);
+      choose();
     };
     return item;
   }
 }
+
+const MICROSOFT_GLYPH = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><g fill="currentColor"><rect x="2.5" y="2.5" width="6.8" height="6.8" /><rect x="10.7" y="2.5" width="6.8" height="6.8" /><rect x="2.5" y="10.7" width="6.8" height="6.8" /><rect x="10.7" y="10.7" width="6.8" height="6.8" /></g></svg>`;
+const GITHUB_GLYPH = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z" /></svg>`;
 
 const KEY_GLYPH = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="10" r="3.6" /><path d="M10.6 10h7.2M15.2 10v2.6M17.8 10v2" /></g></svg>`;
 const SIGN_OUT_GLYPH = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.5H4.5v13H8M12.5 6.5 16 10l-3.5 3.5M16 10H7.5" /></g></svg>`;
@@ -171,12 +183,12 @@ class SignInController {
     return this._signedIn ? this._api.account : undefined;
   }
 
-  signIn(): Promise<void> {
+  signIn(provider?: SignInProvider): Promise<void> {
     if (!this._signInPromise) {
       this._signingIn = true;
       this._hooks.onError("");
       this._hooks.emitState();
-      this._signInPromise = this._signIn().finally(() => {
+      this._signInPromise = this._signIn(provider).finally(() => {
         this._signingIn = false;
         this._signInPromise = undefined;
         if (!this._hooks.isDisposed()) this._hooks.emitState();
@@ -185,9 +197,9 @@ class SignInController {
     return this._signInPromise;
   }
 
-  private async _signIn(): Promise<void> {
+  private async _signIn(provider?: SignInProvider): Promise<void> {
     try {
-      await this._api.signIn();
+      await this._api.signIn(provider);
       if (this._hooks.isDisposed()) return;
       await this._activate();
     } catch (error) {
@@ -288,7 +300,9 @@ export class CyberShuttlePanel extends StackedPanel {
     this._list.runHistoryRequested.connect(
       () => void this._modals.openRunHistory(),
     );
-    this.header.signInRequested.connect(() => void this.signIn());
+    this.header.signInRequested.connect(
+      (_sender, provider) => void this.signIn(provider),
+    );
     this.header.signOutRequested.connect(() => this.signOut());
     this.header.sshKeysRequested.connect(() => void this._modals.openSshKeys());
     this._emitState();
@@ -462,8 +476,8 @@ export class CyberShuttlePanel extends StackedPanel {
     } catch {}
   }
 
-  signIn(): Promise<void> {
-    return this._auth.signIn();
+  signIn(provider?: SignInProvider): Promise<void> {
+    return this._auth.signIn(provider);
   }
 
   signOut(): void {

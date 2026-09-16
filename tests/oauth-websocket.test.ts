@@ -66,8 +66,13 @@ describe("OAuth WebSocket factory", () => {
   it("acquires fresh credentials and sends only the three exact subprotocols", async () => {
     const acquireToken = vi
       .fn()
-      .mockResolvedValueOnce({ accessToken: "token-✓", idToken: "first-id" })
       .mockResolvedValueOnce({
+        scheme: "Bearer",
+        accessToken: "token-✓",
+        idToken: "first-id",
+      })
+      .mockResolvedValueOnce({
+        scheme: "Bearer",
         accessToken: "second-token",
         idToken: "second-id",
       });
@@ -121,6 +126,7 @@ describe("OAuth WebSocket factory", () => {
       const factory = new OAuthWebSocketFactory(
         {
           acquireToken: vi.fn(async () => ({
+            scheme: "Bearer" as const,
             accessToken: "valid-access",
             idToken: "identity-token",
             [field]: token,
@@ -150,5 +156,23 @@ describe("OAuth WebSocket factory", () => {
       factory.open("wss://hostile.example/api/v1/ssh/delta/auth"),
     ).rejects.toThrow("outside the configured control origin");
     expect(acquireToken).not.toHaveBeenCalled();
+  });
+
+  it("sends a GitHub token as the single github subprotocol", async () => {
+    const factory = new OAuthWebSocketFactory(
+      {
+        acquireToken: vi.fn(async () => ({
+          scheme: "github" as const,
+          accessToken: "gho_token",
+        })),
+      },
+      "https://control.example.edu",
+      Socket,
+    );
+    await factory.open("wss://control.example.edu/api/v1/ssh/delta/auth");
+    expect(sockets.at(-1)?.protocols).toEqual([
+      "cybershuttle.v1",
+      "github.Z2hvX3Rva2Vu",
+    ]);
   });
 });

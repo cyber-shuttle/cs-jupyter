@@ -48,6 +48,7 @@ import {
   vString,
   validControlApiUrl,
   validSessionId,
+  type SignInProvider,
 } from "./Common";
 
 const SESSION_LOG_CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
@@ -65,7 +66,7 @@ export interface ISessionList {
 }
 
 export interface IControlAuth extends ITokenProvider {
-  interactiveLogin(): Promise<OAuthCredentials>;
+  interactiveLogin(provider?: SignInProvider): Promise<OAuthCredentials>;
   readonly account?: string | undefined;
 }
 
@@ -98,8 +99,13 @@ export function safeControlFetch(
       init.headers ?? (input instanceof Request ? input.headers : undefined),
     );
     const credentials = await auth.acquireToken();
-    headers.set("Authorization", `Bearer ${credentials.accessToken}`);
-    headers.set("X-CyberShuttle-Identity", credentials.idToken);
+    headers.set(
+      "Authorization",
+      `${credentials.scheme} ${credentials.accessToken}`,
+    );
+    if (credentials.idToken) {
+      headers.set("X-CyberShuttle-Identity", credentials.idToken);
+    }
     const response = await fetch(input, {
       ...init,
       headers,
@@ -134,9 +140,9 @@ export class ControlClient {
       webSockets ?? new OAuthWebSocketFactory(auth, new URL(this._base).origin);
   }
 
-  async signIn(): Promise<void> {
+  async signIn(provider?: SignInProvider): Promise<void> {
     this._sessionsTag = undefined;
-    await this._auth.interactiveLogin();
+    await this._auth.interactiveLogin(provider);
   }
 
   async resumeSignIn(): Promise<void> {

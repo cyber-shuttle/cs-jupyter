@@ -1,10 +1,11 @@
-// The accessible modal that shows a Microsoft device code for sign-in. It has
+// The accessible modal that shows a sign-in device code. It has
 // the verification link, the one-time code with a copy button, and a status
 // line. The overlay attaches to document.body directly so a themed ancestor
 // cannot clip it.
 import { button, copyText, element } from "./dom";
 
 interface IDeviceAuthorization {
+  label: string;
   userCode: string;
   verificationUri: string;
 }
@@ -19,12 +20,12 @@ export function showDeviceCodeDialog(
   const activeElement = document.activeElement;
   const overlay = element("dialog", "", "csDeviceCodeOverlay");
   const dialog = element("section", "", "csDeviceCodeDialog");
-  const title = element("h2", "Sign in to Microsoft");
+  const title = element("h2", `Sign in to ${authorization.label}`);
   title.id = `cs-device-code-title-${crypto.randomUUID()}`;
   overlay.setAttribute("aria-labelledby", title.id);
   const instructions = element(
     "p",
-    "Open the Microsoft sign-in page and enter this one-time code:",
+    `Open the ${authorization.label} sign-in page and enter this one-time code:`,
   );
   instructions.id = `cs-device-code-instructions-${crypto.randomUUID()}`;
   overlay.setAttribute("aria-describedby", instructions.id);

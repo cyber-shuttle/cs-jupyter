@@ -149,7 +149,11 @@ export function sessionListFixture(
 }
 
 export function fakeAuth(accessToken = "delegated-token") {
-  const credentials = async () => ({ accessToken, idToken: "identity-token" });
+  const credentials = async () => ({
+    scheme: "Bearer" as const,
+    accessToken,
+    idToken: "identity-token",
+  });
   return {
     acquireToken: vi.fn(credentials),
     interactiveLogin: vi.fn(credentials),

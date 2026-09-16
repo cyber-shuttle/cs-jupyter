@@ -7,6 +7,10 @@ All notable changes to CyberShuttle Jupyter are recorded here. The format follow
 
 ### Added
 
+- GitHub sign-in. Sign in opens a menu of Microsoft and GitHub, each with an icon. A GitHub sign-in runs
+  GitHub's device flow through cs-control, sends its one token under the `github` scheme, and names the
+  account by the GitHub login.
+
 - Login keys: SSH Keys, under the account menu, uploads a private key file under a name, lists the stored
   keys with type and fingerprint, and deletes one. The SSH Hosts form picks a stored key as a host's login
   key when adding or editing the host, and a host assigned a key signs in with it. The account menu items
