@@ -83,6 +83,52 @@ export function field(label: string, control: HTMLElement): HTMLElement {
   return value;
 }
 
+export function formFooter(
+  error: string,
+  label: string,
+  busy: boolean,
+): [HTMLElement, HTMLElement] {
+  const note = element("div", error, "csError");
+  note.hidden = !error;
+  const footer = element("div", "", "csFormFooter");
+  const save = button(label, "csPrimaryButton");
+  save.type = "submit";
+  save.disabled = busy;
+  footer.appendChild(save);
+  return [note, footer];
+}
+
+export function addSection(
+  label: string,
+  action: string,
+  form: HTMLElement | undefined,
+  toggle: () => void,
+): HTMLElement {
+  const section = element("div", "", "csSshAdd");
+  const control = button(
+    form ? "Cancel" : label,
+    "csSecondaryButton csSshAddToggle",
+    toggle,
+  );
+  control.dataset.sessionAction = action;
+  section.appendChild(control);
+  if (form) section.appendChild(form);
+  return section;
+}
+
+export function confirmDelete(
+  message: string,
+  action: string,
+  cancel: () => void,
+  remove: () => void,
+): HTMLElement[] {
+  const keep = button("Cancel", "csSecondaryButton", cancel);
+  keep.dataset.sessionAction = `confirm-cancel-${action}`;
+  const drop = button("Delete", "csDangerButton", remove);
+  drop.dataset.sessionAction = `confirm-delete-${action}`;
+  return [element("span", message, "csMeta"), keep, drop];
+}
+
 export function select(
   name: string,
   options: Array<[string, string]>,

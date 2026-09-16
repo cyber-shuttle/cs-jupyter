@@ -12,6 +12,7 @@ import {
 } from "../src/ControlClient";
 import { CreateSessionForm } from "../src/CreateSessionForm";
 import { SshHosts } from "../src/SshHosts";
+import { SshKeys } from "../src/SshKeys";
 import { FakeOperation } from "./fakes";
 
 const hosts = ["alpha", "beta"].map((name) => ({
@@ -1028,7 +1029,6 @@ describe("SSH hosts modal chrome", () => {
       "Login keydelta-key",
       "ProxyJumpbastion",
     ]);
-    expect(hosts.node.textContent).toContain("ssh-ed25519 SHA256:abc");
     hosts.node
       .querySelector<HTMLButtonElement>('[data-session-action="edit-delta"]')!
       .click();
@@ -1054,10 +1054,11 @@ describe("SSH hosts modal chrome", () => {
     );
     hosts.dispose();
   });
+});
 
+describe("SSH keys modal", () => {
   it("uploads a private key file under a name and confirms before deleting one", async () => {
     const api = withKeys({
-      listSshHosts: vi.fn(async () => []),
       listSshKeys: vi.fn(async () => [
         { name: "old", type: "ssh-rsa", fingerprint: "SHA256:old" },
       ]),
@@ -1068,7 +1069,7 @@ describe("SSH hosts modal chrome", () => {
       })),
       removeSshKey: vi.fn(async () => undefined),
     });
-    const hosts = new SshHosts(api as unknown as ControlClient);
+    const hosts = new SshKeys(api as unknown as ControlClient);
     await hosts.refresh();
     hosts.node
       .querySelector<HTMLButtonElement>(
