@@ -7,3 +7,6 @@ pre-commit:
     - name: format
       glob: "*.{ts,tsx,mts,js,mjs,cjs,json,md,css,yml,yaml}"
       run: bunx prettier --check {staged_files}
+    - name: test
+      glob: "*.{ts,tsx,mts,mjs,json,css}"
+      run: bun run test

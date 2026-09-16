@@ -1,11 +1,31 @@
-// The two identifier formats cs-control issues. Written once here for the same
-// reason as the state list below: a change to either must not half-land.
-export const RUNTIME_ID = /^rt-[a-f0-9]{12}$/;
+// Types, identifier and URL validation, and small response and object helpers
+// shared across the extension. Nothing here depends on the DOM or on cs-control,
+// so other modules can import freely. Optional fields mean not observed or not
+// yet, never a stand-in for false or zero.
+
+export interface OAuthCredentials {
+  accessToken: string;
+  idToken: string;
+}
+
+export const SESSION_ID = /^s-[a-f0-9]{12}$/;
 export const GENERATION = /^g-[a-f0-9]{16}$/;
 
-// Types are derived from these values so validation and the type system cannot
-// disagree about what cs-control is allowed to report.
-export const RUNTIME_STATES = [
+export function validSessionId(value: string): string {
+  if (!SESSION_ID.test(value)) {
+    throw new Error("Invalid session id.");
+  }
+  return value;
+}
+
+export interface ITokenProvider {
+  acquireToken(): Promise<OAuthCredentials>;
+  invalidateToken?(): void;
+}
+
+export const TOKEN_43 = /^[A-Za-z0-9_-]{43}$/;
+
+export const SESSION_STATES = [
   "SUBMITTING",
   "QUEUED",
   "STARTING",
@@ -14,16 +34,16 @@ export const RUNTIME_STATES = [
   "STOPPED",
   "FAILED",
 ] as const;
-export type RuntimeState = (typeof RUNTIME_STATES)[number];
+export type SessionState = (typeof SESSION_STATES)[number];
 
 export const VALIDATION_STATUSES = ["PASSED", "FAILED"] as const;
-export type RuntimeValidationStatus = (typeof VALIDATION_STATUSES)[number];
+export type SessionValidationStatus = (typeof VALIDATION_STATUSES)[number];
 
-export function isTerminal(state: RuntimeState): boolean {
+export function isTerminal(state: SessionState): boolean {
   return state === "STOPPED" || state === "FAILED";
 }
 
-export interface IResources {
+interface IResources {
   cores: number;
   memoryMb: number;
   wallMinutes: number;
@@ -31,7 +51,7 @@ export interface IResources {
   gpuCount?: number;
 }
 
-export interface IAllocation {
+interface IJobSpec {
   sshHost: string;
   account?: string;
   partition: string;
@@ -39,30 +59,30 @@ export interface IAllocation {
   resources: IResources;
 }
 
-export interface IRuntimeCreateRequest extends IAllocation {
+export interface ISessionCreateRequest extends IJobSpec {
   idempotencyKey: string;
 }
 
-export interface IRuntimeValidation {
-  status: RuntimeValidationStatus;
+export interface ISessionValidation {
+  sessionId: string;
+  status: SessionValidationStatus;
   script: string;
   message: string;
+  stdout?: string;
   stderr?: string;
 }
 
-export interface IRuntime extends IAllocation {
+export interface ISession extends IJobSpec {
   id: string;
   generation: string;
-  state: RuntimeState;
+  state: SessionState;
   error?: string;
   createdAt: string;
-  // When Slurm was first seen running the allocation. Absent until it starts,
-  // so a queue wait is never mistaken for a countdown.
   startedAt?: string;
   updatedAt: string;
 }
 
-export const RUNTIME_KEYS = [
+export const SESSION_KEYS = [
   "id",
   "generation",
   "state",
@@ -75,65 +95,56 @@ export const RUNTIME_KEYS = [
   "createdAt",
   "startedAt",
   "updatedAt",
-] as const satisfies readonly (keyof IRuntime)[];
+] as const satisfies readonly (keyof ISession)[];
 
-export const runtimeKeysCoverIRuntime: [
-  Exclude<keyof IRuntime, (typeof RUNTIME_KEYS)[number]>,
+const sessionKeysCoverISession: [
+  Exclude<keyof ISession, (typeof SESSION_KEYS)[number]>,
 ] extends [never]
   ? true
   : false = true;
+void sessionKeysCoverISession;
 
-// One reading of what an allocation is actually using. Every figure is optional:
-// a host with no GPUs reports none, and a cgroup file that cannot be read is
-// absent rather than zero, which for a cumulative counter is a different claim.
 export interface IMetricSample {
   at: string;
   memBytes?: number;
   cpuUsageUsec?: number;
-  gpus?: IGpuSample[];
+  gpus?: IGpuUtilisation[];
 }
 
-export interface IGpuSample {
-  index: number;
+interface IGpuUtilisation {
   utilPct: number;
-  memUsedMiB: number;
-  memTotalMiB: number;
 }
 
-export interface IRuntimeSeries {
-  runtimeId: string;
+export interface ISessionSeries {
+  sessionId: string;
   samples: IMetricSample[];
 }
 
-// What Slurm's accounting says a finished allocation used. Absent until the
-// flush lands, so every figure is optional.
 export interface IRunStats {
-  cores?: number;
   requestedMemory?: string;
   elapsedSeconds?: number;
   maxRss?: string;
   cpuEfficiencyPct?: number;
   memoryEfficiencyPct?: number;
+  cores?: number;
 }
 
-// What one finished allocation did. A run is named by the generation that ran
-// it, so a card accumulates runs rather than overwriting them.
-export interface IRun extends IAllocation {
-  runtimeId: string;
+export interface IRun extends IJobSpec {
+  sessionId: string;
   generation: string;
-  finalState: string;
+  finalState: SessionState;
   error?: string;
   startedAt?: string;
   endedAt: string;
   stats?: IRunStats;
   samples?: IMetricSample[];
-  // What the allocation said while it ran. The live tail is dropped when a run
-  // ends, so this is the only place it survives.
-  logs?: IRunLogLine[];
+  logs?: ILogLine[];
 }
 
-export interface IRunLogLine {
-  stream: "status" | "stdout" | "stderr";
+export type LogStream = "status" | "stdout" | "stderr";
+
+export interface ILogLine {
+  stream: LogStream;
   text: string;
   at: string;
 }
@@ -145,17 +156,16 @@ export interface ISshHost {
   port?: number;
   identityFile?: string;
   extraDirectives: string[];
-  // Only entries CyberShuttle wrote can be removed from here; the rest are the
-  // user's own configuration.
   managed?: boolean;
 }
 
 export interface ISshHostTest {
+  host: string;
   ok: boolean;
   message: string;
 }
 
-export interface IGres {
+interface IGres {
   name: string;
   count: number;
 }
@@ -171,7 +181,7 @@ export interface ISlurmInfo {
   host: string;
   accounts: string[];
   partitions: IPartition[];
-  homeDir: string;
+  homeDir?: string;
 }
 
 export function isPlainObject(value: unknown): value is Record<string, any> {
@@ -193,7 +203,6 @@ export const requestUrl = (input: RequestInfo | URL): string =>
       ? input.toString()
       : input.url;
 
-// One rule for both the control API URL and the WebSocket URL.
 export function assertSecureOrLoopback(
   url: URL,
   secure: string,
@@ -212,18 +221,38 @@ export function assertSecureOrLoopback(
   }
 }
 
-// Two questions a response is asked: is this exactly these keys, and does it
-// carry anything outside this list. The second permits an absent optional field,
-// so they are not interchangeable.
+export function validControlApiUrl(configured: string): string {
+  const url = parseUrl(
+    configured,
+    "cybershuttleControlApiUrl must be an absolute control API URL.",
+  );
+  assertSecureOrLoopback(
+    url,
+    "https:",
+    "http:",
+    "cybershuttleControlApiUrl is invalid; it must use HTTPS or loopback HTTP without credentials, query, or fragment.",
+  );
+  url.pathname = url.pathname.replace(/\/+$/, "");
+  return url.toString().replace(/\/$/, "");
+}
+
+export function jsonResponse(
+  value: unknown,
+  init: { status?: number; statusText?: string } = {},
+): Response {
+  return new Response(JSON.stringify(value), {
+    status: init.status ?? 200,
+    statusText: init.statusText,
+    headers: { "content-type": "application/json" },
+  });
+}
+
 export function exactKeys(
   value: unknown,
   expected: string[],
 ): value is Record<string, any> {
-  if (!isPlainObject(value)) return false;
-  const actual = Object.keys(value).sort();
   return (
-    actual.length === expected.length &&
-    [...expected].sort().every((key, index) => key === actual[index])
+    onlyKeys(value, expected) && Object.keys(value).length === expected.length
   );
 }
 
@@ -235,4 +264,8 @@ export function onlyKeys(
     isPlainObject(value) &&
     Object.keys(value).every((key) => allowed.includes(key))
   );
+}
+
+export function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

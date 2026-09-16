@@ -1,3 +1,6 @@
+// Vitest global setup: configures JupyterLab's PageConfig and patches jsdom APIs
+// the test environment lacks. jsdom 26 declares HTMLDialogElement but implements
+// neither showModal nor close, so both are stubbed here.
 import { PageConfig } from "@jupyterlab/coreutils";
 
 PageConfig.setOption(
@@ -39,7 +42,6 @@ Object.defineProperty(globalThis, "DragEvent", {
   configurable: true,
 });
 
-// jsdom 26 declares HTMLDialogElement but implements neither modal method.
 HTMLDialogElement.prototype.showModal = function () {
   this.open = true;
 };

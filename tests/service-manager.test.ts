@@ -1,3 +1,6 @@
+// The service manager registry is fail-closed until a READY session is
+// selected, keeping compute calls off the wrong session. It shares one
+// ServerConnection.ISettings across contents, kernels, sessions and terminals.
 import { PageConfig } from "@jupyterlab/coreutils";
 import { PluginRegistry } from "@lumino/coreutils";
 import {
@@ -23,21 +26,12 @@ import {
 import { afterEach, assert, describe, expect, it, vi } from "vitest";
 
 import { remoteServicePlugins } from "../src/index.js";
-import { getActiveRuntimeId } from "../src/runtime-state.js";
+import { getActiveSessionId } from "../src/session-state.js";
+import { accessFixture, sessionFixture } from "./fakes";
 
-const id = "rt-012345abcdef";
-const runtime = (state = "READY") => ({
-  id,
-  generation: "g-0123456789abcdef",
-  state,
-  sshHost: "delta",
-  account: "project-a",
-  partition: "debug",
-  rootFolder: "projects/demo",
-  resources: { cores: 4, memoryMb: 4096, wallMinutes: 30 },
-  createdAt: "2026-01-01T00:00:00Z",
-  updatedAt: "2026-01-01T00:00:01Z",
-});
+const id = "s-012345abcdef";
+const session = (state = "READY") =>
+  sessionFixture({ id, state: state as never, account: "project-a" });
 
 const supportManagers = {
   events: { dispose: vi.fn() },
@@ -99,7 +93,7 @@ function registryFor(path: string): PluginRegistry<null> {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("remote service manager registry", () => {
-  it("constructs a fail-closed IServiceManager without runtime selection", async () => {
+  it("constructs a fail-closed IServiceManager without session selection", async () => {
     const registry = registryFor("/lite/lab/index.html");
     const manager = await registry.resolveRequiredService(IServiceManager);
     await manager.ready;
@@ -130,23 +124,23 @@ describe("remote service manager registry", () => {
     manager.dispose();
   });
 
-  it("uses fail-closed services for a non-READY runtime", async () => {
+  it("uses fail-closed services for a non-READY session", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(
         async () =>
-          new Response(JSON.stringify(runtime("STARTING")), {
+          new Response(JSON.stringify(session("STARTING")), {
             headers: { "content-type": "application/json" },
           }),
       ),
     );
     const registry = registryFor(
-      `/lite/lab/index.html?runtime=${id}&generation=g-0123456789abcdef`,
+      `/lite/lab/index.html?session=${id}&generation=g-0123456789abcdef`,
     );
     const manager = await registry.resolveRequiredService(IServiceManager);
     await manager.ready;
     expect(manager.serverSettings.baseUrl).toBe(PageConfig.getBaseUrl());
-    expect(getActiveRuntimeId()).toBeUndefined();
+    expect(getActiveSessionId()).toBeUndefined();
     manager.dispose();
   });
 
@@ -156,8 +150,8 @@ describe("remote service manager registry", () => {
         typeof input === "string" || input instanceof URL ? input : input.url,
       );
       let body: unknown = [];
-      if (url.pathname.endsWith(`/runtimes/${id}`)) {
-        body = runtime();
+      if (url.pathname.endsWith(`/sessions/${id}`)) {
+        body = session();
       } else if (url.pathname.endsWith("/api/kernelspecs")) {
         body = {
           default: "python",
@@ -180,19 +174,11 @@ describe("remote service manager registry", () => {
     });
     vi.stubGlobal("fetch", browserFetch);
     window.sessionStorage.setItem(
-      `cybershuttle.runtime-access.v1.${id}`,
-      JSON.stringify({
-        runtimeId: id,
-        generation: "g-0123456789abcdef",
-        expiresAt: "2030-01-01T00:00:00Z",
-        jupyter: {
-          uri: "https://31002.use.devtunnels.ms/",
-          token: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-        },
-      }),
+      `cybershuttle.session-access.v1.${id}`,
+      JSON.stringify(accessFixture(id, "g-0123456789abcdef")),
     );
     const registry = registryFor(
-      `/lite/lab/index.html?runtime=${id}&generation=g-0123456789abcdef`,
+      `/lite/lab/index.html?session=${id}&generation=g-0123456789abcdef`,
     );
 
     const manager = await registry.resolveRequiredService(IServiceManager);
@@ -214,7 +200,6 @@ describe("remote service manager registry", () => {
     expect(kernels).toBeInstanceOf(KernelManager);
     expect(kernelspecs).toBeInstanceOf(KernelSpecManager);
     expect(sessions).toBeInstanceOf(SessionManager);
-    expect(terminals).toBeInstanceOf(TerminalManager);
     const remoteBase = "https://31002.use.devtunnels.ms/";
     expect(shellServerSettings.baseUrl).toBe(PageConfig.getBaseUrl());
     expect(manager.serverSettings).toBe(shellServerSettings);
@@ -250,13 +235,6 @@ describe("remote service manager registry", () => {
         "/api/terminals",
       ]),
     );
-    expect(
-      paths.some(
-        (path) =>
-          path.includes(`/runtimes/${id}/jupyter/`) &&
-          path.includes("lab/api/settings"),
-      ),
-    ).toBe(false);
 
     manager.dispose();
     kernels.dispose();

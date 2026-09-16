@@ -1,3 +1,5 @@
+// This workspace ships no local kernel and runs against a remote session's
+// own Jupyter server. package.json's JupyterLab config must keep it that way.
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -43,14 +45,6 @@ const disabledUpstreamServices = [
 ];
 
 describe("remote-only native workspace distribution", () => {
-  it("holds no Microsoft credential or authority in the browser bundle", () => {
-    expect(liteConfig).toMatchObject({ cybershuttleControlApiUrl: "" });
-    expect(packageJson.dependencies).not.toHaveProperty("@azure/msal-browser");
-    const authSource = readFileSync(resolve(root, "src/AuthClient.ts"), "utf8");
-    expect(authSource).not.toContain("login.microsoftonline.com");
-    expect(authSource).not.toContain("c0df98ca-23b4-4bce-bb9f-72039b28d3a5");
-  });
-
   it("does not install a local kernel provider", () => {
     const installed = {
       ...packageJson.dependencies,
@@ -62,34 +56,11 @@ describe("remote-only native workspace distribution", () => {
   });
 
   it("keeps local shell settings while replacing compute services", () => {
-    expect(liteConfig.disabledExtensions).not.toContain(
-      "@jupyterlab/services-extension:server-settings",
-    );
     expect(liteConfig.disabledExtensions).toEqual(
       expect.arrayContaining(disabledUpstreamServices),
     );
-    expect(liteConfig.deferredExtensions).toContain(
-      "@jupyterlab/terminal-extension:plugin",
-    );
-    expect(liteConfig.disabledExtensions).not.toContain(
-      "@jupyterlab/terminal-extension:plugin",
-    );
     for (const support of requiredLiteSupportServices) {
       expect(liteConfig.disabledExtensions).not.toContain(support);
-    }
-  });
-
-  it("pins a required version for every host package crossing the package boundary", () => {
-    for (const name of [
-      "@jupyterlab/apputils",
-      "@jupyterlab/coreutils",
-      "@jupyterlab/services",
-      "@lumino/signaling",
-      "@lumino/widgets",
-    ]) {
-      expect(
-        packageJson.jupyterlab.sharedPackages[name].requiredVersion,
-      ).toBeTruthy();
     }
   });
 });

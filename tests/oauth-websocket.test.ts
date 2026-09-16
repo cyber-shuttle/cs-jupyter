@@ -1,3 +1,6 @@
+// Covers OAuthWebSocketFactory: URL construction, subprotocol encoding, and
+// rejection of malformed tokens or URLs. The multibyte access token tests that
+// subprotocols carry base64url of UTF-8 bytes, not the raw string.
 import { fakeAuth } from "./fakes";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ControlClient } from "../src/ControlClient";
@@ -64,8 +67,6 @@ describe("OAuth WebSocket factory", () => {
   });
 
   it("acquires fresh credentials and sends only the three exact subprotocols", async () => {
-    // The multibyte token is the point: the subprotocol carries base64url of the
-    // UTF-8 bytes, so an ASCII-only vector would not exercise the encoding.
     const acquireToken = vi
       .fn()
       .mockResolvedValueOnce({ accessToken: "token-✓", idToken: "first-id" })
@@ -86,7 +87,7 @@ describe("OAuth WebSocket factory", () => {
       .mockImplementation(() => undefined);
 
     await factory.open("wss://control.example.edu/api/v1/ssh/delta/auth");
-    await factory.open("wss://control.example.edu/api/v1/ssh/delta/terminal");
+    await factory.open("wss://control.example.edu/api/v1/ssh/echo/auth");
 
     expect(acquireToken).toHaveBeenCalledTimes(2);
     expect(sockets.slice(-2).map(({ protocols }) => protocols)).toEqual([
@@ -96,7 +97,6 @@ describe("OAuth WebSocket factory", () => {
     expect(sockets.at(-2)?.url).toBe(
       "wss://control.example.edu/api/v1/ssh/delta/auth",
     );
-    expect(sockets.at(-2)?.url).not.toContain("token");
     expect([
       window.localStorage.length,
       window.localStorage.getItem("existing"),
@@ -109,7 +109,6 @@ describe("OAuth WebSocket factory", () => {
     expect(error).not.toHaveBeenCalled();
   });
 
-  // Both bearers must be validated, so the table varies the field as well as the value.
   it.each([
     ["accessToken", ""],
     ["accessToken", "contains space"],

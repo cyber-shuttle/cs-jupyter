@@ -1,11 +1,14 @@
+// Covers the panel's session-creation wizard and SSH host list against
+// concurrent refresh and disposal. Opening and closing the wizard must not
+// restart the panel's poll loop. A stale cached credential can fail the first
+// host read, but a later sign-in must re-read hosts.
 import { Dialog } from "@jupyterlab/apputils";
 import { StackedPanel } from "@lumino/widgets";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CyberShuttlePanel } from "../src/CyberShuttlePanel";
-import { CreateRuntimeForm } from "../src/CreateRuntimeForm";
+import { CreateSessionForm } from "../src/CreateSessionForm";
 import { SshHosts } from "../src/SshHosts";
 import type { ISshHost } from "../src/Common";
-import { FakeOperation, runtimeListFixture } from "./fakes";
+import { controlFake, panelFake, sessionListFixture } from "./fakes";
 
 const alpha: ISshHost = {
   name: "alpha",
@@ -20,7 +23,7 @@ const gamma: ISshHost = {
 const createRequest = {
   idempotencyKey: "create-one",
   sshHost: "alpha",
-  account: "allocation",
+  account: "project-a",
   partition: "cpu",
   rootFolder: "projects/new",
   resources: { cores: 1, memoryMb: 1024, wallMinutes: 60 },
@@ -31,34 +34,23 @@ afterEach(() => {
 });
 
 function harness() {
-  let hosts: ISshHost[] = [alpha];
-  let hostError: Error | undefined;
   const api = {
     signIn: vi.fn(async () => undefined),
-    listRuntimes: vi.fn(async () => runtimeListFixture()),
-    listSshHosts: vi.fn(async () => {
-      if (hostError) {
-        throw hostError;
-      }
-      return hosts;
-    }),
-    runtimeStreamUrl: vi.fn(() => "/api/v1/runtimes/stream"),
-    slurmStreamWebSocket: vi.fn((_host: string) => vi.fn()),
-    sshAuthWebSocket: vi.fn((_host: string) => vi.fn()),
-    createRuntime: vi.fn(),
+    listSessions: vi.fn(async () => sessionListFixture()),
+    listSshHosts: vi.fn(async () => [alpha]),
+    createSession: vi.fn(),
   };
-  const panel = new CyberShuttlePanel(api as any, { select: vi.fn() } as any);
+  const panel = panelFake(api);
   void panel.signIn();
-  const operation = new FakeOperation();
-  const forms: CreateRuntimeForm[] = [];
+  const forms: CreateSessionForm[] = [];
   const hostWidgets: SshHosts[] = [];
   const hostRenders: ReturnType<typeof vi.spyOn>[] = [];
-  (panel as any)._createForm = () => {
-    const form = new CreateRuntimeForm(api as any, () => operation);
+  (panel as any)._modals._createForm = () => {
+    const form = new CreateSessionForm(api as any);
     forms.push(form);
     return form;
   };
-  (panel as any)._sshHostsWidget = () => {
+  (panel as any)._modals._sshHostsWidget = () => {
     const widget = new SshHosts(api as any);
     hostWidgets.push(widget);
     hostRenders.push(vi.spyOn(widget as any, "_render"));
@@ -70,24 +62,16 @@ function harness() {
     forms,
     hostWidgets,
     hostRenders,
-    operation,
-    failHosts(message = "temporary host refresh failure") {
-      hostError = new Error(message);
-    },
-    succeedHosts(next: ISshHost[]) {
-      hosts = next;
-      hostError = undefined;
-    },
   };
 }
 
-describe("host refresh while the runtime wizard is active", () => {
-  it("uses fresh create modal widgets and swaps the same dialog to runtime detail", async () => {
+describe("host refresh while the session wizard is active", () => {
+  it("uses fresh create modal widgets and swaps the same dialog to session detail", async () => {
     const state = harness();
     await vi.waitFor(() => expect(state.api.listSshHosts).toHaveBeenCalled());
     const pollTimer = (state.panel as any)._pollTimer;
-    state.api.createRuntime.mockResolvedValue({
-      id: "rt-111111111111",
+    state.api.createSession.mockResolvedValue({
+      id: "s-111111111111",
       generation: "g-0123456789abcdef",
     });
 
@@ -97,7 +81,7 @@ describe("host refresh while the runtime wizard is active", () => {
     expect([first.isHidden, first.isDisposed]).toEqual([false, false]);
     first.createRequested.emit(createRequest);
     await vi.waitFor(() =>
-      expect(state.api.createRuntime).toHaveBeenCalledOnce(),
+      expect(state.api.createSession).toHaveBeenCalledOnce(),
     );
     await vi.waitFor(() =>
       expect(document.body.textContent).toContain(
@@ -116,9 +100,8 @@ describe("host refresh while the runtime wizard is active", () => {
       idempotencyKey: "create-two",
     });
     await vi.waitFor(() =>
-      expect(state.api.createRuntime).toHaveBeenCalledTimes(2),
+      expect(state.api.createSession).toHaveBeenCalledTimes(2),
     );
-    // Opening and closing the wizard must not restart the poll loop.
     expect([
       state.forms[1].isDisposed,
       (state.panel as any)._pollTimer === pollTimer,
@@ -134,28 +117,28 @@ describe("host refresh while the runtime wizard is active", () => {
         id: string;
         generation: string;
       }>();
-      state.api.createRuntime.mockReturnValueOnce(completion.promise);
-      const form = new CreateRuntimeForm(state.api as any);
+      state.api.createSession.mockReturnValueOnce(completion.promise);
+      const form = new CreateSessionForm(state.api as any);
       const body = new StackedPanel();
       body.addWidget(form);
-      const reset = vi.spyOn(form, "resetRequestIdentity");
+      const show = vi.fn();
       const setError = vi.spyOn(form, "setError");
-      const pending = (state.panel as any)._createInModal(
+      const pending = (state.panel as any)._modals._createInModal(
         createRequest,
         form,
         body,
-        vi.fn(),
+        show,
       );
       const errors = setError.mock.calls.length;
       body.dispose();
       outcome === "resolve"
         ? completion.resolve({
-            id: "rt-111111111111",
+            id: "s-111111111111",
             generation: "g-0123456789abcdef",
           })
         : completion.reject(new Error("late failure"));
       await pending;
-      expect([reset.mock.calls.length, setError.mock.calls.length]).toEqual([
+      expect([show.mock.calls.length, setError.mock.calls.length]).toEqual([
         0,
         errors,
       ]);
@@ -163,9 +146,6 @@ describe("host refresh while the runtime wizard is active", () => {
     },
   );
 
-  // The host widget no longer edits anything, so a deferred refresh can only be
-  // outstanding from opening the panel. What must still hold is that a response
-  // arriving after the widget is disposed re-renders nothing.
   it.each(["resolve", "reject"] as const)(
     "ignores a deferred SSH host refresh after %s",
     async (outcome) => {
@@ -178,7 +158,6 @@ describe("host refresh while the runtime wizard is active", () => {
       await vi.waitFor(() => expect(listHosts).toHaveBeenCalledTimes(2));
       const host = state.hostWidgets[0];
       await vi.waitFor(() => expect(Dialog.tracker.size).toBe(1));
-      // The dialog's own control is the only close: no footer repeats it.
       Dialog.tracker.currentWidget!.reject();
       await vi.waitFor(() => expect(host.isDisposed).toBe(true));
       state.hostRenders[0].mockClear();
@@ -191,16 +170,43 @@ describe("host refresh while the runtime wizard is active", () => {
     },
   );
 
-  // A page that loads with a stale cached credential activates once, fails this
-  // read, and leaves _controlInitialized set. Before the fix a later sign-in
-  // returned early and the host list stayed empty for the life of the page --
-  // the poll only ever refreshes runtimes.
+  it("enables Add Session after adding a host from inside the create wizard", async () => {
+    const api = {
+      signIn: vi.fn(async () => undefined),
+      listSessions: vi.fn(async () => sessionListFixture()),
+      listSshHosts: vi.fn(async (): Promise<ISshHost[]> => []),
+    };
+    const panel = panelFake(api);
+    const forms: CreateSessionForm[] = [];
+    (panel as any)._modals._createForm = () => {
+      const form = new CreateSessionForm(api as any);
+      forms.push(form);
+      return form;
+    };
+    await panel.signIn();
+    await vi.waitFor(() => expect(api.listSshHosts).toHaveBeenCalled());
+    const addButton = (): HTMLButtonElement =>
+      panel.node.querySelector<HTMLButtonElement>(
+        '[aria-label="Add Session"]',
+      )!;
+    expect(addButton().disabled).toBe(true);
+
+    void panel.openCreate();
+    await vi.waitFor(() => expect(forms).toHaveLength(1));
+    api.listSshHosts.mockResolvedValue([alpha]);
+    forms[0].sshHostsRequested.emit(undefined);
+    await vi.waitFor(() => expect(Dialog.tracker.size).toBe(1));
+    Dialog.tracker.currentWidget!.reject();
+    await vi.waitFor(() => expect(addButton().disabled).toBe(false));
+    panel.dispose();
+  });
+
   it("re-reads hosts when the first activation could not", async () => {
     let fail = true;
     const api = {
       signIn: vi.fn(async () => undefined),
-      resumeSession: vi.fn(async () => undefined),
-      listRuntimes: vi.fn(async () => runtimeListFixture()),
+      resumeSignIn: vi.fn(async () => undefined),
+      listSessions: vi.fn(async () => sessionListFixture()),
       listSshHosts: vi.fn(async () => {
         if (fail) {
           throw new Error("cs-control returned 401");
@@ -208,21 +214,57 @@ describe("host refresh while the runtime wizard is active", () => {
         return [alpha];
       }),
     };
-    const panel = new CyberShuttlePanel(api as any, { select: vi.fn() } as any);
+    const panel = panelFake(api);
 
-    // The page-load path: a credential that no longer works.
     await panel.resume();
     await vi.waitFor(() => expect(api.listSshHosts).toHaveBeenCalled());
     expect(panel.state.error).toContain("401");
     const afterResume = api.listSshHosts.mock.calls.length;
 
-    // The owner signs in properly. Hosts must be read again.
     fail = false;
     await panel.signIn();
     await vi.waitFor(() =>
       expect(api.listSshHosts.mock.calls.length).toBeGreaterThan(afterResume),
     );
     await vi.waitFor(() => expect(panel.state.error).toBe(""));
+    panel.dispose();
+  });
+
+  it("does not let a stale host list from a signed-out session reach the next one", async () => {
+    const gate = Promise.withResolvers<ISshHost[]>();
+    let calls = 0;
+    const api = controlFake({
+      resumeSignIn: vi.fn(async () => {
+        throw new Error("no stored credentials");
+      }),
+      listSessions: vi.fn(async () => sessionListFixture()),
+      listSshHosts: vi.fn(() => {
+        calls++;
+        return calls === 1 ? gate.promise : Promise.resolve([gamma]);
+      }),
+    });
+    const panel = panelFake(api);
+    void panel.signIn();
+    await vi.waitFor(() => expect(calls).toBe(1));
+    panel.signOut();
+    gate.resolve([alpha]);
+    await new Promise((done) => setTimeout(done));
+    await panel.signIn();
+    await vi.waitFor(() => expect((panel as any)._hosts).toEqual([gamma]));
+    panel.dispose();
+  });
+
+  it("clears only the error _refreshHosts itself set, not a standing action error", async () => {
+    const api = controlFake({
+      listSessions: vi.fn(async () => sessionListFixture()),
+      listSshHosts: vi.fn(async () => [alpha]),
+    });
+    const panel = panelFake(api);
+    await panel.signIn();
+    await vi.waitFor(() => expect(api.listSshHosts).toHaveBeenCalled());
+    (panel as any)._error = "Stop failed: session is busy.";
+    await (panel as any)._refreshHosts();
+    expect(panel.state.error).toBe("Stop failed: session is busy.");
     panel.dispose();
   });
 });

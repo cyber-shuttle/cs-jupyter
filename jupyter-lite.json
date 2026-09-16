@@ -1,6 +1,6 @@
 {
   "jupyter-config-data": {
-    "appName": "CyberShuttle Notebooks",
+    "appName": "CyberShuttle Jupyter",
     "cybershuttleControlApiUrl": "",
     "deferredExtensions": ["@jupyterlab/terminal-extension:plugin"],
     "disabledExtensions": [

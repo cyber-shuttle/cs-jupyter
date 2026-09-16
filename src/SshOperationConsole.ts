@@ -1,3 +1,6 @@
+// Interactive SSH terminal embedded in a login or discovery flow. It is
+// credential-blind: prompts and replies pass straight through to SSH. It owns
+// only the transcript; the caller announces what operation is running.
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import {
@@ -10,8 +13,6 @@ const MAX_ANNOUNCEMENT_LENGTH = 512;
 export interface ISshOperationCallbacks {
   failed: (message: string) => void;
   ready?: () => void;
-  // The console owns the transcript and nothing else: what it is doing is said
-  // once, where the rest of the operation says it.
   status?: (message: string) => void;
 }
 
@@ -23,7 +24,6 @@ export interface ISshOperationConsole {
   ): void;
   complete(message: string, collapse?: boolean): void;
   focus(): void;
-  cancel(): void;
   dispose(): void;
 }
 
@@ -33,7 +33,6 @@ type ServerFrame =
   | { type: "ready" }
   | { type: "exit"; code?: number; message?: string };
 
-// Credential-blind: prompts and replies pass straight through to SSH.
 export class SshOperationConsole implements ISshOperationConsole {
   readonly node = document.createElement("section");
   private _terminalHost = document.createElement("div");
@@ -46,7 +45,7 @@ export class SshOperationConsole implements ISshOperationConsole {
     fontSize: 13,
     theme: { background: "#111827", foreground: "#f3f4f6" },
   });
-  private _fit = new FitAddon();
+  private _fitAddon = new FitAddon();
   private _socket: WebSocket | undefined;
   private _resizeObserver: ResizeObserver | undefined;
   private _disposed = false;
@@ -57,32 +56,30 @@ export class SshOperationConsole implements ISshOperationConsole {
   private _finished = false;
 
   constructor() {
-    this.node.className = "csSshAuthSession";
+    this.node.className = "csSshAuthTranscript";
     this.node.setAttribute("role", "region");
     this.node.setAttribute("aria-label", "SSH operation console");
     this._terminalHost.className = "csSshOperationTerminal";
     this._terminalHost.setAttribute("aria-label", "SSH operation output");
     this.node.appendChild(this._terminalHost);
-    this._terminal.loadAddon(this._fit);
+    this._terminal.loadAddon(this._fitAddon);
     this._terminal.open(this._terminalHost);
     this._terminal.onData((data) => {
       if (this._socket?.readyState === WebSocket.OPEN) {
         this._socket.send(this._encoder.encode(data));
       }
     });
-    this._terminal.onResize(({ cols, rows }) =>
-      this._send({ type: "resize", cols, rows }),
-    );
-    // The dialog that hosts this console claims Enter for its own buttons, and
-    // it claims it from the document down, so the terminal never sees the one
-    // key an OpenSSH prompt is waiting for. The console takes it back and
-    // delivers it itself.
+    this._terminal.onResize(({ cols, rows }) => {
+      if (this._socket?.readyState === WebSocket.OPEN) {
+        this._socket.send(JSON.stringify({ type: "resize", cols, rows }));
+      }
+    });
     document.addEventListener("keydown", this._enter, true);
     if (typeof ResizeObserver !== "undefined") {
-      this._resizeObserver = new ResizeObserver(() => this._fitAndReport());
+      this._resizeObserver = new ResizeObserver(() => this._fit());
       this._resizeObserver.observe(this.node);
     }
-    requestAnimationFrame(() => this._fitAndReport());
+    requestAnimationFrame(() => this._fit());
   }
 
   start(
@@ -108,11 +105,6 @@ export class SshOperationConsole implements ISshOperationConsole {
 
   focus(): void {
     this._terminal.focus();
-  }
-
-  cancel(): void {
-    this._generation++;
-    this._closeSocket();
   }
 
   dispose(): void {
@@ -153,7 +145,7 @@ export class SshOperationConsole implements ISshOperationConsole {
           this._say(
             "Respond to the prompts below. Passwords and verification codes go straight to SSH and are not stored.",
           );
-          this._fitAndReport();
+          this._fit();
           this.focus();
         };
         socket.onmessage = (event) => this._message(event.data);
@@ -256,28 +248,17 @@ export class SshOperationConsole implements ISshOperationConsole {
     socket.close();
   }
 
-  private _fitAndReport(): void {
+  private _fit(): void {
     if (this._disposed || !this.node.isConnected) {
       return;
     }
     try {
-      this._fit.fit();
-    } catch {
-      return;
-    }
-  }
-
-  private _send(frame: object): void {
-    if (this._socket?.readyState === WebSocket.OPEN) {
-      this._socket.send(JSON.stringify(frame));
-    }
+      this._fitAddon.fit();
+    } catch {}
   }
 }
 
-function boundedAnnouncement(value: unknown, fallback = ""): string {
+function boundedAnnouncement(value: unknown, fallback: string): string {
   const message = typeof value === "string" ? value.trim() : "";
   return (message || fallback).slice(0, MAX_ANNOUNCEMENT_LENGTH);
 }
-
-export const createSshOperationConsole: SshOperationConsoleFactory = () =>
-  new SshOperationConsole();

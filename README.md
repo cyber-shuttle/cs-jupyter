@@ -7,11 +7,11 @@ CyberShuttle Jupyter is a browser-based JupyterLab distribution, built with
 [JupyterLite](https://github.com/jupyterlite/jupyterlite), that runs notebooks and terminals on a
 high-performance computing (HPC) compute node rather than on the machine in front of you. You sign in, ask a
 [cs-control](https://github.com/cyber-shuttle/cs-control) daemon for a [Slurm](https://slurm.schedmd.com/)
-allocation, and the file browser, kernels and terminals talk directly to the Jupyter server running inside
+session, and the file browser, kernels and terminals talk directly to the Jupyter server running inside
 that job.
 
-No compute runs locally: there is no notebook server on your machine and no in-browser kernel. Until an
-allocation is running (`READY`) the application fails closed rather than falling back to local compute.
+No compute runs locally: there is no notebook server on your machine and no in-browser kernel. Until a
+session is running (`READY`) the application fails closed rather than falling back to local compute.
 
 ## Status
 
@@ -25,19 +25,20 @@ can change without notice. [CHANGELOG.md](CHANGELOG.md) records what has landed 
   only, so each user runs their own.
 - **Microsoft Entra sign-in.** Device-code sign-in, brokered by cs-control, is the only authentication path;
   this client has no other login and never calls Microsoft directly.
-- **[Microsoft Dev Tunnels](https://learn.microsoft.com/en-us/azure/developer/dev-tunnels/).** A runtime's
-  Jupyter origin must be a bare `*.devtunnels.ms` host. An allocation reached through any other tunnel or
-  ingress is rejected.
+- **[Microsoft Dev Tunnels](https://learn.microsoft.com/en-us/azure/developer/dev-tunnels/).** A session's
+  Jupyter origin must be a `devtunnels.ms` host with at least two labels ahead of it, as a tunnel port's
+  is. A session reached through any other tunnel or ingress is rejected.
 - A current browser; the application ships no polyfills.
 
 ## Using it
 
-Start `csctl serve` on your machine, then open the site. The Launcher's **Sessions** section offers
-**Sign in**, which shows a Microsoft device code to enter. **Add Session** submits a Slurm allocation, and its
-card tracks the job's state. Open that card and choose **Connect** once it reads `READY`; notebooks and
-terminals then run inside the job. A card shows what its session is doing now — its remaining wall time, what
-it is using, and what it is saying. Once a session ends that moves to **Run History**, which keeps every run
-of every card, including runs whose card has since been deleted.
+Start `csctl serve` on your machine, then open the site. **Sign in** is on the CyberShuttle title row and
+shows a Microsoft device code to enter. The Launcher's **Sessions** section offers **Add Session**, which
+submits a Slurm job and creates a session, and its card tracks the job's state: host, account, state, resources, and a remaining
+walltime countdown. Open that card and choose **Connect** once it reads `READY`; notebooks and terminals then
+run inside the job. What the session is using and its status log are in the detail dialog. Once a session ends
+that moves to **Run history**, which keeps every run of every card, including runs whose card has since been
+deleted.
 
 ## Deploy
 
@@ -47,15 +48,15 @@ Build `dist/` and host it as static files over HTTPS, set `cybershuttleControlAp
 
 ## Documentation
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — credentials, trust boundaries, runtime lifecycle
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — credentials, trust boundaries, session lifecycle
 - [docs/DEPLOYING.md](docs/DEPLOYING.md) — hosting and configuring a deployment
 - [CONTRIBUTING.md](CONTRIBUTING.md) — development setup, tests, and what CI enforces
 - [SECURITY.md](SECURITY.md) — reporting a vulnerability
 
 ## Related projects
 
-cs-control brokers sign-in, creates and tracks Slurm allocations, and issues the per-allocation access this
-client connects with. It serves neither this application nor its runtime traffic. What this client does with
+cs-control brokers sign-in, creates and tracks Slurm sessions, and issues the per-session access this
+client connects with. It serves neither this application nor its session traffic. What this client does with
 those routes is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); the routes themselves are defined by
 [cyber-shuttle/cs-control](https://github.com/cyber-shuttle/cs-control).
 

@@ -58,34 +58,52 @@ cs-control and Jupyter servers on separate origins, so it also needs the Playwri
 
 `.github/workflows/ci.yml` runs on every pull request and every push to `main`, in two jobs:
 
-- **test** — `bun install --frozen-lockfile`, `bun run typecheck`, `bun run test`
+- **test** — `bun install --frozen-lockfile`, `bun run lint`, `bun run test`
 - **e2e** — `bun install --frozen-lockfile`, `uv sync --frozen`, `bun run build`, `bun run test:dist`,
   `bunx playwright install --with-deps chromium`, `bun run test:browser`
 
-CI does not gate formatting, so run `bun run lint` yourself before opening a pull request.
+CI runs `bun run lint`, which is `typecheck` then `prettier --check .`, so it gates formatting too.
+`lefthook.yml` runs `typecheck`, `prettier --check` and the unit tests before every commit, so a commit is
+formatted and green; `lefthook install` wires it once per clone.
 
 ## Source layout
 
 ```
 cs-jupyter
 ├── src/
-│   ├── index.ts              # extension entry: service-manager plugins, fail-closed server settings
-│   ├── AuthClient.ts         # device-code broker client, sign-in dialog, sessionStorage credentials
-│   ├── ControlClient.ts      # typed cs-control REST/WebSocket client and response validation
-│   ├── OAuthWebSocket.ts     # credential-carrying WebSocket subprotocols
-│   ├── runtime-access.ts     # generation-bound access cache, Dev Tunnel host allowlist
-│   ├── runtime-ui.ts         # Launcher integration, runtime selection in the page query
-│   ├── runtime-state.ts      # the selected runtime id, in memory
-│   ├── CyberShuttlePanel.ts  # runtimes panel and its poll loop
-│   ├── RuntimeList.ts        # runtime cards and their actions
-│   ├── RuntimeDetail.ts      # one runtime's detail view and status log
-│   ├── RuntimeController.ts  # opening a runtime and guarding commands that need one
-│   ├── CreateRuntimeForm.ts  # Slurm allocation form, validation and script preview
-│   ├── SshHosts.ts           # SSH host list, add, test and remove
-│   ├── SshLoginDock.ts       # interactive SSH login surface
+│   ├── index.ts               # extension entry: service-manager plugins, fail-closed server settings
+│   ├── AuthClient.ts          # device-code broker client, sessionStorage credentials
+│   ├── DeviceCodeDialog.ts    # the accessible device-code sign-in modal
+│   ├── ControlClient.ts       # typed cs-control REST/WebSocket client and response validation
+│   ├── OAuthWebSocket.ts      # credential-carrying WebSocket subprotocols
+│   ├── session-access.ts      # generation-bound access cache, Dev Tunnel host allowlist
+│   ├── session-ui.ts          # Launcher integration
+│   ├── session-state.ts       # session selection in the page query, the active session global, and sessionLiteUrl
+│   ├── session-ui-state.ts    # the UI state shape and its empty value
+│   ├── CyberShuttlePanel.ts   # the stateful controller: poll, list; composes auth, actions and modals
+│   ├── SignInController.ts    # the sign-in/out state machine and the "sign in again" state
+│   ├── session-actions.ts     # connect, run again, stop, delete and the Jupyter access they need
+│   ├── modals.ts              # the panel's dialogs: session detail, Add Session, hosts, history
+│   ├── CyberShuttleHeader.ts  # the fixed title row: identity, sign in/out
+│   ├── RebuildingWidget.ts    # shared full-rebuild render loop, focus restore and countdown redraw
+│   ├── SessionList.ts         # session cards and their actions
+│   ├── SessionDetail.ts       # one session's detail view and status log
+│   ├── SessionController.ts   # opening a session and guarding commands that need one
+│   ├── RunHistory.ts          # every run this account has made, live and finished
+│   ├── RunReport.ts           # one finished run's accounting, usage and frozen log
+│   ├── CreateSessionForm.ts   # the multi-step wizard shell composing the three below
+│   ├── SlurmDiscovery.ts      # SSH host selection, Slurm discovery, SSH interactive login
+│   ├── PartitionModel.ts      # pure partition/GPU option and bounds logic, no DOM
+│   ├── ReviewStep.ts          # validation, script preview and submit
+│   ├── SshHosts.ts            # SSH host list, add, edit, test and remove
+│   ├── SshLoginDock.ts        # interactive SSH login surface
 │   ├── SshOperationConsole.ts # xterm.js console over the SSH WebSocket
-│   ├── Common.ts             # shared types, identifier and URL rules
-│   └── dom.ts                # element helpers
+│   ├── metrics.ts             # accounting and sample series to summaries and sparklines
+│   ├── usage.ts               # live/peak usage plots over a session's or run's samples
+│   ├── walltime.ts            # countdown arithmetic and the remaining-time badge
+│   ├── walltime-status.ts     # the status-bar countdown for the page's own session
+│   ├── Common.ts              # shared types, identifier/URL rules, JSON response builder
+│   └── dom.ts                 # element, grid, log-section and disclosure builders
 ├── style/                    # CSS shipped with the extension
 ├── tests/                    # Vitest units, distribution.mjs, browser.mjs and fixtures
 ├── jupyter-lite.json         # PageConfig for the built site
@@ -94,7 +112,7 @@ cs-jupyter
 
 Every cs-control response is validated in `ControlClient.ts` against the types and identifier rules in
 `Common.ts`; a change to the wire contract belongs there and in
-`tests/fixtures/cs-control-runtime-contract.json`, which `tests/runtime-contract.test.ts` pins.
+`tests/fixtures/cs-control-session-contract.json`, which `tests/session-contract.test.ts` pins.
 
 ## Releases
 

@@ -1,7 +1,11 @@
-import { Widget } from "@lumino/widgets";
-import { ISshHost } from "./Common";
-import { ControlClient, errorMessage } from "./ControlClient";
-import { button, element, field } from "./dom";
+// SSH host management dialog: list, add, edit, test and remove entries from
+// ~/.ssh/config. Only entries CyberShuttle itself wrote can be edited or
+// removed. Removal confirms inline, since JupyterLab would otherwise queue a
+// second dialog behind the one already open.
+import { RebuildingWidget } from "./RebuildingWidget";
+import { errorMessage, ISshHost } from "./Common";
+import { ControlClient } from "./ControlClient";
+import { button, disclosure, element, field, modalBody } from "./dom";
 
 interface IHostTest {
   busy: boolean;
@@ -9,28 +13,23 @@ interface IHostTest {
   message?: string;
 }
 
-export class SshHosts extends Widget {
+export class SshHosts extends RebuildingWidget {
   private _api: ControlClient;
   private _hosts: ISshHost[] = [];
   private _busy = false;
   private _error = "";
-  // One paste form serves both: a blank alias adds, a named one replaces that
-  // entry. Undefined means no form is open.
   private _form: { alias: string; name: string; command: string } | undefined;
   private _addError = "";
   private _saving = false;
-  // Keyed by alias, so a re-render leaves the reader where they were.
   private _open = new Set<string>();
   private _tests = new Map<string, IHostTest>();
-  // JupyterLab queues a second dialog behind the open one, so a dialog would ask
-  // this after the answer was needed.
   private _confirming = "";
 
   constructor(api: ControlClient) {
     super();
     this._api = api;
     this.id = "cybershuttle-ssh-hosts";
-    this.addClass("csRuntimePanel");
+    this.addClass("csSessionPanel");
     this._render();
   }
 
@@ -112,25 +111,13 @@ export class SshHosts extends Widget {
     }
   }
 
-  private _render(): void {
+  protected _rebuild(): void {
     this.node.textContent = "";
-    const root = element("div", "", "csRoot csScrollRoot");
-    // The dialog names itself, so this opens with what the list means and a rule
-    // under it. Both belong to the title: the list scrolls under them.
-    root.append(
-      element(
-        "div",
-        "Hosts come from your SSH configuration. Add one here, or edit ~/.ssh/config directly.",
-        "csModalSubtitle",
-      ),
-      element("hr", "", "csModalRule"),
+    const { root, scroll, card } = modalBody(
+      "Hosts come from your SSH configuration. Add one here, or edit ~/.ssh/config directly.",
+      this._error,
     );
-    const scroll = element("div", "", "csModalScroll");
-    if (this._error) {
-      scroll.appendChild(element("div", this._error, "csError"));
-    }
     scroll.appendChild(this._addSection());
-    const card = element("div", "", "csCard");
     for (const host of this._hosts) {
       card.appendChild(this._hostEntry(host));
     }
@@ -140,31 +127,28 @@ export class SshHosts extends Widget {
       );
     }
     scroll.appendChild(card);
-    root.appendChild(scroll);
     this.node.appendChild(root);
   }
 
   private _addSection(): HTMLElement {
     const adding = this._form?.alias === "";
     const section = element("div", "", "csSshAdd");
-    section.appendChild(
-      button(
-        adding ? "Cancel" : "Add SSH Host",
-        "csSecondaryButton csSshAddToggle",
-        () =>
-          this._openForm(
-            adding ? undefined : { alias: "", name: "", command: "" },
-          ),
-      ),
+    const toggle = button(
+      adding ? "Cancel" : "Add SSH Host",
+      "csSecondaryButton csSshAddToggle",
+      () =>
+        this._openForm(
+          adding ? undefined : { alias: "", name: "", command: "" },
+        ),
     );
+    toggle.dataset.sessionAction = "add-ssh-host-toggle";
+    section.appendChild(toggle);
     if (this._form && adding) {
       section.appendChild(this._pasteForm(this._form));
     }
     return section;
   }
 
-  // The alias is fixed while editing — the entry keeps its name — so the name
-  // field belongs to adding alone.
   private _pasteForm(draft: {
     alias: string;
     name: string;
@@ -173,6 +157,7 @@ export class SshHosts extends Widget {
     const form = element("form", "", "csForm csSshAddForm");
     const command = element("input", "", "csInput");
     command.name = "sshHostCommand";
+    command.dataset.sessionAction = "ssh-host-command";
     command.required = true;
     command.placeholder = "ssh -p 2222 me@login.example.edu";
     command.value = draft.command;
@@ -195,6 +180,7 @@ export class SshHosts extends Widget {
     if (!draft.alias) {
       const name = element("input", "", "csInput");
       name.name = "sshHostName";
+      name.dataset.sessionAction = "ssh-host-name";
       name.required = true;
       name.placeholder = "delta";
       name.value = draft.name;
@@ -212,18 +198,10 @@ export class SshHosts extends Widget {
   }
 
   private _hostEntry(host: ISshHost): HTMLElement {
-    const entry = document.createElement("details");
-    entry.className = "csSshHostEntry";
-    entry.open = this._open.has(host.name);
-    entry.ontoggle = () =>
-      entry.open ? this._open.add(host.name) : this._open.delete(host.name);
-    const summary = document.createElement("summary");
-    summary.className = "csSshHostSummary";
-    summary.append(
+    const { entry, body } = disclosure(host.name, this._open, [
       element("span", host.name, "csCardTitle"),
       element("span", hostTarget(host), "csMeta csSshHostTarget"),
-    );
-    const body = element("div", "", "csSshHostBody");
+    ]);
     for (const [key, value] of hostArguments(host)) {
       const row = element("div", "", "csSshArgRow");
       row.append(
@@ -245,16 +223,23 @@ export class SshHosts extends Widget {
     }
     const actions = element("div", "", "csSshHostActions");
     if (this._confirming === host.name) {
+      const cancelConfirm = button("Cancel", "csSecondaryButton", () => {
+        this._confirming = "";
+        this._render();
+      });
+      cancelConfirm.dataset.sessionAction = `confirm-cancel-${host.name}`;
+      const deleteConfirm = button(
+        "Delete",
+        "csDangerButton",
+        () => void this._remove(host),
+      );
+      deleteConfirm.dataset.sessionAction = `confirm-delete-${host.name}`;
       actions.append(
         element("span", "Remove this entry from ~/.ssh/config?", "csMeta"),
-        button("Cancel", "csSecondaryButton", () => {
-          this._confirming = "";
-          this._render();
-        }),
-        button("Delete", "csDangerButton", () => void this._remove(host)),
+        cancelConfirm,
+        deleteConfirm,
       );
       body.appendChild(actions);
-      entry.append(summary, body);
       return entry;
     }
     const editing = this._form?.alias === host.name;
@@ -263,6 +248,7 @@ export class SshHosts extends Widget {
       "csSecondaryButton",
       () => void this._test(host),
     );
+    testButton.dataset.sessionAction = `test-${host.name}`;
     testButton.disabled = test?.busy ?? false;
     const edit = button(editing ? "Cancel" : "Edit", "csSecondaryButton", () =>
       this._openForm(
@@ -271,11 +257,12 @@ export class SshHosts extends Widget {
           : { alias: host.name, name: host.name, command: hostCommand(host) },
       ),
     );
+    edit.dataset.sessionAction = `edit-${host.name}`;
     const remove = button("Delete", "csDangerButton", () => {
       this._confirming = host.name;
       this._render();
     });
-    // Only entries CyberShuttle wrote are ours to edit or remove.
+    remove.dataset.sessionAction = `delete-${host.name}`;
     edit.disabled = !host.managed;
     remove.disabled = !host.managed;
     if (!host.managed) {
@@ -288,7 +275,6 @@ export class SshHosts extends Widget {
     if (this._form && editing) {
       body.appendChild(this._pasteForm(this._form));
     }
-    entry.append(summary, body);
     return entry;
   }
 }
@@ -297,11 +283,9 @@ function hostTarget(host: ISshHost): string {
   const target = [host.user && `${host.user}@`, host.hostname]
     .filter(Boolean)
     .join("");
-  // The port is a detail of the connection, not a name for it.
   return target || "Uses SSH defaults";
 }
 
-// The rows read as the configuration does, so the UI and ssh see one list.
 function hostArguments(host: ISshHost): Array<[string, string]> {
   const rows: Array<[string, string]> = [];
   if (host.hostname) rows.push(["HostName", host.hostname]);
@@ -317,9 +301,6 @@ function hostArguments(host: ISshHost): Array<[string, string]> {
   return rows;
 }
 
-// The command that reproduces a stored host, so an edit starts from what is
-// configured rather than from an empty box. It is a display string the server
-// re-parses, not configuration text the browser composes.
 function hostCommand(host: ISshHost): string {
   const parts = ["ssh"];
   if (host.port && host.port !== 22) parts.push("-p", String(host.port));
