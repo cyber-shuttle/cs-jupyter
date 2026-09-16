@@ -67,6 +67,9 @@ All notable changes to CyberShuttle Jupyter are recorded here. The format follow
 
 ### Fixed
 
+- The sessions section is re-mounted when the launcher re-renders its content without it, instead of
+  staying gone until another launcher is opened; releasing a section whose node the launcher already
+  dropped no longer throws.
 - A session list read whose ETag was stored before the body was validated could leave the panel showing an
   empty, silent list until sign-out: a rejected record threw on the first poll, and the next poll's `304`
   then skipped the state update entirely. The ETag is now kept only once the body has parsed and every
