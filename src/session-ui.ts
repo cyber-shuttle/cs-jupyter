@@ -1,10 +1,11 @@
 // Mounts the CyberShuttle panel into JupyterLab's launcher. The header goes in
-// the launcher's fixed content header, the sessions in the scrolling body. Both
-// widgets must be released before the launcher's DOM goes, or they are stranded
-// with it.
+// the launcher's fixed content header, the sessions in the scrolling body, where
+// a React re-render can drop the foreign node, so a mutation observer re-mounts
+// it and release tolerates a node already gone from the document.
 import type { JupyterFrontEndPlugin } from "@jupyterlab/application";
 import { ICommandPalette } from "@jupyterlab/apputils";
 import type { ReactWidget } from "@jupyterlab/ui-components";
+import { MessageLoop } from "@lumino/messaging";
 import { BoxPanel, Widget } from "@lumino/widgets";
 import { ControlClient } from "./ControlClient.js";
 import { CyberShuttlePanel } from "./CyberShuttlePanel.js";
@@ -28,17 +29,27 @@ export const sessionUiPlugin: JupyterFrontEndPlugin<void> = {
     const api = new ControlClient();
     const controller = new SessionController(app, api, sessionLiteUrl);
     let panel: CyberShuttlePanel | undefined;
+    let current: MainWidget | undefined;
     const asLauncher = (widget: Widget | null): MainWidget | undefined =>
       (widget as MainWidget | null)?.content?.hasClass("jp-Launcher")
         ? (widget as MainWidget)
         : undefined;
+    const detach = (widget: Widget): void => {
+      if (widget.node.isConnected) {
+        Widget.detach(widget);
+        return;
+      }
+      MessageLoop.sendMessage(widget, Widget.Msg.BeforeDetach);
+      widget.node.remove();
+      MessageLoop.sendMessage(widget, Widget.Msg.AfterDetach);
+    };
     const mountSection = async (launcher: MainWidget): Promise<void> => {
       await (launcher.content as ReactWidget).renderPromise;
       const content = launcher.content.node.querySelector<HTMLElement>(
         ".jp-Launcher-content",
       );
       if (!panel || !content || panel.node.parentElement === content) return;
-      if (panel.isAttached) Widget.detach(panel);
+      if (panel.isAttached) detach(panel);
       Widget.attach(panel, content, content.firstElementChild as HTMLElement);
     };
 
@@ -49,7 +60,7 @@ export const sessionUiPlugin: JupyterFrontEndPlugin<void> = {
       if (panel.header.parent === launcher.contentHeader) {
         panel.header.parent = null;
       }
-      Widget.detach(panel);
+      detach(panel);
     };
 
     const wiredLaunchers = new WeakSet<MainWidget>();
@@ -63,13 +74,24 @@ export const sessionUiPlugin: JupyterFrontEndPlugin<void> = {
         BoxPanel.setSizeBasis(launcher.contentHeader, launcherHeaderHeight);
         if (!wiredLaunchers.has(launcher)) {
           wiredLaunchers.add(launcher);
-          launcher.disposed.connect(() => releaseFrom(launcher));
+          const observer = new MutationObserver(() => {
+            if (current === launcher) void mountSection(launcher);
+          });
+          observer.observe(launcher.content.node, {
+            childList: true,
+            subtree: true,
+          });
+          launcher.disposed.connect(() => {
+            observer.disconnect();
+            releaseFrom(launcher);
+          });
           launcher.title.changed.connect(
             () => (launcher.title.closable = false),
             panel,
           );
         }
       }
+      current = launcher;
       void mountSection(launcher);
       launcher.title.closable = false;
     };

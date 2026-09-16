@@ -68,6 +68,35 @@ describe("sessions section across launchers", () => {
     expect(next.contentHeader.widgets[0]).toBe(header);
   });
 
+  it("re-mounts the section after the launcher re-renders its content without it", async () => {
+    const first = launcher("launcher-3");
+    const currentChanged = new Signal<unknown, { newValue: Widget | null }>({});
+    const app = {
+      commands: {
+        addCommand: vi.fn(),
+        execute: vi.fn(),
+        hasCommand: () => true,
+      },
+      shell: {
+        currentWidget: first as Widget,
+        widgets: () => [first as Widget].values(),
+        activateById: vi.fn(),
+        currentChanged,
+      },
+      restored: Promise.resolve(),
+    };
+
+    await sessionUiPlugin.activate(app as never, null);
+    await settle();
+    expect(section(first)).not.toBeNull();
+
+    first.content.node.querySelector(".jp-Launcher-body")!.innerHTML =
+      '<div class="jp-Launcher-content"><div class="jp-Launcher-cwd"></div></div>';
+    expect(section(first)).toBeNull();
+    await settle();
+    expect(section(first)).not.toBeNull();
+  });
+
   it("connects title.changed once per launcher when alternating between two", async () => {
     const first = launcher("launcher-4");
     const second = launcher("launcher-5");
