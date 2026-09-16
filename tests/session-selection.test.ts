@@ -479,9 +479,15 @@ describe("identity control", () => {
     expect(header.node.querySelector(".csAccountMenuItem")).toBeNull();
 
     trigger.click();
-    const item =
-      header.node.querySelector<HTMLButtonElement>(".csAccountMenuItem")!;
-    expect(item.textContent).toBe("Sign out");
+    const items = [
+      ...header.node.querySelectorAll<HTMLButtonElement>(".csAccountMenuItem"),
+    ];
+    expect(items.map((each) => each.textContent)).toEqual([
+      "SSH Keys",
+      "Sign out",
+    ]);
+    expect(items.every((each) => each.querySelector("svg"))).toBe(true);
+    const item = items[1];
     expect(
       header.node
         .querySelector(".csAccountButton")

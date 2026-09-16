@@ -1,4 +1,4 @@
-// The panel's dialogs: session detail, Add Session, SSH Hosts and Run history.
+// The panel's dialogs: session detail, Add Session, SSH Hosts, SSH Keys and Run history.
 // Each is one view, closed by the dialog's own control, with the view's action
 // instead of a footer. The login dock lives outside the detail dialog because
 // closing that dialog would destroy it.
@@ -15,6 +15,7 @@ import { CreateSessionForm } from "./CreateSessionForm";
 import { RunHistory } from "./RunHistory";
 import { SessionDetail } from "./SessionDetail";
 import { SshHosts } from "./SshHosts";
+import { SshKeys } from "./SshKeys";
 import { SshLoginDock } from "./ssh";
 
 function openDialog(title: string, widget: Widget): Dialog<unknown> {
@@ -92,9 +93,19 @@ export class SessionModals {
   }
 
   async openSshHosts(): Promise<void> {
-    const hosts = this._sshHostsWidget();
-    void hosts.refresh();
-    await openDialog("SSH Hosts", hosts)
+    await this._openRefreshing("SSH Hosts", this._sshHostsWidget());
+  }
+
+  async openSshKeys(): Promise<void> {
+    await this._openRefreshing("SSH Keys", new SshKeys(this._api));
+  }
+
+  private async _openRefreshing(
+    title: string,
+    widget: SshHosts | SshKeys,
+  ): Promise<void> {
+    void widget.refresh();
+    await openDialog(title, widget)
       .launch()
       .catch(() => undefined);
   }

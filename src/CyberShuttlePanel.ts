@@ -32,6 +32,7 @@ const SESSION_POLL_INTERVAL_MS = 1000;
 export class CyberShuttleHeader extends RebuildingWidget {
   readonly signInRequested = new Signal<this, void>(this);
   readonly signOutRequested = new Signal<this, void>(this);
+  readonly sshKeysRequested = new Signal<this, void>(this);
 
   private _state = emptyState();
   private _accountMenuOpen = false;
@@ -92,19 +93,46 @@ export class CyberShuttleHeader extends RebuildingWidget {
     holder.appendChild(trigger);
     if (this._accountMenuOpen) {
       const menu = element("div", "", "csAccountMenu", { role: "menu" });
-      const signOut = button("Sign out", "csAccountMenuItem");
-      signOut.dataset.sessionAction = "sign-out";
-      signOut.setAttribute("role", "menuitem");
-      signOut.onclick = () => {
-        this._accountMenuOpen = false;
-        this.signOutRequested.emit(undefined);
-      };
-      menu.appendChild(signOut);
+      menu.append(
+        this._menuItem(
+          "SSH Keys",
+          "ssh-keys",
+          KEY_GLYPH,
+          this.sshKeysRequested,
+        ),
+        this._menuItem(
+          "Sign out",
+          "sign-out",
+          SIGN_OUT_GLYPH,
+          this.signOutRequested,
+        ),
+      );
       holder.appendChild(menu);
     }
     return holder;
   }
+
+  private _menuItem(
+    label: string,
+    action: string,
+    glyph: string,
+    signal: Signal<this, void>,
+  ): HTMLButtonElement {
+    const item = button("", "csAccountMenuItem");
+    item.innerHTML = glyph;
+    item.appendChild(element("span", label));
+    item.dataset.sessionAction = action;
+    item.setAttribute("role", "menuitem");
+    item.onclick = () => {
+      this._accountMenuOpen = false;
+      signal.emit(undefined);
+    };
+    return item;
+  }
 }
+
+const KEY_GLYPH = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="10" r="3.6" /><path d="M10.6 10h7.2M15.2 10v2.6M17.8 10v2" /></g></svg>`;
+const SIGN_OUT_GLYPH = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.5H4.5v13H8M12.5 6.5 16 10l-3.5 3.5M16 10H7.5" /></g></svg>`;
 
 function userGlyph(): SVGSVGElement {
   const holder = element("div", "");
@@ -262,6 +290,7 @@ export class CyberShuttlePanel extends StackedPanel {
     );
     this.header.signInRequested.connect(() => void this.signIn());
     this.header.signOutRequested.connect(() => this.signOut());
+    this.header.sshKeysRequested.connect(() => void this._modals.openSshKeys());
     this._emitState();
     void this.resume();
   }

@@ -1,11 +1,21 @@
 // SSH host management dialog: list, add, edit, test and remove entries from
-// ~/.ssh/config, and the login keys a host can be assigned. Only entries
-// CyberShuttle itself wrote can be edited or removed. Removal confirms inline,
-// since JupyterLab would otherwise queue a second dialog behind the one open.
+// ~/.ssh/config. Only entries CyberShuttle itself wrote can be edited or
+// removed. Removal confirms inline, since JupyterLab would otherwise queue a
+// second dialog behind the one already open.
 import { RebuildingWidget } from "./RebuildingWidget";
 import { errorMessage, ISshHost, ISshKey } from "./Common";
 import { ControlClient } from "./ControlClient";
-import { button, disclosure, element, field, dialogBody, select } from "./dom";
+import {
+  addSection,
+  button,
+  confirmDelete,
+  dialogBody,
+  disclosure,
+  element,
+  field,
+  formFooter,
+  select,
+} from "./dom";
 
 interface IHostDraft {
   alias: string;
@@ -32,9 +42,6 @@ export class SshHosts extends RebuildingWidget {
   private _open = new Set<string>();
   private _tests = new Map<string, IHostTest>();
   private _confirming = "";
-  private _keyForm: { name: string; file: File | undefined } | undefined;
-  private _keyError = "";
-  private _confirmingKey = "";
 
   constructor(api: ControlClient) {
     super();
@@ -92,49 +99,6 @@ export class SshHosts extends RebuildingWidget {
     this._render();
   }
 
-  private async _uploadKey(form: { name: string; file: File }): Promise<void> {
-    this._saving = true;
-    this._keyError = "";
-    this._sync();
-    try {
-      await this._api.addSshKey(form.name.trim(), await readText(form.file));
-      if (this.isDisposed) {
-        return;
-      }
-      this._keyForm = undefined;
-      this._saving = false;
-      await this.refresh();
-    } catch (error) {
-      this._keyError = errorMessage(error);
-      this._saving = false;
-      this._sync();
-    }
-  }
-
-  private async _removeKey(key: ISshKey): Promise<void> {
-    this._confirmingKey = "";
-    try {
-      await this._api.removeSshKey(key.name);
-      await this.refresh();
-    } catch (error) {
-      this._error = errorMessage(error);
-      this._sync();
-    }
-  }
-
-  private _confirmDelete(
-    message: string,
-    action: string,
-    cancel: () => void,
-    remove: () => void,
-  ): HTMLElement[] {
-    const cancelBtn = button("Cancel", "csSecondaryButton", cancel);
-    cancelBtn.dataset.sessionAction = `confirm-cancel-${action}`;
-    const removeBtn = button("Delete", "csDangerButton", remove);
-    removeBtn.dataset.sessionAction = `confirm-delete-${action}`;
-    return [element("span", message, "csMeta"), cancelBtn, removeBtn];
-  }
-
   private async _remove(host: ISshHost): Promise<void> {
     this._confirming = "";
     try {
@@ -183,148 +147,21 @@ export class SshHosts extends RebuildingWidget {
         element("div", "No SSH hosts are configured.", "csStatus"),
       );
     }
-    scroll.append(card, this._keySection());
+    scroll.appendChild(card);
     this.node.appendChild(root);
-  }
-
-  private _keySection(): HTMLElement {
-    const section = element("div", "", "csSshAdd");
-    section.appendChild(element("h3", "Login keys", "csSshKeysTitle"));
-    const card = element("div", "", "csCard");
-    for (const key of this._keys) {
-      card.appendChild(this._keyEntry(key));
-    }
-    if (!this._busy && this._keys.length === 0) {
-      card.appendChild(
-        element(
-          "div",
-          "No login keys are stored. A host assigned one signs in with it.",
-          "csStatus",
-        ),
-      );
-    }
-    const adding = this._keyForm !== undefined;
-    const toggle = button(
-      adding ? "Cancel" : "Upload key",
-      "csSecondaryButton csSshAddToggle",
-      () => {
-        this._keyForm = adding ? undefined : { name: "", file: undefined };
-        this._keyError = "";
-        this._render();
-      },
-    );
-    toggle.dataset.sessionAction = "upload-ssh-key-toggle";
-    section.append(card, toggle);
-    if (this._keyForm) {
-      section.appendChild(this._keyUploadForm(this._keyForm));
-    }
-    return section;
-  }
-
-  private _keyUploadForm(draft: {
-    name: string;
-    file: File | undefined;
-  }): HTMLElement {
-    const form = element("form", "", "csForm csSshAddForm");
-    const name = element("input", "", "csInput");
-    name.name = "sshKeyName";
-    name.required = true;
-    name.placeholder = "delta-key";
-    name.value = draft.name;
-    name.oninput = () => (draft.name = name.value);
-    const file = element("input", "", "csInput");
-    file.type = "file";
-    file.name = "sshKeyFile";
-    file.onchange = () => (draft.file = file.files?.[0]);
-    const help = element(
-      "div",
-      "The private key file, such as ~/.ssh/id_ed25519. It is stored for your account only; a passphrase is asked for at login.",
-      "csFieldHelp",
-    );
-    const [error, footer] = this._formFooter(
-      this._keyError,
-      this._saving ? "Uploading…" : "Upload",
-    );
-    form.append(
-      field("Name", name),
-      field("Private key", file),
-      help,
-      error,
-      footer,
-    );
-    form.onsubmit = (event) => {
-      event.preventDefault();
-      if (!form.reportValidity() || this._saving) return;
-      if (!draft.file) {
-        this._keyError = "Choose the private key file to upload.";
-        this._render();
-        return;
-      }
-      void this._uploadKey({ name: draft.name, file: draft.file });
-    };
-    return form;
-  }
-
-  private _formFooter(
-    error: string,
-    label: string,
-  ): [HTMLElement, HTMLElement] {
-    const errorEl = element("div", error, "csError");
-    errorEl.hidden = !error;
-    const footer = element("div", "", "csFormFooter");
-    const save = button(label, "csPrimaryButton");
-    save.type = "submit";
-    save.disabled = this._saving;
-    footer.appendChild(save);
-    return [errorEl, footer];
-  }
-
-  private _keyEntry(key: ISshKey): HTMLElement {
-    const row = element("div", "", "csSshKeyRow");
-    row.append(
-      element("span", key.name, "csCardTitle"),
-      element("span", `${key.type} ${key.fingerprint}`, "csMeta csSshKeyPrint"),
-    );
-    if (this._confirmingKey === key.name) {
-      row.append(
-        ...this._confirmDelete(
-          "Delete this key and unassign it?",
-          `key-${key.name}`,
-          () => {
-            this._confirmingKey = "";
-            this._render();
-          },
-          () => void this._removeKey(key),
-        ),
-      );
-      return row;
-    }
-    const remove = button("Delete", "csDangerButton", () => {
-      this._confirmingKey = key.name;
-      this._render();
-    });
-    remove.dataset.sessionAction = `delete-key-${key.name}`;
-    row.appendChild(remove);
-    return row;
   }
 
   private _addSection(): HTMLElement {
     const adding = this._form?.alias === "";
-    const section = element("div", "", "csSshAdd");
-    const toggle = button(
-      adding ? "Cancel" : "Add SSH Host",
-      "csSecondaryButton csSshAddToggle",
+    return addSection(
+      "Add SSH Host",
+      "add-ssh-host-toggle",
+      adding && this._form ? this._pasteForm(this._form) : undefined,
       () =>
         this._openForm(
           adding ? undefined : { alias: "", name: "", command: "", key: "" },
         ),
     );
-    toggle.dataset.sessionAction = "add-ssh-host-toggle";
-    section.appendChild(toggle);
-    if (this._form && adding) {
-      section.appendChild(this._pasteForm(this._form));
-    }
-    return section;
   }
 
   private _pasteForm(draft: IHostDraft): HTMLElement {
@@ -360,9 +197,10 @@ export class SshHosts extends RebuildingWidget {
       "A stored login key signs in to this host in place of any -i identity.",
       "csFieldHelp",
     );
-    const [error, footer] = this._formFooter(
+    const [error, footer] = formFooter(
       this._addError,
       this._saving ? "Saving…" : draft.alias ? "Save changes" : "Save host",
+      this._saving,
     );
     if (!draft.alias) {
       const name = element("input", "", "csInput");
@@ -418,7 +256,7 @@ export class SshHosts extends RebuildingWidget {
     const actions = element("div", "", "csSshHostActions");
     if (this._confirming === host.name) {
       actions.append(
-        ...this._confirmDelete(
+        ...confirmDelete(
           "Remove this entry from ~/.ssh/config?",
           host.name,
           () => {
@@ -471,15 +309,6 @@ export class SshHosts extends RebuildingWidget {
     }
     return entry;
   }
-}
-
-function readText(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsText(file);
-  });
 }
 
 function hostTarget(host: ISshHost): string {
