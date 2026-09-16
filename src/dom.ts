@@ -1,8 +1,37 @@
 // Small DOM builders shared across the widgets: elements, detail grids, log
-// sections and disclosure lists. `disclosure` restores open state after a
-// rebuild by caller-supplied identifier.
+// sections and disclosure lists, plus the walltime countdown math they and
+// the status bar share. `disclosure` restores open state after a rebuild by
+// caller-supplied identifier. Slurm measures --time from when a job starts
+// running, so the full limit shows until then, and the formatted figure
+// switches from hours and minutes to minutes and seconds at the one-hour
+// mark.
 import type { ILogLine, ISession } from "./Common";
-import { countsDown, remainingBadge } from "./walltime";
+
+export const LOW_TIME_MS = 10 * 60_000;
+
+export function remainingMs(session: ISession, now: number): number {
+  const limit = session.resources.wallMinutes * 60_000;
+  const started = session.startedAt ? Date.parse(session.startedAt) : NaN;
+  return Math.max(0, Number.isFinite(started) ? started + limit - now : limit);
+}
+
+export function formatRemaining(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return hours ? `${hours}h ${minutes}m` : `${minutes}m ${seconds % 60}s`;
+}
+
+export const countsDown = (session: ISession): boolean =>
+  session.state === "STARTING" || session.state === "READY";
+
+export function remainingBadge(
+  session: ISession,
+  now: number,
+): { label: string; low: boolean } {
+  const left = remainingMs(session, now);
+  return { label: formatRemaining(left), low: left <= LOW_TIME_MS };
+}
 
 export async function copyText(text: string): Promise<boolean> {
   try {
@@ -131,16 +160,16 @@ export function logSection(lines: ILogLine[]): {
   return { section, scroller };
 }
 
-export function modalBody(
+export function dialogBody(
   subtitle: string,
   error: string,
 ): { root: HTMLElement; scroll: HTMLElement; card: HTMLElement } {
   const root = element("div", "", "csRoot csScrollRoot");
   root.append(
-    element("div", subtitle, "csModalSubtitle"),
-    element("hr", "", "csModalRule"),
+    element("div", subtitle, "csDialogSubtitle"),
+    element("hr", "", "csDialogRule"),
   );
-  const scroll = element("div", "", "csModalScroll");
+  const scroll = element("div", "", "csDialogScroll");
   if (error) {
     scroll.appendChild(element("div", error, "csError"));
   }

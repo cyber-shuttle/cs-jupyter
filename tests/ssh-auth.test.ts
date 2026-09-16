@@ -3,6 +3,8 @@
 // since the hosting dialog would otherwise close on the same keystroke.
 import type { ITerminalOptions } from "@xterm/xterm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "fs";
+import { join } from "path";
 
 const mocks = vi.hoisted(() => {
   class Terminal {
@@ -78,8 +80,8 @@ Object.defineProperty(globalThis, "WebSocket", {
   value: FakeSocket,
 });
 
-import type { OAuthWebSocketConnector } from "../src/OAuthWebSocket";
-import { SshOperationConsole } from "../src/SshOperationConsole";
+import type { OAuthWebSocketConnector } from "../src/ssh";
+import { SshOperationConsole } from "../src/ssh";
 
 const connect =
   (url: string): OAuthWebSocketConnector =>
@@ -162,5 +164,30 @@ describe("SSH operation console protocol", () => {
     );
     expect(dialog).not.toHaveBeenCalled();
     console.dispose();
+  });
+});
+
+// .csSshAuth is SlurmDiscovery's in-form progress row; the login dock has its
+// own fixed-position class, .csSshLoginDock. Pinning .csSshAuth to position
+// fixed would float the in-form progress row and terminal over the shell.
+describe("SSH auth CSS", () => {
+  const css = readFileSync(join(__dirname, "../style/base.css"), "utf8");
+
+  function rule(selector: string): string {
+    const match = css.match(
+      new RegExp(
+        `${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`,
+      ),
+    );
+    if (!match) throw new Error(`no rule found for ${selector}`);
+    return match[1];
+  }
+
+  it("gives the login dock its own fixed-position class", () => {
+    expect(rule(".csSshLoginDock")).toContain("position: fixed");
+  });
+
+  it("keeps .csSshAuth inline, not fixed, for SlurmDiscovery's in-form area", () => {
+    expect(rule(".csSshAuth")).not.toContain("position: fixed");
   });
 });

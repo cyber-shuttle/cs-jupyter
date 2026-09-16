@@ -6,8 +6,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthInteractionRequiredError } from "../src/AuthClient";
 import { ControlClient, UNCHANGED } from "../src/ControlClient";
 import type { IRun } from "../src/Common";
-import { cacheSessionAccess } from "../src/session-access";
-import { setActiveSessionId } from "../src/session-state";
+import { cacheSessionAccess } from "../src/session";
+import { setActiveSessionId } from "../src/session";
 import {
   accessFixture,
   controlFake,
@@ -23,12 +23,12 @@ const session = sessionFixture({ state: "QUEUED" });
 
 function cacheAccess(
   sessionId: string,
-  generation: string,
+  seq: number,
   token = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
 ): void {
   cacheSessionAccess(
-    accessFixture(sessionId, generation, {
-      jupyter: { ...accessFixture(sessionId, generation).jupyter, token },
+    accessFixture(sessionId, seq, {
+      jupyter: { ...accessFixture(sessionId, seq).jupyter, token },
     }),
   );
 }
@@ -173,8 +173,8 @@ describe("session polling", () => {
       await pollPanel(panel);
     };
 
-    cacheAccess(session.id, session.generation);
-    cacheAccess(other.id, other.generation, "B".repeat(43));
+    cacheAccess(session.id, session.seq);
+    cacheAccess(other.id, other.seq, "B".repeat(43));
     window.localStorage.setItem(key, "unrelated-local-value");
 
     await report({ ...session, state: "READY" }, { ...other, state: "READY" });
@@ -195,15 +195,15 @@ describe("session polling", () => {
     expect(window.sessionStorage.getItem(otherKey)).not.toBeNull();
     expect(window.localStorage.getItem(key)).toBe("unrelated-local-value");
 
-    cacheAccess(session.id, session.generation);
+    cacheAccess(session.id, session.seq);
     await report(
-      { ...session, generation: "g-fedcba9876543210", state: "READY" },
+      { ...session, seq: 2, state: "READY" },
       { ...other, state: "READY" },
     );
     expect(window.sessionStorage.getItem(key)).toBeNull();
     expect(window.sessionStorage.getItem(otherKey)).not.toBeNull();
 
-    cacheAccess(session.id, session.generation);
+    cacheAccess(session.id, session.seq);
     await report({ ...session, state: "FAILED" }, { ...other, state: "READY" });
     expect(window.sessionStorage.getItem(key)).toBeNull();
     expect(window.sessionStorage.getItem(otherKey)).not.toBeNull();
@@ -303,7 +303,7 @@ describe("sign-out during an in-flight poll", () => {
 
 describe("polling an unchanged list", () => {
   const ready = sessionFixture();
-  const access = accessFixture(ready.id, ready.generation, {
+  const access = accessFixture(ready.id, ready.seq, {
     jupyter: { uri: "https://31002.use.devtunnels.ms/", token: "A".repeat(43) },
   });
 

@@ -75,35 +75,24 @@ cs-jupyter
 │   ├── AuthClient.ts          # device-code broker client, sessionStorage credentials
 │   ├── DeviceCodeDialog.ts    # the accessible device-code sign-in modal
 │   ├── ControlClient.ts       # typed cs-control REST/WebSocket client and response validation
-│   ├── OAuthWebSocket.ts      # credential-carrying WebSocket subprotocols
-│   ├── session-access.ts      # generation-bound access cache, Dev Tunnel host allowlist
+│   ├── ssh.ts                 # OAuth WebSocket subprotocols, the SSH terminal console and its login dock
+│   ├── session.ts             # session identity/selection, the UI state shape, and the seq-bound access cache
 │   ├── session-ui.ts          # Launcher integration
-│   ├── session-state.ts       # session selection in the page query, the active session global, and sessionLiteUrl
-│   ├── session-ui-state.ts    # the UI state shape and its empty value
-│   ├── CyberShuttlePanel.ts   # the stateful controller: poll, list; composes auth, actions and modals
-│   ├── SignInController.ts    # the sign-in/out state machine and the "sign in again" state
+│   ├── CyberShuttlePanel.ts   # the stateful controller: poll, list, sign-in/out, title row; composes actions and modals
 │   ├── session-actions.ts     # connect, run again, stop, delete and the Jupyter access they need
 │   ├── modals.ts              # the panel's dialogs: session detail, Add Session, hosts, history
-│   ├── CyberShuttleHeader.ts  # the fixed title row: identity, sign in/out
 │   ├── RebuildingWidget.ts    # shared full-rebuild render loop, focus restore and countdown redraw
 │   ├── SessionList.ts         # session cards and their actions
 │   ├── SessionDetail.ts       # one session's detail view and status log
 │   ├── SessionController.ts   # opening a session and guarding commands that need one
 │   ├── RunHistory.ts          # every run this account has made, live and finished
-│   ├── RunReport.ts           # one finished run's accounting, usage and frozen log
-│   ├── CreateSessionForm.ts   # the multi-step wizard shell composing the three below
+│   ├── CreateSessionForm.ts   # the multi-step wizard shell, and the partition/GPU option and bounds logic
 │   ├── SlurmDiscovery.ts      # SSH host selection, Slurm discovery, SSH interactive login
-│   ├── PartitionModel.ts      # pure partition/GPU option and bounds logic, no DOM
 │   ├── ReviewStep.ts          # validation, script preview and submit
 │   ├── SshHosts.ts            # SSH host list, add, edit, test and remove
-│   ├── SshLoginDock.ts        # interactive SSH login surface
-│   ├── SshOperationConsole.ts # xterm.js console over the SSH WebSocket
-│   ├── metrics.ts             # accounting and sample series to summaries and sparklines
-│   ├── usage.ts               # live/peak usage plots over a session's or run's samples
-│   ├── walltime.ts            # countdown arithmetic and the remaining-time badge
-│   ├── walltime-status.ts     # the status-bar countdown for the page's own session
+│   ├── metrics.ts             # accounting and sample series to summaries, sparklines, usage plots and the status-bar countdown
 │   ├── Common.ts              # shared types, identifier/URL rules, JSON response builder
-│   └── dom.ts                 # element, grid, log-section and disclosure builders
+│   └── dom.ts                 # element, grid, log-section and disclosure builders, plus walltime countdown arithmetic and the remaining-time badge
 ├── style/                    # CSS shipped with the extension
 ├── tests/                    # Vitest units, distribution.mjs, browser.mjs and fixtures
 ├── jupyter-lite.json         # PageConfig for the built site

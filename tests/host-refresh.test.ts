@@ -72,7 +72,7 @@ describe("host refresh while the session wizard is active", () => {
     const pollTimer = (state.panel as any)._pollTimer;
     state.api.createSession.mockResolvedValue({
       id: "s-111111111111",
-      generation: "g-0123456789abcdef",
+      seq: 1,
     });
 
     void state.panel.openCreate();
@@ -115,7 +115,7 @@ describe("host refresh while the session wizard is active", () => {
       const state = harness();
       const completion = Promise.withResolvers<{
         id: string;
-        generation: string;
+        seq: number;
       }>();
       state.api.createSession.mockReturnValueOnce(completion.promise);
       const form = new CreateSessionForm(state.api as any);
@@ -123,7 +123,7 @@ describe("host refresh while the session wizard is active", () => {
       body.addWidget(form);
       const show = vi.fn();
       const setError = vi.spyOn(form, "setError");
-      const pending = (state.panel as any)._modals._createInModal(
+      const pending = (state.panel as any)._modals._createInDialog(
         createRequest,
         form,
         body,
@@ -134,7 +134,7 @@ describe("host refresh while the session wizard is active", () => {
       outcome === "resolve"
         ? completion.resolve({
             id: "s-111111111111",
-            generation: "g-0123456789abcdef",
+            seq: 1,
           })
         : completion.reject(new Error("late failure"));
       await pending;

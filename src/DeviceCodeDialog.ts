@@ -12,7 +12,7 @@ interface IDeviceAuthorization {
 const COPY_GLYPH = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.2"><rect x="5.6" y="5.6" width="8" height="8" rx="1.4" /><path d="M10.9 5.6V3.9a1.4 1.4 0 0 0-1.4-1.4H3.9a1.4 1.4 0 0 0-1.4 1.4v5.6a1.4 1.4 0 0 0 1.4 1.4h1.7" /></g></svg>`;
 const CHECK_GLYPH = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m3.4 8.4 3 3 6.2-6.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>`;
 
-export function showDeviceCodeModal(
+export function showDeviceCodeDialog(
   authorization: IDeviceAuthorization,
   cancel: () => void,
 ): { close(): void } {
@@ -79,7 +79,7 @@ export function showDeviceCodeModal(
   };
   actions.appendChild(open);
 
-  const close = button("", "csModalClose", cancel);
+  const close = button("", "csDialogClose", cancel);
   close.title = "Close";
   close.setAttribute("aria-label", "Close");
   close.innerHTML = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /></svg>`;

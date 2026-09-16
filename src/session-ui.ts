@@ -12,7 +12,7 @@ import {
   SessionController,
   installSessionCommandGuard,
 } from "./SessionController.js";
-import { getActiveSessionId, sessionLiteUrl } from "./session-state.js";
+import { getActiveSessionId, sessionLiteUrl } from "./session.js";
 
 const SELECT_SESSION_COMMAND = "@cybershuttle/jupyter:select-session";
 

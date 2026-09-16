@@ -10,14 +10,11 @@ import type {
   ISessionList,
   ISessionLogTail,
 } from "../src/ControlClient";
-import type { ISessionAccess } from "../src/session-access";
+import type { ISessionAccess } from "../src/session";
 import { CyberShuttlePanel } from "../src/CyberShuttlePanel";
-import { emptyState, type ISessionUiState } from "../src/session-ui-state";
-import type { OAuthWebSocketConnector } from "../src/OAuthWebSocket";
-import type {
-  ISshOperationCallbacks,
-  ISshOperationConsole,
-} from "../src/SshOperationConsole";
+import { emptyState, type ISessionUiState } from "../src/session";
+import type { OAuthWebSocketConnector } from "../src/ssh";
+import type { ISshOperationCallbacks, ISshOperationConsole } from "../src/ssh";
 
 export async function pollPanel(panel: unknown): Promise<void> {
   await (panel as { _poll(): Promise<void> })._poll();
@@ -48,7 +45,7 @@ export class FakeOperation implements ISshOperationConsole {
 export function sessionFixture(overrides: Partial<ISession> = {}): ISession {
   return {
     id: "s-012345abcdef",
-    generation: "g-0123456789abcdef",
+    seq: 1,
     state: "READY",
     sshHost: "delta",
     partition: "debug",
@@ -63,7 +60,7 @@ export function sessionFixture(overrides: Partial<ISession> = {}): ISession {
 export function runFixture(overrides: Partial<IRun> = {}): IRun {
   return {
     sessionId: "s-012345abcdef",
-    generation: "g-0123456789abcdef",
+    seq: 1,
     sshHost: "delta",
     partition: "cpu",
     rootFolder: "$HOME/project",
@@ -83,12 +80,12 @@ export function uiState(
 
 export function accessFixture(
   sessionId: string,
-  generation: string,
+  seq: number,
   overrides: Partial<ISessionAccess> = {},
 ): ISessionAccess {
   return {
     sessionId,
-    generation,
+    seq,
     expiresAt: "2030-01-01T00:00:00Z",
     jupyter: {
       uri: "https://31002.use.devtunnels.ms/",

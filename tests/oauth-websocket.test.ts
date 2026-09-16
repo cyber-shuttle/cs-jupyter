@@ -4,10 +4,7 @@
 import { fakeAuth } from "./fakes";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ControlClient } from "../src/ControlClient";
-import {
-  OAuthWebSocketFactory,
-  type WebSocketConstructor,
-} from "../src/OAuthWebSocket";
+import { OAuthWebSocketFactory, type WebSocketConstructor } from "../src/ssh";
 
 class FakeSocket extends EventTarget implements WebSocket {
   readonly CONNECTING = 0;

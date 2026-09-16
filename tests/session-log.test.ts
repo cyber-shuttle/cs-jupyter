@@ -11,8 +11,8 @@ import {
   type ISessionLogTail,
 } from "../src/ControlClient";
 import type { CyberShuttlePanel } from "../src/CyberShuttlePanel";
-import { RunReport } from "../src/RunReport";
-import type { ISessionUiState } from "../src/session-ui-state";
+import { RunReport } from "../src/RunHistory";
+import type { ISessionUiState } from "../src/session";
 import { SessionDetail } from "../src/SessionDetail";
 import {
   ControllerFake,
@@ -75,15 +75,24 @@ describe("session log tails on the polled read", () => {
   });
 
   it.each([
-    ["a foreign session id", { ...log(), sessionId: "invalid" }],
-    ["an unknown field", { ...log(), extra: true }],
+    [
+      "a foreign session id",
+      { ...log(), sessionId: "invalid" },
+      "invalid session list",
+    ],
+    ["an unknown field", { ...log(), extra: true }, "invalid session list"],
     [
       "an unknown stream",
-      { ...log(), lines: [{ stream: "other", text: "x" }] },
+      { ...log(), lines: [{ stream: "other", text: "x", at: LOG_AT }] },
+      "invalid session list",
     ],
     [
       "an unknown line field",
-      { ...log(), lines: [{ stream: "stdout", text: "x", extra: true }] },
+      {
+        ...log(),
+        lines: [{ stream: "stdout", text: "x", extra: true, at: LOG_AT }],
+      },
+      "invalid session list",
     ],
     [
       "too many lines",
@@ -92,8 +101,10 @@ describe("session log tails on the polled read", () => {
         lines: Array.from({ length: 101 }, () => ({
           stream: "stdout",
           text: "x",
+          at: LOG_AT,
         })),
       },
+      "invalid session list",
     ],
     [
       "an oversized tail",
@@ -102,26 +113,38 @@ describe("session log tails on the polled read", () => {
         lines: Array.from({ length: 100 }, () => ({
           stream: "stdout",
           text: "x".repeat(1000),
+          at: LOG_AT,
         })),
       },
+      "oversized session log event",
     ],
     [
       "an oversized line",
-      { ...log(), lines: [{ stream: "stderr", text: "x".repeat(4097) }] },
+      {
+        ...log(),
+        lines: [{ stream: "stderr", text: "x".repeat(4097), at: LOG_AT }],
+      },
+      "oversized session log event",
     ],
     [
       "an ANSI control sequence",
-      { ...log(), lines: [{ stream: "stdout", text: "\u001b[31mANSI" }] },
+      {
+        ...log(),
+        lines: [{ stream: "stdout", text: "\u001b[31mANSI", at: LOG_AT }],
+      },
+      "invalid session log line",
     ],
     [
       "an embedded newline",
-      { ...log(), lines: [{ stream: "stdout", text: "two\nlines" }] },
+      {
+        ...log(),
+        lines: [{ stream: "stdout", text: "two\nlines", at: LOG_AT }],
+      },
+      "invalid session log line",
     ],
-    ["a non-object", "not-an-object"],
-  ])("rejects %s", async (_name, value) => {
-    await expect(clientFor([value]).listSessions()).rejects.toThrow(
-      /invalid session log|oversized session log/,
-    );
+    ["a non-object", "not-an-object", "invalid session list"],
+  ] as const)("rejects %s", async (_name, value, message) => {
+    await expect(clientFor([value]).listSessions()).rejects.toThrow(message);
   });
 });
 

@@ -2,9 +2,17 @@
 // cgroup CPU counter only climbs, so cores-busy comes from the rate between two
 // readings. RunHistory must keep keyboard focus on an open disclosure across the
 // sample poll that rebuilds it.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { IMetricSample, IRun, ISession } from "../src/Common";
-import { ControllerFake, runFixture, sessionFixture, uiState } from "./fakes";
+import {
+  controlFake,
+  ControllerFake,
+  panelFake,
+  runFixture,
+  sessionFixture,
+  sessionListFixture,
+  uiState,
+} from "./fakes";
 import {
   accountingState,
   cpuCoreSeries,
@@ -13,9 +21,9 @@ import {
   resourceGraphs,
   runSummary,
   sparklinePoints,
+  usagePlots,
 } from "../src/metrics";
 import { RunHistory } from "../src/RunHistory";
-import { usagePlots } from "../src/usage";
 
 const sample = (
   seconds: number,
@@ -58,7 +66,10 @@ describe("resource samples", () => {
     expect(
       gpuUtilisation([
         sample(0, {
-          gpus: [{ utilPct: 12 }, { utilPct: 88 }],
+          gpus: [
+            { index: 0, utilPct: 12 },
+            { index: 1, utilPct: 88 },
+          ],
         }),
       ]),
     ).toEqual([88]);
@@ -207,7 +218,7 @@ describe("run history view", () => {
 
   const live = sessionFixture({
     id: "s-999999999999",
-    generation: "g-fedcba9876543210",
+    seq: 2,
     sshHost: "deltaTest",
     resources: { cores: 4, memoryMb: 8192, wallMinutes: 120 },
     startedAt: "2030-01-01T00:00:00Z",
@@ -265,5 +276,37 @@ describe("run history view", () => {
     expect(document.activeElement).toBe(restored);
     history.dispose();
     document.body.removeChild(history.node);
+  });
+
+  it("keeps distinct keys for a relaunching session and its finished run", async () => {
+    const stopped = sessionFixture({ state: "STOPPED" });
+    const api = controlFake({
+      listSessions: vi.fn(async () => sessionListFixture([stopped])),
+      listRuns: vi.fn(async () => [
+        runFixture({ sessionId: stopped.id, seq: stopped.seq }),
+      ]),
+      startSession: vi.fn(() => new Promise<never>(() => {})),
+    });
+    const panel = panelFake(api);
+    await panel.signIn();
+    await vi.waitFor(() => expect(panel.state.sessions).toHaveLength(1));
+
+    void panel.actions.runAgain(stopped.id);
+    await vi.waitFor(() =>
+      expect(panel.state.busySessionIds.has(stopped.id)).toBe(true),
+    );
+
+    const history = new RunHistory(panel);
+    document.body.appendChild(history.node);
+    const keys = [
+      ...history.node.querySelectorAll<HTMLElement>(
+        "summary[data-session-action]",
+      ),
+    ].map((node) => node.dataset.sessionAction);
+    expect(keys).toEqual([`${stopped.id}/${stopped.seq}`]);
+    expect(history.node.textContent).toContain("SUBMITTING");
+
+    history.dispose();
+    panel.dispose();
   });
 });

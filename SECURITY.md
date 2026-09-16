@@ -24,12 +24,13 @@ The invariants this client is responsible for; the mechanisms behind them are in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 - Credentials stay in per-tab `sessionStorage` — never `localStorage`, a URL, a log or an error
-  (`src/AuthClient.ts`, `src/session-access.ts`).
+  (`src/AuthClient.ts`, `src/session.ts`).
 - Every control call is pinned to the configured origin, and tokens travel as WebSocket subprotocols rather
-  than in a URL (`src/ControlClient.ts`, `src/OAuthWebSocket.ts`).
-- A session's Jupyter origin must be a bare `*.devtunnels.ms` host (`src/session-access.ts`).
-- Responses are validated before use (`src/ControlClient.ts`, `src/Common.ts`).
-- Compute is fail-closed: no kernels, terminals or contents without a valid `READY` generation
+  than in a URL (`src/ControlClient.ts`, `src/ssh.ts`).
+- A session's Jupyter origin must be a bare `*.devtunnels.ms` host (`src/session.ts`).
+- Responses are validated before use, and an unrecognized field fails the same way a missing or mistyped one
+  does (`src/ControlClient.ts`, `src/Common.ts`).
+- Compute is fail-closed: no kernels, terminals or contents without a valid `READY` seq
   (`src/index.ts`).
 
 A report that assumes the attacker already holds the signed-in account's tokens, or already controls the

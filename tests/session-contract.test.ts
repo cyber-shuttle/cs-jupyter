@@ -41,7 +41,7 @@ describe("checked narrow cs-control session JSON contract", () => {
   it("rejects a session missing required fields rather than rendering them undefined", async () => {
     for (const field of [
       "id",
-      "generation",
+      "seq",
       "sshHost",
       "partition",
       "rootFolder",
@@ -62,21 +62,26 @@ describe("checked narrow cs-control metric sample JSON contract", () => {
   it.each([
     ["a string memBytes", { at, memBytes: "1024" }],
     ["a string cpuUsageUsec", { at, cpuUsageUsec: "1000" }],
-    ["a string GPU utilPct", { at, gpus: [{ utilPct: "50" }] }],
+    ["a string GPU utilPct", { at, gpus: [{ index: 0, utilPct: "50" }] }],
   ])("rejects %s", async (_name, sample) => {
     await expect(
       clientFor({
         sessionId: providerFixture.id,
         samples: [sample],
       }).getSessionMetrics(providerFixture.id),
-    ).rejects.toThrow("invalid metric sample");
+    ).rejects.toThrow("invalid metric series");
   });
 
   it("accepts numeric memory, CPU and GPU readings", async () => {
     const series = await clientFor({
       sessionId: providerFixture.id,
       samples: [
-        { at, memBytes: 1024, cpuUsageUsec: 1000, gpus: [{ utilPct: 50 }] },
+        {
+          at,
+          memBytes: 1024,
+          cpuUsageUsec: 1000,
+          gpus: [{ index: 0, utilPct: 50 }],
+        },
       ],
     }).getSessionMetrics(providerFixture.id);
     expect(series.samples).toHaveLength(1);
@@ -161,7 +166,7 @@ describe("checked narrow cs-control Slurm discovery JSON contract", () => {
 describe("checked narrow cs-control run history JSON contract", () => {
   const run = {
     sessionId: providerFixture.id,
-    generation: providerFixture.generation,
+    seq: providerFixture.seq,
     sshHost: "delta",
     partition: "cpu",
     rootFolder: "$HOME/project",
@@ -186,6 +191,6 @@ describe("checked narrow cs-control run history JSON contract", () => {
       clientFor({
         runs: [{ ...run, samples: ["not a sample"] }],
       }).listRuns(),
-    ).rejects.toThrow("invalid metric sample");
+    ).rejects.toThrow("invalid run history");
   });
 });

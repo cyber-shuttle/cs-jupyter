@@ -37,13 +37,17 @@ Every credential this app carries, and where it goes:
 | Device sign-in     | `POST /api/v1/oauth/device/start`, `/api/v1/oauth/device/poll/{handle}` | none (`credentials: omit`, `redirect: "error"`)                      |
 | Control API        | `/api/v1/*`                                                             | `Authorization: Bearer <access>` and `X-CyberShuttle-Identity: <ID>` |
 | SSH authentication | `WS /api/v1/ssh/{alias}/auth`                                           | the two tokens as `bearer.` and `identity.` subprotocols             |
-| Jupyter            | the session's Dev Tunnel origin                                         | the generation-bound Jupyter token                                   |
+| Jupyter            | the session's Dev Tunnel origin                                         | the seq-bound Jupyter token                                          |
 
 The control API uses no cookies, XSRF header or same-origin proxy. The SSH socket offers exactly
 `cybershuttle.v1` plus the two credential subprotocols and fails closed unless the server negotiates
 `cybershuttle.v1`; tokens never appear in a WebSocket URL. The routes and their trust boundaries are
 cs-control's, and [cyber-shuttle/cs-control](https://github.com/cyber-shuttle/cs-control) is the canonical
 description of them.
+
+Every response is checked against a shared `Validator` vocabulary in `src/Common.ts` before `src/ControlClient.ts`
+hands it to the rest of the app: an object validator rejects a field it does not list as well as one it is
+missing or of the wrong type, so an unexpected cs-control shape fails closed instead of passing through.
 
 ## Session flow
 
@@ -56,8 +60,8 @@ description of them.
 4. Connect is available once the session state is `READY` and an access response has been fetched for it. The
    client directly requests the separate owner-authenticated session-access response; no Dev Tunnel popup or
    cookie bootstrap is used.
-5. The client stores that exact generation-bound access response only in `sessionStorage`, reloads with the
-   nonsecret session ID and generation in its static query, and points JupyterLab's Contents, `api/kernels`,
+5. The client stores that exact seq-bound access response only in `sessionStorage`, reloads with the
+   nonsecret session ID and seq in its static query, and points JupyterLab's Contents, `api/kernels`,
    `api/kernelspecs`, `api/sessions`, and `api/terminals` managers directly at the Jupyter HTTPS/WSS Dev
    Tunnel URI. Those managers use JupyterLab's own `ServerConnection` token handling: `Authorization: token
 <token>` on REST and `?token=` on the Jupyter WebSocket URLs.
@@ -92,13 +96,13 @@ a run read back out of the history, because they are the same record.
 
 Session access intentionally keeps the token across same-tab reloads so an active session remains
 usable while cs-control is unavailable. It is never written to localStorage, the page URL, logs, errors, or
-session cards. An entry for another session or generation, or one whose expiry has passed, is discarded on
+session cards. An entry for another session or seq, or one whose expiry has passed, is discarded on
 read, and the Dev Tunnel URI it names must be a bare `*.devtunnels.ms` origin.
 
 ## Fail-closed compute
 
 There is no local kernel fallback; the Launcher and all compute managers remain fail-closed until a valid
-`READY` generation is selected. Without one, `src/index.ts` substitutes server settings that answer
+`READY` seq is selected. Without one, `src/index.ts` substitutes server settings that answer
 `api/contents` with an empty read-only directory, `api/kernels`, `api/sessions` and `api/terminals` with an
 empty list, `api/kernelspecs` with no specification, and everything else with `503`. Terminals are a
 `NoopManager` and `terminalsAvailable` is `false`, so the terminal UI never activates. The build carries no

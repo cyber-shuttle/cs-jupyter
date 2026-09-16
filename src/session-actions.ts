@@ -4,12 +4,12 @@
 import { Dialog, showDialog } from "@jupyterlab/apputils";
 import { errorMessage, ISession, isTerminal } from "./Common";
 import { ControlClient, ControlError, needsSshLogin } from "./ControlClient";
-import type { SshLoginDock } from "./SshLoginDock";
+import type { SshLoginDock } from "./ssh";
 import {
   cacheSessionAccess,
   clearSessionAccess,
   loadSessionAccess,
-} from "./session-access";
+} from "./session";
 
 interface ISessionActionsHooks {
   isDisposed: () => boolean;
@@ -25,7 +25,7 @@ interface ISessionActionsHooks {
 
 interface IJupyterOperation {
   sessionId: string;
-  generation: string;
+  seq: number;
   selection: number;
 }
 
@@ -40,7 +40,7 @@ export class SessionActions {
   private _lastAccessError: string | undefined;
   private _accessBackoffMs = new Map<string, number>();
   private _accessRetryAt = new Map<string, number>();
-  private _accessBackoffGeneration = new Map<string, string>();
+  private _accessBackoffSeq = new Map<string, number>();
 
   constructor(
     private _api: ControlClient,
@@ -91,7 +91,7 @@ export class SessionActions {
     this._abortJupyter(session.id);
     const operation = {
       sessionId: session.id,
-      generation: session.generation,
+      seq: session.seq,
       selection: this._selection,
     };
     this._jupyterOperations.set(session.id, operation);
@@ -104,7 +104,7 @@ export class SessionActions {
       !this._hooks.isDisposed() &&
       this._jupyterOperations.get(operation.sessionId) === operation &&
       operation.selection === this._selection &&
-      session?.generation === operation.generation &&
+      session?.seq === operation.seq &&
       session.state === "READY"
     );
   }
@@ -125,7 +125,7 @@ export class SessionActions {
     }
   }
 
-  private abortJupyterOperations(): void {
+  private _abortAllJupyter(): void {
     for (const sessionId of [...this._jupyterOperations.keys()]) {
       this._abortJupyter(sessionId);
     }
@@ -162,7 +162,7 @@ export class SessionActions {
       this._resetAccessBackoff(sessionId);
       return;
     }
-    if (this._accessBackoffGeneration.get(sessionId) !== session.generation) {
+    if (this._accessBackoffSeq.get(sessionId) !== session.seq) {
       this._resetAccessBackoff(sessionId);
     }
     const retryAt = this._accessRetryAt.get(sessionId);
@@ -187,7 +187,7 @@ export class SessionActions {
       );
       this._accessBackoffMs.set(sessionId, nextBackoff);
       this._accessRetryAt.set(sessionId, Date.now() + nextBackoff);
-      this._accessBackoffGeneration.set(sessionId, session.generation);
+      this._accessBackoffSeq.set(sessionId, session.seq);
       const message = errorMessage(error);
       this._lastAccessError = message;
       this._hooks.onError(message);
@@ -200,18 +200,18 @@ export class SessionActions {
   private _resetAccessBackoff(sessionId: string): void {
     this._accessBackoffMs.delete(sessionId);
     this._accessRetryAt.delete(sessionId);
-    this._accessBackoffGeneration.delete(sessionId);
+    this._accessBackoffSeq.delete(sessionId);
   }
 
   private async _ensureAccess(
     session: ISession,
     operation: IJupyterOperation,
   ): Promise<void> {
-    if (!loadSessionAccess(session.id, session.generation)) {
+    if (!loadSessionAccess(session.id, session.seq)) {
       const access = await this._api.getSessionAccess(session.id);
       if (!this._jupyterOperationCurrent(operation)) return;
-      if (access.generation !== operation.generation) {
-        throw new Error("Session access generation changed.");
+      if (access.seq !== operation.seq) {
+        throw new Error("Session access seq changed.");
       }
       cacheSessionAccess(access);
     }
@@ -245,7 +245,7 @@ export class SessionActions {
       return;
     }
     const selection = ++this._selection;
-    this.abortJupyterOperations();
+    this._abortAllJupyter();
     const current = (): boolean =>
       selection === this._selection && !this._hooks.isDisposed();
     this._hooks.onError("");
@@ -443,7 +443,7 @@ export class SessionActions {
 
   dispose(): void {
     this._selection++;
-    this.abortJupyterOperations();
+    this._abortAllJupyter();
     this._connectingSessionId = undefined;
     this._busySessionIds = new Map();
     this._busyTokens = new Map();

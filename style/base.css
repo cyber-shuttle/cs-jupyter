@@ -56,7 +56,7 @@
   margin: 20px 0;
 }
 .csDeviceCodeCopy,
-.csModalClose {
+.csDialogClose {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -68,14 +68,14 @@
   cursor: pointer;
 }
 .csDeviceCodeCopy svg,
-.csModalClose svg {
+.csDialogClose svg {
   width: 18px;
   height: 18px;
 }
 .csDeviceCodeCopy:hover,
 .csDeviceCodeCopy:focus-visible,
-.csModalClose:hover,
-.csModalClose:focus-visible {
+.csDialogClose:hover,
+.csDialogClose:focus-visible {
   background: var(--jp-layout-color2);
   color: var(--jp-ui-font-color1);
 }
@@ -83,14 +83,14 @@
 .csDeviceCodeCopied:hover {
   color: var(--jp-success-color1);
 }
-.csModalClose {
+.csDialogClose {
   position: absolute;
   z-index: 1;
   top: 12px;
   right: 12px;
 }
 
-.csModalSubtitle {
+.csDialogSubtitle {
   padding-right: 32px;
   color: var(--jp-ui-font-color2);
   font-size: var(--jp-ui-font-size1);
@@ -110,7 +110,7 @@
 .csDiscoveryCancel {
   margin-left: auto;
 }
-.csModalRule {
+.csDialogRule {
   height: 0;
   border: 0;
   border-top: 1px solid var(--jp-border-color2);
@@ -145,17 +145,17 @@
   display: none !important;
 }
 
-.jp-Dialog-content:has(.csWorkspaceModal) {
+.jp-Dialog-content:has(.csWorkspaceDialog) {
   width: min(90vw, 1100px);
   max-width: calc(100vw - 32px);
   max-height: min(85vh, 850px);
 }
 
-.jp-Dialog-content:has(.csWorkspaceModal)
+.jp-Dialog-content:has(.csWorkspaceDialog)
   .jp-Dialog-footer:has(.jp-Dialog-footerButtons:empty) {
   display: none;
 }
-.jp-Dialog-content:has(.csWorkspaceModal) .jp-Dialog-body {
+.jp-Dialog-content:has(.csWorkspaceDialog) .jp-Dialog-body {
   flex: 0 1 auto;
   min-height: 0;
 }
@@ -167,7 +167,7 @@
   min-height: 0;
   overflow: hidden;
 }
-.csModalScroll {
+.csDialogScroll {
   flex: 0 1 auto;
   min-height: 0;
   overflow: auto;

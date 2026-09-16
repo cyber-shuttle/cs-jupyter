@@ -1,12 +1,94 @@
-// Interactive SSH terminal embedded in a login or discovery flow. It is
-// credential-blind: prompts and replies pass straight through to SSH. It owns
-// only the transcript; the caller announces what operation is running.
+// SSH interactive auth end to end: the token-bearing WebSocket connector, the
+// terminal that renders an operation's transcript, and the dock that hosts it
+// during sign-in. A WebSocket cannot carry an Authorization header, so the
+// bearer and identity tokens travel as subprotocols, refreshed on each open.
+// The console is credential-blind, passing prompts and replies straight
+// through to SSH, and the dock attaches to document.body rather than the
+// session detail dialog so closing that dialog cannot destroy it.
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
+import { Widget } from "@lumino/widgets";
 import {
-  CYBERSHUTTLE_WEBSOCKET_PROTOCOL,
-  type OAuthWebSocketConnector,
-} from "./OAuthWebSocket";
+  assertSecureOrLoopback,
+  parseUrl,
+  type ITokenProvider,
+} from "./Common";
+import { element } from "./dom";
+
+const CYBERSHUTTLE_WEBSOCKET_PROTOCOL = "cybershuttle.v1";
+const CYBERSHUTTLE_BEARER_PROTOCOL_PREFIX = "bearer.";
+const CYBERSHUTTLE_IDENTITY_PROTOCOL_PREFIX = "identity.";
+const MAX_ACCESS_TOKEN_BYTES = 16 * 1024;
+const TOKEN_CONTROL_OR_WHITESPACE = /[\s\u0000-\u001f\u007f-\u009f]/u;
+
+export type OAuthWebSocketConnector = () => Promise<WebSocket>;
+
+export type WebSocketConstructor = new (
+  url: string,
+  protocols: string[],
+) => WebSocket;
+
+export class OAuthWebSocketFactory {
+  private readonly _controlOrigin: string;
+
+  constructor(
+    private readonly _auth: ITokenProvider,
+    controlOrigin: string,
+    private readonly _WebSocket: WebSocketConstructor = WebSocket,
+  ) {
+    const httpOrigin = new URL(controlOrigin);
+    httpOrigin.protocol = httpOrigin.protocol === "https:" ? "wss:" : "ws:";
+    this._controlOrigin = new URL(
+      validateWebSocketUrl(httpOrigin.toString()),
+    ).origin;
+  }
+
+  async open(rawUrl: string): Promise<WebSocket> {
+    const url = validateWebSocketUrl(rawUrl);
+    if (new URL(url).origin !== this._controlOrigin) {
+      throw new Error(
+        "CyberShuttle blocked a WebSocket outside the configured control origin.",
+      );
+    }
+    const credentials = await this._auth.acquireToken();
+    const encodedAccess = encodeAccessToken(credentials.accessToken);
+    const encodedIdentity = encodeAccessToken(credentials.idToken);
+    return new this._WebSocket(url, [
+      CYBERSHUTTLE_WEBSOCKET_PROTOCOL,
+      `${CYBERSHUTTLE_BEARER_PROTOCOL_PREFIX}${encodedAccess}`,
+      `${CYBERSHUTTLE_IDENTITY_PROTOCOL_PREFIX}${encodedIdentity}`,
+    ]);
+  }
+}
+
+function encodeAccessToken(token: string): string {
+  if (!token || TOKEN_CONTROL_OR_WHITESPACE.test(token)) {
+    throw new Error(
+      "CyberShuttle delegated token contains invalid characters.",
+    );
+  }
+  const bytes = new TextEncoder().encode(token);
+  if (bytes.byteLength > MAX_ACCESS_TOKEN_BYTES) {
+    throw new Error("CyberShuttle delegated token is too large.");
+  }
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+function validateWebSocketUrl(raw: string): string {
+  const url = parseUrl(raw, "CyberShuttle WebSocket URL is invalid.");
+  assertSecureOrLoopback(
+    url,
+    "wss:",
+    "ws:",
+    "CyberShuttle WebSocket URL must use WSS or loopback WS without credentials, query, or fragment.",
+  );
+  return url.toString();
+}
 
 const MAX_ANNOUNCEMENT_LENGTH = 512;
 
@@ -49,7 +131,7 @@ export class SshOperationConsole implements ISshOperationConsole {
   private _socket: WebSocket | undefined;
   private _resizeObserver: ResizeObserver | undefined;
   private _disposed = false;
-  private _generation = 0;
+  private _epoch = 0;
   private _callbacks: ISshOperationCallbacks | undefined;
   private _encoder = new TextEncoder();
   private _decoder = new TextDecoder();
@@ -97,7 +179,7 @@ export class SshOperationConsole implements ISshOperationConsole {
 
   complete(message: string, collapse = true): void {
     this._finished = true;
-    this._generation++;
+    this._epoch++;
     this._say(boundedAnnouncement(message, "Operation complete."));
     this.node.hidden = collapse;
     this._closeSocket();
@@ -112,7 +194,7 @@ export class SshOperationConsole implements ISshOperationConsole {
       return;
     }
     this._disposed = true;
-    this._generation++;
+    this._epoch++;
     this._closeSocket();
     document.removeEventListener("keydown", this._enter, true);
     this._resizeObserver?.disconnect();
@@ -121,10 +203,10 @@ export class SshOperationConsole implements ISshOperationConsole {
   }
 
   private _connect(connect: OAuthWebSocketConnector): void {
-    const generation = ++this._generation;
+    const epoch = ++this._epoch;
     void connect().then(
       (socket) => {
-        if (this._disposed || generation !== this._generation) {
+        if (this._disposed || epoch !== this._epoch) {
           socket.close();
           return;
         }
@@ -159,7 +241,7 @@ export class SshOperationConsole implements ISshOperationConsole {
           );
       },
       (error) => {
-        if (!this._disposed && generation === this._generation) {
+        if (!this._disposed && epoch === this._epoch) {
           this._fail(
             boundedAnnouncement(
               error instanceof Error ? error.message : undefined,
@@ -261,4 +343,71 @@ export class SshOperationConsole implements ISshOperationConsole {
 function boundedAnnouncement(value: unknown, fallback: string): string {
   const message = typeof value === "string" ? value.trim() : "";
   return (message || fallback).slice(0, MAX_ANNOUNCEMENT_LENGTH);
+}
+
+export class SshLoginDock extends Widget {
+  private _console: ISshOperationConsole | undefined;
+  private _pending: ((reason: Error) => void) | undefined;
+  private _status = element("div", "", "csSshAuthStatus");
+
+  constructor(
+    private _consoleFactory: SshOperationConsoleFactory = () =>
+      new SshOperationConsole(),
+  ) {
+    super();
+    this.addClass("csSshLoginDock");
+    this._status.setAttribute("role", "status");
+    this.node.appendChild(this._status);
+    this.hide();
+  }
+
+  login(alias: string, connect: OAuthWebSocketConnector): Promise<void> {
+    this._settle(new Error("Superseded by another SSH login."));
+    this._status.textContent = `${alias} is asking for credentials.`;
+    this.show();
+    if (!this._console) {
+      this._console = this._consoleFactory();
+      this.node.appendChild(this._console.node);
+    }
+    const console = this._console;
+    return new Promise<void>((resolve, reject) => {
+      this._pending = reject;
+      const current = (): boolean => this._pending === reject;
+      const done = (message: string): boolean => {
+        if (!current()) return false;
+        this._pending = undefined;
+        this._status.textContent = message;
+        console.complete(message);
+        this.hide();
+        return true;
+      };
+      console.start(connect, {
+        ready: () => done(`Signed in to ${alias}.`) && resolve(),
+        failed: (message) => done(message) && reject(new Error(message)),
+        status: (message) => {
+          if (current()) this._status.textContent = message;
+        },
+      });
+      requestAnimationFrame(() => {
+        if (!current()) return;
+        this.node.scrollIntoView?.({ block: "nearest" });
+        console.focus();
+      });
+    });
+  }
+
+  dispose(): void {
+    if (this.isDisposed) {
+      return;
+    }
+    this._settle(new Error("SSH login dismissed."));
+    this._console?.dispose();
+    super.dispose();
+  }
+
+  private _settle(reason: Error): void {
+    const reject = this._pending;
+    this._pending = undefined;
+    reject?.(reason);
+  }
 }
