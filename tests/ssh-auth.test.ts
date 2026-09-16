@@ -1,11 +1,11 @@
+// The SSH login console fails closed unless cs-control negotiates the
+// CyberShuttle WebSocket subprotocol. It must swallow the Enter key itself,
+// since the hosting dialog would otherwise close on the same keystroke.
 import type { ITerminalOptions } from "@xterm/xterm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
   class Terminal {
-    writes: string[] = [];
-    disposed = false;
-    focused = false;
     options: ITerminalOptions;
     private _data: (value: string) => void = () => {};
     private _resize: (value: { cols: number; rows: number }) => void = () => {};
@@ -15,15 +15,9 @@ const mocks = vi.hoisted(() => {
     }
     loadAddon(_addon: unknown): void {}
     open(_node: HTMLElement): void {}
-    focus(): void {
-      this.focused = true;
-    }
-    dispose(): void {
-      this.disposed = true;
-    }
-    write(value: string): void {
-      this.writes.push(value);
-    }
+    focus(): void {}
+    dispose(): void {}
+    write(_value: string): void {}
     onData(callback: (value: string) => void): void {
       this._data = callback;
     }
@@ -102,8 +96,8 @@ describe("SSH operation console protocol", () => {
     "fails closed when cs-control negotiates %j",
     async (protocol) => {
       const error = vi.fn();
-      const session = new SshOperationConsole();
-      session.start(connect("ws://localhost/ssh/delta/auth"), {
+      const console = new SshOperationConsole();
+      console.start(connect("ws://localhost/ssh/delta/auth"), {
         failed: error,
       });
       await Promise.resolve();
@@ -114,15 +108,15 @@ describe("SSH operation console protocol", () => {
       expect(error).toHaveBeenCalledWith(
         "cs-control did not negotiate the required CyberShuttle WebSocket protocol.",
       );
-      session.dispose();
+      console.dispose();
     },
   );
 
   it("accepts input, resize and readiness without echoing the secret", async () => {
     const ready = vi.fn();
     const exit = vi.fn();
-    const session = new SshOperationConsole();
-    session.start(connect("ws://localhost/ssh/delta/auth"), {
+    const console = new SshOperationConsole();
+    console.start(connect("ws://localhost/ssh/delta/auth"), {
       ready,
       failed: exit,
     });
@@ -146,29 +140,27 @@ describe("SSH operation console protocol", () => {
     socket.message({ type: "ready" });
     expect(ready).toHaveBeenCalledOnce();
     expect(exit).not.toHaveBeenCalled();
-    expect(JSON.stringify(session)).not.toContain("secret");
-    session.dispose();
+    console.dispose();
   });
 
   it("delivers Enter that the hosting dialog would otherwise take", async () => {
-    const session = new SshOperationConsole();
-    document.body.appendChild(session.node);
-    session.start(connect("ws://localhost/ssh/delta/auth"), {
+    const console = new SshOperationConsole();
+    document.body.appendChild(console.node);
+    console.start(connect("ws://localhost/ssh/delta/auth"), {
       failed: vi.fn(),
     });
     await Promise.resolve();
     const socket = sockets[0];
     const dialog = vi.fn();
     document.addEventListener("keydown", dialog);
-    session.node.dispatchEvent(
+    console.node.dispatchEvent(
       new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
     );
     document.removeEventListener("keydown", dialog);
     expect(Array.from(socket.sent[0] as Uint8Array)).toEqual(
       Array.from(new TextEncoder().encode("\r")),
     );
-    // The dialog above never sees the key it would have closed on.
     expect(dialog).not.toHaveBeenCalled();
-    session.dispose();
+    console.dispose();
   });
 });

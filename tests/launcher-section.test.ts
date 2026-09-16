@@ -1,8 +1,10 @@
+// JupyterLab disposes a launcher once anything is launched from it. The sessions
+// section and its header must follow to whatever launcher becomes current.
 import { MainAreaWidget } from "@jupyterlab/apputils";
 import { Signal } from "@lumino/signaling";
 import { Widget } from "@lumino/widgets";
 import { describe, expect, it, vi } from "vitest";
-import { runtimeUiPlugin } from "../src/runtime-ui";
+import { sessionUiPlugin } from "../src/session-ui";
 
 class LauncherContent extends Widget {
   constructor() {
@@ -30,7 +32,7 @@ async function settle(): Promise<void> {
   }
 }
 
-describe("runtimes section across launchers", () => {
+describe("sessions section across launchers", () => {
   it("follows the launcher JupyterLab disposes when something is launched", async () => {
     const first = launcher("launcher-1");
     const currentChanged = new Signal<unknown, { newValue: Widget | null }>({});
@@ -49,13 +51,12 @@ describe("runtimes section across launchers", () => {
       restored: Promise.resolve(),
     };
 
-    await runtimeUiPlugin.activate(app as never, null);
+    await sessionUiPlugin.activate(app as never, null);
     await settle();
     expect(section(first)).not.toBeNull();
     const header = first.contentHeader.widgets[0];
     expect(header).toBeDefined();
 
-    // Launching anything disposes the launcher it was launched from.
     first.content.dispose();
     expect(first.isDisposed).toBe(true);
     expect(header.isDisposed).toBe(false);
@@ -65,5 +66,39 @@ describe("runtimes section across launchers", () => {
     await settle();
     expect(section(next)).not.toBeNull();
     expect(next.contentHeader.widgets[0]).toBe(header);
+  });
+
+  it("connects title.changed once per launcher when alternating between two", async () => {
+    const first = launcher("launcher-4");
+    const second = launcher("launcher-5");
+    const currentChanged = new Signal<unknown, { newValue: Widget | null }>({});
+    const app = {
+      commands: {
+        addCommand: vi.fn(),
+        execute: vi.fn(),
+        hasCommand: () => true,
+      },
+      shell: {
+        currentWidget: first as Widget,
+        widgets: () => [first as Widget].values(),
+        activateById: vi.fn(),
+        currentChanged,
+      },
+      restored: Promise.resolve(),
+    };
+    const firstConnectSpy = vi.spyOn(first.title.changed, "connect");
+    const secondConnectSpy = vi.spyOn(second.title.changed, "connect");
+
+    await sessionUiPlugin.activate(app as never, null);
+    await settle();
+    currentChanged.emit({ newValue: second });
+    await settle();
+    currentChanged.emit({ newValue: first });
+    await settle();
+    currentChanged.emit({ newValue: second });
+    await settle();
+
+    expect(firstConnectSpy).toHaveBeenCalledTimes(1);
+    expect(secondConnectSpy).toHaveBeenCalledTimes(1);
   });
 });

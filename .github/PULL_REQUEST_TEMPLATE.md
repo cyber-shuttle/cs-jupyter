@@ -13,6 +13,6 @@ What you ran and what it reported. `bun run build` must precede `bun run test:di
 
 ## Checklist
 
-- [ ] `bun run lint` passes (CI does not check formatting)
+- [ ] `bun run lint` passes
 - [ ] New behaviour is covered by a test
 - [ ] Documentation updated, if this changes deployment, configuration or the cs-control wire contract

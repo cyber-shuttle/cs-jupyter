@@ -1,8 +1,10 @@
-import type { IMetricSample, IRun, IRunStats, IRuntime } from "./Common";
+// Turns raw metric samples and run accounting into series and summaries the
+// panel renders. A cumulative CPU counter is turned into a rate between
+// consecutive readings. A finished run reports Slurm's accounting once it lands,
+// or its own last samples otherwise.
+import type { IMetricSample, IRun, IRunStats, ISession } from "./Common";
+import { formatRemaining } from "./walltime";
 
-// A cumulative CPU counter says nothing on its own; the rate between two
-// readings is the figure that means something, so a gap missing either reading
-// is dropped rather than guessed.
 export function cpuCoreSeries(samples: readonly IMetricSample[]): number[] {
   return samples.flatMap((sample, index) => {
     const previous = samples[index - 1];
@@ -26,8 +28,6 @@ export const memoryGigabytes = (samples: readonly IMetricSample[]): number[] =>
     sample.memBytes === undefined ? [] : [sample.memBytes / 1024 ** 3],
   );
 
-// The busiest device in each sample: a card sitting idle beside a saturated one
-// is not what an owner needs to see at a glance.
 export const gpuUtilisation = (samples: readonly IMetricSample[]): number[] =>
   samples.flatMap((sample) =>
     sample.gpus?.length
@@ -35,29 +35,26 @@ export const gpuUtilisation = (samples: readonly IMetricSample[]): number[] =>
       : [],
   );
 
-export interface IResourceGraph {
+interface IResourceGraph {
   label: string;
   values: number[];
-  // The full height of the plot, so a series is read against what was allocated
-  // rather than against its own maximum.
   ceiling: number;
   format: (value: number) => string;
 }
 
-// CPU, MEM and GPU, in that order and under those names, the way cs-bridge
-// labels the same three series.
 export function resourceGraphs(
-  allocation: Pick<IRuntime, "resources">,
+  spec: Pick<ISession, "resources"> & { stats?: IRunStats },
   samples: readonly IMetricSample[],
 ): IResourceGraph[] {
-  const { cores, memoryMb, gpuCount = 0 } = allocation.resources;
+  const { cores, memoryMb, gpuCount = 0 } = spec.resources;
+  const cpuCeiling = spec.stats?.cores ?? cores;
   const memoryGb = memoryMb / 1024;
   const graphs: IResourceGraph[] = [
     {
       label: "CPU",
       values: cpuCoreSeries(samples),
-      ceiling: cores,
-      format: (value) => `${value.toFixed(1)} / ${cores} cores`,
+      ceiling: cpuCeiling,
+      format: (value) => `${value.toFixed(1)} / ${cpuCeiling} cores`,
     },
     {
       label: "MEM",
@@ -77,13 +74,11 @@ export function resourceGraphs(
   return graphs;
 }
 
-// values → SVG polyline points, newest last and the maximum at the top. slots
-// fixes the x-grid to the window's capacity, so a filling window grows in from
-// the left and then slides rather than restretching on every sample.
+export const PLOT_WIDTH = 60;
+export const PLOT_HEIGHT = 40;
+
 export function sparklinePoints(
   values: number[],
-  width: number,
-  height: number,
   ceiling: number,
   slots: number,
 ): string {
@@ -93,13 +88,19 @@ export function sparklinePoints(
   return values
     .map(
       (value, index) =>
-        `${round((index * width) / steps)},${round(height - (value / span) * height)}`,
+        `${round((index * PLOT_WIDTH) / steps)},${round(PLOT_HEIGHT - (value / span) * PLOT_HEIGHT)}`,
     )
     .join(" ");
 }
 
-// A finished run is described by whatever it left behind: Slurm's accounting
-// when the flush landed, and the allocation's own last samples when it did not.
+export function sessionSummary(session: ISession): Array<[string, string]> {
+  return [
+    ["Partition", session.partition],
+    ["Cores", String(session.resources.cores)],
+    ["Memory", `${session.resources.memoryMb} MB`],
+  ];
+}
+
 export function runSummary(run: IRun): Array<[string, string]> {
   const rows: Array<[string, string]> = [
     ["Ended", new Date(run.endedAt).toLocaleString()],
@@ -107,12 +108,14 @@ export function runSummary(run: IRun): Array<[string, string]> {
     ["Ran for", elapsedLabel(run)],
   ];
   const stats: IRunStats = run.stats ?? {};
+  if (stats.cores !== undefined)
+    rows.push(["Allocated cores", String(stats.cores)]);
   if (stats.maxRss) rows.push(["Peak memory", stats.maxRss]);
   if (stats.requestedMemory) rows.push(["Requested", stats.requestedMemory]);
   if (stats.cpuEfficiencyPct !== undefined) {
     rows.push([
       "CPU used",
-      `${Math.round(stats.cpuEfficiencyPct)}% of allocated`,
+      `${Math.round(stats.cpuEfficiencyPct)}% of requested`,
     ]);
   }
   if (stats.memoryEfficiencyPct !== undefined) {
@@ -124,7 +127,6 @@ export function runSummary(run: IRun): Array<[string, string]> {
   return rows;
 }
 
-// The accounting figure when it landed, and the wall-clock span otherwise.
 function elapsedLabel(run: IRun): string {
   const seconds =
     run.stats?.elapsedSeconds ??
@@ -134,19 +136,11 @@ function elapsedLabel(run: IRun): string {
           (Date.parse(run.endedAt) - Date.parse(run.startedAt)) / 1000,
         )
       : undefined);
-  if (seconds === undefined) return "—";
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.round((seconds % 3600) / 60);
-  return hours ? `${hours}h ${minutes}m` : `${minutes}m`;
+  return seconds === undefined ? "—" : formatRemaining(seconds * 1000);
 }
 
-// cs-control chases Slurm's accounting for ten minutes after a run ends and then
-// leaves the record as it is.
 const ACCOUNTING_WINDOW_MS = 10 * 60_000;
 
-// Absent accounting means two different things. Just after a run ends the flush
-// has not landed yet and is still coming; long after, it never arrived and never
-// will, and saying it "will appear here" would be a promise nothing keeps.
 export function accountingState(
   run: IRun,
   now: number,

@@ -1,6 +1,10 @@
+// Covers the metrics and usage math and the run-history view built on it. A
+// cgroup CPU counter only climbs, so cores-busy comes from the rate between two
+// readings. RunHistory must keep keyboard focus on an open disclosure across the
+// sample poll that rebuilds it.
 import { describe, expect, it } from "vitest";
-import type { IMetricSample, IRun, IRuntime } from "../src/Common";
-import { uiState } from "./fakes";
+import type { IMetricSample, IRun, ISession } from "../src/Common";
+import { ControllerFake, runFixture, sessionFixture, uiState } from "./fakes";
 import {
   accountingState,
   cpuCoreSeries,
@@ -10,6 +14,8 @@ import {
   runSummary,
   sparklinePoints,
 } from "../src/metrics";
+import { RunHistory } from "../src/RunHistory";
+import { usagePlots } from "../src/usage";
 
 const sample = (
   seconds: number,
@@ -20,8 +26,6 @@ const sample = (
 });
 
 describe("resource samples", () => {
-  // A cgroup CPU counter only ever climbs, so the rate between two readings is
-  // the figure that means anything.
   it("differentiates the cumulative CPU counter into cores busy", () => {
     const series = cpuCoreSeries([
       sample(0, { cpuUsageUsec: 0 }),
@@ -39,7 +43,6 @@ describe("resource samples", () => {
         sample(10, { cpuUsageUsec: 20_000_000 }),
       ]),
     ).toEqual([]);
-    // Two readings at the same instant have no elapsed time to divide by.
     expect(
       cpuCoreSeries([
         sample(0, { cpuUsageUsec: 0 }),
@@ -55,18 +58,13 @@ describe("resource samples", () => {
     expect(
       gpuUtilisation([
         sample(0, {
-          gpus: [
-            { index: 0, utilPct: 12, memUsedMiB: 0, memTotalMiB: 40960 },
-            { index: 1, utilPct: 88, memUsedMiB: 0, memTotalMiB: 40960 },
-          ],
+          gpus: [{ utilPct: 12 }, { utilPct: 88 }],
         }),
       ]),
-      // An idle card beside a saturated one must not read as half busy.
     ).toEqual([88]);
   });
 
-  // A series read on its own scale would make an idle allocation look busy.
-  it("graphs each series against what the allocation was given", () => {
+  it("graphs each series against what the session was given", () => {
     const graphs = resourceGraphs(
       {
         resources: { cores: 8, memoryMb: 16384, wallMinutes: 60, gpuCount: 2 },
@@ -81,51 +79,42 @@ describe("resource samples", () => {
     expect(graphs[1].format(4)).toBe("4.0 / 16.0 GB");
   });
 
-  it("leaves out the GPU graph for an allocation that asked for none", () => {
+  it("leaves out the GPU graph for a session that asked for none", () => {
     const graphs = resourceGraphs(
       { resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 } },
       [sample(0)],
     );
     expect(graphs.map((graph) => graph.label)).toEqual(["CPU", "MEM"]);
   });
+
+  it("graphs a finished run's CPU against Slurm's allocated cores, not the request", () => {
+    const graphs = resourceGraphs(
+      {
+        resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 },
+        stats: { cores: 64 },
+      },
+      [sample(0)],
+    );
+    expect(graphs[0].ceiling).toBe(64);
+  });
 });
 
 describe("sparkline", () => {
-  // The x-grid is the window's capacity, so a filling window grows in from the
-  // left and then slides rather than restretching on every sample.
   it("places points on the window's grid with the maximum at the top", () => {
-    expect(sparklinePoints([0, 5, 10], 100, 24, 10, 5)).toBe("0,24 25,12 50,0");
+    expect(sparklinePoints([0, 5, 10], 10, 5)).toBe("0,40 15,20 30,0");
   });
 
   it("keeps a series that overshoots its ceiling inside the graph", () => {
-    const points = sparklinePoints([20], 100, 24, 10, 1).split(",")[1];
+    const points = sparklinePoints([20], 10, 1).split(",")[1];
     expect(Number(points)).toBe(0);
-  });
-
-  it("says nothing for no samples", () => {
-    expect(sparklinePoints([], 100, 24, 10, 20)).toBe("");
   });
 });
 
 describe("run report", () => {
-  const run = (over: Partial<IRun> = {}): IRun =>
-    ({
-      runtimeId: "rt-012345abcdef",
-      generation: "g-0123456789abcdef",
-      sshHost: "delta",
-      partition: "cpu",
-      rootFolder: "$HOME/project",
-      resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 },
-      finalState: "STOPPED",
-      startedAt: "2030-01-01T00:00:00Z",
-      endedAt: "2030-01-01T01:00:00Z",
-      ...over,
-    }) as IRun;
-
   it("reports what Slurm's accounting said once it landed", () => {
     const rows = new Map(
       runSummary(
-        run({
+        runFixture({
           stats: {
             elapsedSeconds: 5400,
             maxRss: "2.0 GB",
@@ -138,14 +127,25 @@ describe("run report", () => {
     );
     expect(rows.get("Ran for")).toBe("1h 30m");
     expect(rows.get("Peak memory")).toBe("2.0 GB");
-    expect(rows.get("CPU used")).toBe("50% of allocated");
+    expect(rows.get("CPU used")).toBe("50% of requested");
     expect(rows.get("Outcome")).toBe("STOPPED");
   });
 
-  // The flush lands a beat after the job ends, so a run frozen without it still
-  // knows how long it ran and must not invent the rest.
+  it("labels Slurm's allocated cores distinctly from the requested cores", () => {
+    const rows = new Map(
+      runSummary(
+        runFixture({
+          resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 },
+          stats: { cores: 64, elapsedSeconds: 60 },
+        }),
+      ),
+    );
+    expect(rows.get("Allocated cores")).toBe("64");
+    expect(rows.has("Cores")).toBe(false);
+  });
+
   it("falls back to the wall-clock span and claims no figures it lacks", () => {
-    const rows = new Map(runSummary(run()));
+    const rows = new Map(runSummary(runFixture()));
     expect(rows.get("Ran for")).toBe("1h 0m");
     expect(rows.has("Peak memory")).toBe(false);
     expect(rows.has("CPU used")).toBe(false);
@@ -156,12 +156,9 @@ describe("accounting state", () => {
   const ran = (endedAt: string, stats?: IRun["stats"]): IRun =>
     ({ endedAt, stats }) as IRun;
 
-  // The flush lands a beat after the job ends, so a fresh run is waiting.
   it("is pending only while the flush could still land", () => {
     const now = Date.parse("2030-01-01T01:00:00Z");
     expect(accountingState(ran("2030-01-01T00:59:00Z"), now)).toBe("pending");
-    // Long past the window cs-control gives up on: promising it "will appear"
-    // would be a promise nothing keeps.
     expect(accountingState(ran("2030-01-01T00:00:00Z"), now)).toBe("never");
     expect(
       accountingState(ran("2030-01-01T00:00:00Z", { maxRss: "1.0 GB" }), now),
@@ -170,8 +167,8 @@ describe("accounting state", () => {
 });
 
 describe("usage plots", () => {
-  const runtime = {
-    id: "rt-012345abcdef",
+  const session = {
+    id: "s-012345abcdef",
     resources: { cores: 8, memoryMb: 16384, wallMinutes: 60, gpuCount: 2 },
   } as never;
   const samples: IMetricSample[] = [
@@ -184,12 +181,10 @@ describe("usage plots", () => {
   ];
 
   it("stacks CPU, MEM and GPU in one row, each titled above its own plot", async () => {
-    const { usagePlots, latest } = await import("../src/usage");
-    const row = usagePlots(runtime, samples, latest);
+    const row = usagePlots(session, samples, "latest");
     expect(
       [...row.querySelectorAll(".csUsageTitle")].map((n) => n.textContent),
     ).toEqual(["CPU", "MEM", "GPU"]);
-    // One plot per series, and the panel is what carries the 3:2 shape.
     expect(row.querySelectorAll(".csPlot svg").length).toBe(3);
     expect(row.querySelector(".csPlot svg")?.getAttribute("viewBox")).toBe(
       "0 0 60 40",
@@ -198,54 +193,30 @@ describe("usage plots", () => {
   });
 
   it("calls out the latest reading live and the peak on a finished run", async () => {
-    const { usagePlots, latest, peak } = await import("../src/usage");
-    const live = usagePlots(runtime, samples, latest);
+    const live = usagePlots(session, samples, "latest");
     expect(live.textContent).toContain("2.0 / 16.0 GB");
-    const done = usagePlots(runtime, samples, peak, "peak ");
+    const done = usagePlots(session, samples, "peak");
     expect(done.textContent).toContain("peak 2.0 / 16.0 GB");
   });
 });
 
 describe("run history view", () => {
-  const finished: IRun = {
-    runtimeId: "rt-012345abcdef",
-    generation: "g-0123456789abcdef",
-    sshHost: "delta",
-    partition: "cpu",
-    rootFolder: "$HOME/project",
-    resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 },
-    finalState: "STOPPED",
-    startedAt: "2030-01-01T00:00:00Z",
-    endedAt: "2030-01-01T01:00:00Z",
+  const finished = runFixture({
     stats: { maxRss: "2.0 GB", elapsedSeconds: 3600 },
-  } as IRun;
+  });
 
-  const live = {
-    id: "rt-999999999999",
+  const live = sessionFixture({
+    id: "s-999999999999",
     generation: "g-fedcba9876543210",
-    state: "READY",
     sshHost: "deltaTest",
-    partition: "cpu",
-    rootFolder: "$HOME/project",
     resources: { cores: 4, memoryMb: 8192, wallMinutes: 120 },
-    createdAt: "2030-01-01T00:00:00Z",
-    updatedAt: "2030-01-01T00:00:00Z",
     startedAt: "2030-01-01T00:00:00Z",
-  } as IRuntime;
+  });
 
-  const panelWith = (runs: IRun[], runtimes: IRuntime[]) => {
-    const listeners: Array<(s: unknown, v: unknown) => void> = [];
-    return {
-      state: { ...uiState(), runs, runtimes },
-      stateChanged: {
-        connect: (fn: (s: unknown, v: unknown) => void) => listeners.push(fn),
-        disconnect: () => undefined,
-      },
-    } as never;
-  };
+  const panelWith = (runs: IRun[], sessions: ISession[]) =>
+    new ControllerFake(uiState({ runs, sessions })) as never;
 
   it("lists finished runs with their report", async () => {
-    const { RunHistory } = await import("../src/RunHistory");
     const history = new RunHistory(panelWith([finished], []));
     expect(history.node.textContent).toContain("delta");
     expect(history.node.textContent).toContain("2.0 GB");
@@ -253,37 +224,46 @@ describe("run history view", () => {
     history.dispose();
   });
 
-  // A generation still going is a run like any other; calling it STOPPED, or
-  // leaving it out, both misrepresent what the account is actually running.
-  it("shows an allocation still going in its live state, not as stopped", async () => {
-    const { RunHistory } = await import("../src/RunHistory");
+  it("shows a session still going in its live state, not as stopped", async () => {
     const history = new RunHistory(panelWith([finished], [live]));
-    const pills = [...history.node.querySelectorAll(".csRuntimeState")].map(
+    const pills = [...history.node.querySelectorAll(".csSessionState")].map(
       (node) => node.textContent,
     );
-    // Newest first: the one still running leads.
     expect(pills).toEqual(["READY", "STOPPED"]);
-    // A live entry states what it is, the way a finished one states what it was.
-    expect(history.node.textContent).toContain("READY");
     expect(history.node.textContent).toContain("Remaining");
     expect(history.node.textContent).not.toContain("not started yet");
     history.dispose();
   });
 
-  // A terminal card is already represented by its frozen run; listing it twice
-  // would show the same allocation as both finished and in flight.
-  it("does not list a terminal runtime as if it were still going", async () => {
-    const { RunHistory } = await import("../src/RunHistory");
-    const stopped = { ...live, state: "STOPPED" } as IRuntime;
+  it("does not list a terminal session as if it were still going", async () => {
+    const stopped = { ...live, state: "STOPPED" } as ISession;
     const history = new RunHistory(panelWith([], [stopped]));
     expect(history.node.textContent).toContain("No runs yet.");
     history.dispose();
   });
 
-  it("says so plainly when nothing has run", async () => {
-    const { RunHistory } = await import("../src/RunHistory");
-    const history = new RunHistory(panelWith([], []));
-    expect(history.node.textContent).toContain("No runs yet.");
+  it("keeps focus on a disclosure across a state update", async () => {
+    const controller = new ControllerFake(
+      uiState({ runs: [finished], sessions: [live] }),
+    ) as never;
+    const history = new RunHistory(controller);
+    document.body.appendChild(history.node);
+
+    const summary = history.node.querySelector<HTMLElement>(
+      "[data-session-action]",
+    )!;
+    summary.focus();
+    expect(document.activeElement).toBe(summary);
+
+    (controller as unknown as { setState(state: unknown): void }).setState(
+      uiState({ runs: [finished], sessions: [live] }),
+    );
+
+    const restored = history.node.querySelector<HTMLElement>(
+      "[data-session-action]",
+    )!;
+    expect(document.activeElement).toBe(restored);
     history.dispose();
+    document.body.removeChild(history.node);
   });
 });

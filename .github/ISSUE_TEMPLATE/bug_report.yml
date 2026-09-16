@@ -16,13 +16,13 @@ body:
     validations:
       required: true
   - type: dropdown
-    id: runtime-state
+    id: session-state
     attributes:
-      label: Runtime state
-      description: Most behaviour here depends on it. The runtime card shows the state.
+      label: Session state
+      description: Most behaviour here depends on it. The session card shows the state.
       options:
-        - No runtime selected (signed out)
-        - No runtime selected (signed in)
+        - No session selected (signed out)
+        - No session selected (signed in)
         - SUBMITTING
         - QUEUED
         - STARTING

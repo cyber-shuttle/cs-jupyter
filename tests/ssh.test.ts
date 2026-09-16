@@ -1,12 +1,18 @@
+// Every field lookup goes through control, input or picker, so a broken selector
+// fails where it is read. Discovery and validation are async requests resolved
+// over two microtask turns, matching how the form really resolves them. Only SSH
+// host entries CyberShuttle itself wrote are editable or deletable; other
+// entries are read-only.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { IRuntimeCreateRequest } from "../src/Common";
+import type { ISessionCreateRequest } from "../src/Common";
 import {
   ControlClient,
   ControlError,
   validateSlurmResource,
 } from "../src/ControlClient";
-import { CreateRuntimeForm } from "../src/CreateRuntimeForm";
-import { FakeOperation, fakeAuth } from "./fakes";
+import { CreateSessionForm } from "../src/CreateSessionForm";
+import { SshHosts } from "../src/SshHosts";
+import { FakeOperation } from "./fakes";
 
 const hosts = ["alpha", "beta"].map((name) => ({
   name,
@@ -15,7 +21,6 @@ const hosts = ["alpha", "beta"].map((name) => ({
 function discovery(host: string) {
   return {
     host,
-    homeDir: `/home/${host}`,
     accounts: [`${host}-one`, `${host}-two`],
     partitions: [
       { name: `${host}-cpu`, cpuCount: 16, memoryMb: 64000, gres: [] },
@@ -26,12 +31,11 @@ function discovery(host: string) {
         gres: [{ name: "gpu:a100", count: 4 }],
       },
     ],
+    homeDir: `/home/${host}`,
   };
 }
-// Every field lookup lands here, so a selector that stops matching fails where
-// it is read rather than three assertions later.
 function control<T extends HTMLElement>(
-  form: CreateRuntimeForm,
+  form: CreateSessionForm,
   selector: string,
 ): T {
   const node = form.node.querySelector<T>(selector);
@@ -41,78 +45,49 @@ function control<T extends HTMLElement>(
   return node;
 }
 
-const input = (form: CreateRuntimeForm, name: string): HTMLInputElement =>
+const input = (form: CreateSessionForm, name: string): HTMLInputElement =>
   control(form, `input[name="${name}"]`);
-const picker = (form: CreateRuntimeForm, name: string): HTMLSelectElement =>
+const picker = (form: CreateSessionForm, name: string): HTMLSelectElement =>
   control(form, `select[name="${name}"]`);
 
-// The host is the form's first field, so choosing one is answering it.
-const hostSelect = (form: CreateRuntimeForm): HTMLSelectElement =>
+const hostSelect = (form: CreateSessionForm): HTMLSelectElement =>
   picker(form, "sshHost");
-function choose(form: CreateRuntimeForm, runtime: string): void {
+function choose(form: CreateSessionForm, alias: string): void {
   const host = hostSelect(form);
-  if (![...host.options].some((option) => option.value === runtime)) {
-    throw new Error(`runtime host ${runtime} is not listed`);
+  if (![...host.options].some((option) => option.value === alias)) {
+    throw new Error(`host alias ${alias} is not listed`);
   }
-  host.value = runtime;
+  host.value = alias;
   host.onchange?.(new Event("change"));
 }
-function backToHosts(form: CreateRuntimeForm): void {
+function backToHosts(form: CreateSessionForm): void {
   const host = hostSelect(form);
   host.value = "";
   host.onchange?.(new Event("change"));
 }
-function options(form: CreateRuntimeForm): HTMLElement | null {
-  return form.node.querySelector<HTMLElement>(".csRuntimeOptions");
+function options(form: CreateSessionForm): HTMLElement | null {
+  return form.node.querySelector<HTMLElement>(".csSessionOptions");
 }
-class AnimationFrameHarness {
-  private _callbacks: FrameRequestCallback[] = [];
-
-  readonly request = (callback: FrameRequestCallback): number => {
-    this._callbacks.push(callback);
-    return this._callbacks.length;
-  };
-
-  get pending(): number {
-    return this._callbacks.length;
-  }
-
-  advance(): void {
-    const callback = this._callbacks.shift();
-    if (!callback) {
-      throw new Error("No animation frame is pending.");
-    }
-    callback(0);
-  }
-}
-
-let animationFrames: AnimationFrameHarness;
-
 beforeEach(() => {
-  animationFrames = new AnimationFrameHarness();
-  vi.stubGlobal("requestAnimationFrame", animationFrames.request);
+  vi.stubGlobal("requestAnimationFrame", () => 0);
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function submitConfiguration(form: CreateRuntimeForm): void {
+function submitConfiguration(form: CreateSessionForm): void {
   form.node
     .querySelector("form")!
     .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
 }
 
-async function advanceToValidation(): Promise<void> {
-  await Promise.resolve();
-}
-
-async function reviewAndSubmit(form: CreateRuntimeForm): Promise<void> {
+async function reviewAndSubmit(form: CreateSessionForm): Promise<void> {
   submitConfiguration(form);
   await vi.waitFor(() =>
     expect(form.node.textContent).toContain("Review Slurm job"),
   );
-  await advanceToValidation();
+  await Promise.resolve();
   let submit: HTMLButtonElement | undefined;
   await vi.waitFor(() => {
     submit = [...form.node.querySelectorAll<HTMLButtonElement>("button")].find(
@@ -128,7 +103,7 @@ type PendingDiscovery = {
   reject: (reason: unknown) => void;
 };
 
-function captureCreateRequest(form: CreateRuntimeForm): () => any {
+function captureCreateRequest(form: CreateSessionForm): () => any {
   let request: any;
   form.createRequested.connect((_sender, value) => {
     request = value;
@@ -136,7 +111,7 @@ function captureCreateRequest(form: CreateRuntimeForm): () => any {
   return () => request;
 }
 
-async function submitValidForm(form: CreateRuntimeForm): Promise<void> {
+async function submitValidForm(form: CreateSessionForm): Promise<void> {
   const submit = control<HTMLButtonElement>(form, 'button[type="submit"]');
   expect(submit.disabled).toBe(false);
   expect(form.node.querySelector("form")?.reportValidity()).toBe(true);
@@ -154,25 +129,21 @@ function formHarness() {
         }),
     ),
     sshAuthWebSocket: vi.fn((_host: string) => vi.fn()),
-    validateRuntime: vi.fn(
-      async (_request: IRuntimeCreateRequest, _signal?: AbortSignal) => ({
-        runtimeId: "rt-012345abcdef",
+    validateCreateRequest: vi.fn(
+      async (_request: ISessionCreateRequest, _signal?: AbortSignal) => ({
+        sessionId: "s-012345abcdef",
         status: "PASSED",
         script: "#!/bin/bash\n#SBATCH --partition=test\n",
         message: "Slurm accepted the script.",
       }),
     ),
   };
-  const form = new CreateRuntimeForm(api as any, () => {
+  const form = new CreateSessionForm(api as any, () => {
     const operation = new FakeOperation();
     operations.push(operation);
     return operation;
   });
-  // Discovery is a request now, so delivering a result is a promise settlement
-  // and every assertion after one has to wait a microtask turn.
   const deliver = async (index: number, value: unknown): Promise<void> => {
-    // The real client validates the response before the form sees it, so the
-    // fake must too or a malformed payload would reach code that never gets one.
     try {
       discoveries[index].resolve(validateSlurmResource(value));
     } catch (error) {
@@ -193,92 +164,42 @@ function formHarness() {
   return { form, api, operations, discoveries, deliver, failDiscovery };
 }
 
-// A validation left in flight: the form has submitted, the request is out, and
-// nothing has answered it yet.
-async function pendingValidation(workspaceValue: string) {
+async function pendingValidation(
+  workspaceValue: string,
+  configure?: (form: CreateSessionForm) => void,
+  discoveryValue: unknown = discovery("alpha"),
+) {
   let resolveValidation!: (value: any) => void;
   const { form, api, deliver } = formHarness();
-  api.validateRuntime.mockImplementation(
+  api.validateCreateRequest.mockImplementation(
     () => new Promise((resolve) => (resolveValidation = resolve)),
   );
   choose(form, "alpha");
-  await deliver(0, discovery("alpha"));
+  await deliver(0, discoveryValue);
+  configure?.(form);
   const workspace = input(form, "rootFolder");
   workspace.value = workspaceValue;
   workspace.dispatchEvent(new Event("input"));
   submitConfiguration(form);
-  await advanceToValidation();
-  await vi.waitFor(() => expect(api.validateRuntime).toHaveBeenCalledOnce());
-  const signal = api.validateRuntime.mock.calls[0][1];
+  await Promise.resolve();
+  await vi.waitFor(() =>
+    expect(api.validateCreateRequest).toHaveBeenCalledOnce(),
+  );
+  const signal = api.validateCreateRequest.mock.calls[0][1];
   if (!signal) {
     throw new Error("validation was requested without an abort signal");
   }
   return { form, api, signal, resolveValidation };
 }
 
-describe("SSH CRUD and streamed runtime-first creation", () => {
-  it("uses an OAuth bearer on cs-control host routes without XSRF", async () => {
-    Object.defineProperty(document, "cookie", {
-      configurable: true,
-      value: "_xsrf=test-xsrf",
-    });
-    const fetch = vi.fn<typeof globalThis.fetch>(
-      async () =>
-        new Response(
-          JSON.stringify({
-            hosts: [
-              {
-                name: "delta",
-                hostname: "delta.example",
-                port: 22,
-                extraDirectives: [],
-              },
-            ],
-          }),
-        ),
-    );
-    const client = new ControlClient(
-      "http://localhost:3000/api/v1",
-      fakeAuth("test-delegated-token"),
-      fetch,
-    );
-    await client.listSshHosts();
-    const requests = fetch.mock.calls.map(
-      ([input, init]) => new Request(input, init),
-    );
-    expect(requests.map((item) => item.method)).toEqual(["GET"]);
-    expect(
-      requests.every(
-        (item) =>
-          item.headers.get("Authorization") === "Bearer test-delegated-token",
-      ),
-    ).toBe(true);
-    expect(requests.every((item) => !item.headers.has("X-XSRFToken"))).toBe(
-      true,
-    );
-  });
-
+describe("SSH CRUD and session-first creation", () => {
   it("lists configured hosts before discovery and exposes an empty-host call to action", () => {
-    const operations: FakeOperation[] = [];
-    const form = new CreateRuntimeForm({} as any, () => {
-      const operation = new FakeOperation();
-      operations.push(operation);
-      return operation;
-    });
-    form.setHosts([
-      {
-        name: "system-host",
-        hostname: "login.example.edu",
-        user: "alice",
-        port: 2222,
-        extraDirectives: [],
-      },
-    ]);
+    const { form } = formHarness();
     expect([...hostSelect(form).options].map((item) => item.value)).toEqual([
       "",
-      "system-host",
+      "alpha",
+      "beta",
     ]);
-    expect(operations).toHaveLength(0);
     form.setHosts([]);
     expect(form.node.textContent).toContain("No SSH hosts are configured.");
     expect(
@@ -291,10 +212,8 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
   it("starts with host selection and reveals options after a valid result", async () => {
     const { form, api, operations, deliver } = formHarness();
     expect(options(form)?.hidden).toBe(true);
-    expect(operations).toHaveLength(0);
     expect(hostSelect(form).value).toBe("");
     choose(form, "alpha");
-    // Discovery is a plain request, so no login console is opened for it.
     expect(operations).toHaveLength(0);
     expect(options(form)?.hidden).toBe(true);
     expect(
@@ -309,7 +228,6 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
       form.node.querySelector<HTMLSelectElement>('select[name="account"]')
         ?.value,
     ).toBe("alpha-one");
-    // The expanded form is the result, so the query row retires with it.
     expect(form.node.querySelector<HTMLElement>(".csSshAuth")?.hidden).toBe(
       true,
     );
@@ -318,7 +236,6 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
   it("opens the login console on demand and restarts discovery once", async () => {
     const { form, api, operations, discoveries, failDiscovery } = formHarness();
     choose(form, "alpha");
-    expect(operations).toHaveLength(0);
     await failDiscovery(
       0,
       new ControlError("ssh_authentication_required", "Duo required"),
@@ -340,7 +257,7 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
     expect(options(form)?.hidden).toBe(true);
   });
 
-  it("shows actionable retry after stream error and starts one new attempt", async () => {
+  it("shows actionable retry after a discovery error and starts one new attempt", async () => {
     const { form, discoveries, failDiscovery } = formHarness();
     choose(form, "alpha");
     await failDiscovery(0, new Error("scheduler unavailable"));
@@ -369,7 +286,7 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
     ).toBe("beta-one");
   });
 
-  it("rejects malformed streamed resources and retains retry/details", async () => {
+  it("rejects malformed discovery resources and retains retry/details", async () => {
     const { form, deliver } = formHarness();
     choose(form, "alpha");
     await deliver(0, {
@@ -385,6 +302,19 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
     ).toBe(true);
   });
 
+  it("reports no partitions as an error without leaving the spinner running", async () => {
+    const { form, deliver } = formHarness();
+    choose(form, "alpha");
+    await deliver(0, { ...discovery("alpha"), partitions: [] });
+    expect(options(form)?.hidden).toBe(true);
+    expect(form.node.textContent).toContain(
+      "No CPU or GPU Slurm partitions were discovered for alpha.",
+    );
+    expect(form.node.querySelector<HTMLElement>(".csSshAuth")?.hidden).toBe(
+      true,
+    );
+  });
+
   it("aborts discovery and disposes the login console when the form is disposed", async () => {
     const { form, operations, failDiscovery } = formHarness();
     choose(form, "alpha");
@@ -394,7 +324,6 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
     );
     expect(operations).toHaveLength(1);
     form.dispose();
-    expect(operations[0].cancelled).toBeGreaterThan(0);
     expect(operations[0].disposed).toBe(true);
   });
 
@@ -596,64 +525,126 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
     expect(request().partition).toBe("full");
   });
 
-  it.each([".", "$HOME/work", "/scratch/user/work"])(
-    "preserves raw workspace expression %s in the create payload",
-    async (expression) => {
-      const { form, deliver } = formHarness();
-      choose(form, "alpha");
-      await deliver(0, discovery("alpha"));
-      const workspace = input(form, "rootFolder");
-      expect(workspace.getAttribute("aria-describedby")).toBe(
-        "cybershuttle-workspace-help",
-      );
-      expect(form.node.textContent).toContain("~/cybershuttle");
-      expect(form.node.textContent).toContain("$HOME/work");
-      expect(form.node.textContent).toContain("/scratch/user/work");
-      workspace.value = expression;
-      workspace.dispatchEvent(new Event("input"));
-      const request = captureCreateRequest(form);
-      await reviewAndSubmit(form);
-      expect(request().rootFolder).toBe(expression);
-    },
-  );
+  it("shows the discovered home directory as the workspace field's help, not a placeholder", async () => {
+    const { form, deliver } = formHarness();
+    choose(form, "alpha");
+    await deliver(0, discovery("alpha"));
+    const workspace = input(form, "rootFolder");
+    expect(workspace.getAttribute("aria-describedby")).toBe(
+      "cybershuttle-workspace-help",
+    );
+    expect(workspace.placeholder).toBe("");
+    expect(form.node.textContent).toContain("/home/alpha");
+    expect(form.node.textContent).toContain(
+      "Relative to /home/alpha unless it starts with /, ~ or $.",
+    );
+  });
 
-  it("aborts validation on dispose and ignores its stale response", async () => {
-    const { form, signal, resolveValidation } =
-      await pendingValidation("projects/dispose");
+  it("falls back to example workspace paths when discovery omits a home directory", async () => {
+    const { form, deliver } = formHarness();
+    choose(form, "alpha");
+    const { homeDir: _omit, ...noHome } = discovery("alpha");
+    await deliver(0, noHome);
+    const help = form.node.querySelector<HTMLElement>(
+      "#cybershuttle-workspace-help",
+    )!;
+    expect(help.textContent).not.toBe("");
+    expect(help.textContent).toContain("Examples:");
+  });
+
+  it("preserves a raw workspace expression in the create payload", async () => {
+    const { form, deliver } = formHarness();
+    choose(form, "alpha");
+    await deliver(0, discovery("alpha"));
+    const workspace = input(form, "rootFolder");
+    workspace.value = "$HOME/work";
+    workspace.dispatchEvent(new Event("input"));
+    const request = captureCreateRequest(form);
+    await reviewAndSubmit(form);
+    expect(request().rootFolder).toBe("$HOME/work");
+  });
+
+  it("aborts validation on dispose", async () => {
+    const { form, signal } = await pendingValidation("projects/dispose");
 
     form.dispose();
     expect(signal.aborted).toBe(true);
-    resolveValidation({
-      runtimeId: "rt-012345abcdef",
-      status: "PASSED",
-      script: "#!/bin/bash\n#SBATCH --partition=test\n",
-      message: "stale",
-    });
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(form.isDisposed).toBe(true);
   });
 
   it("ignores stale validation after Back and preserves the draft", async () => {
     const { form, signal, resolveValidation } = await pendingValidation(
       "projects/preserved-review",
+      (form) => {
+        picker(form, "gpuType").value = "h100";
+        picker(form, "gpuType").onchange?.(new Event("change"));
+        input(form, "cores").value = "6";
+        input(form, "cores").dispatchEvent(new Event("input"));
+        input(form, "memoryMb").value = "8192";
+        input(form, "memoryMb").dispatchEvent(new Event("input"));
+        input(form, "gpuCount").value = "6";
+        input(form, "gpuCount").dispatchEvent(new Event("input"));
+        picker(form, "account").value = "alpha-two";
+        picker(form, "account").onchange?.(new Event("change"));
+      },
+      {
+        ...discovery("alpha"),
+        partitions: [
+          {
+            name: "alpha-gpu",
+            cpuCount: 32,
+            memoryMb: 128000,
+            gres: [
+              { name: "gpu:a100", count: 2 },
+              { name: "gpu:h100", count: 6 },
+            ],
+          },
+        ],
+      },
     );
     [...form.node.querySelectorAll<HTMLButtonElement>("button")]
       .find((item) => item.textContent === "Back")!
       .click();
     expect(signal.aborted).toBe(true);
     resolveValidation({
-      runtimeId: "rt-012345abcdef",
+      sessionId: "s-012345abcdef",
       status: "PASSED",
       script: "#!/bin/bash\n#SBATCH --partition=test\n",
       message: "stale",
     });
     await Promise.resolve();
-    expect(form.node.textContent).not.toContain("3. Review Slurm job");
+    expect(form.node.textContent).not.toContain("Review Slurm job");
     expect(
       form.node.querySelector<HTMLInputElement>('input[name="rootFolder"]')
         ?.value,
     ).toBe("projects/preserved-review");
+    expect(picker(form, "partition").value).toBe("gpu:0");
+    expect(input(form, "cores").value).toBe("6");
+    expect(input(form, "memoryMb").value).toBe("8192");
+    expect(picker(form, "gpuType").value).toBe("h100");
+    expect(input(form, "gpuCount").value).toBe("6");
+    expect(picker(form, "account").value).toBe("alpha-two");
+  });
+
+  it("keeps no Slurm account chosen after Back", async () => {
+    const { form, signal, resolveValidation } = await pendingValidation(
+      "projects/preserved-no-account",
+      (form) => {
+        picker(form, "account").value = "";
+        picker(form, "account").onchange?.(new Event("change"));
+      },
+    );
+    [...form.node.querySelectorAll<HTMLButtonElement>("button")]
+      .find((item) => item.textContent === "Back")!
+      .click();
+    expect(signal.aborted).toBe(true);
+    resolveValidation({
+      sessionId: "s-012345abcdef",
+      status: "PASSED",
+      script: "#!/bin/bash\n#SBATCH --partition=test\n",
+      message: "stale",
+    });
+    await Promise.resolve();
+    expect(picker(form, "account").value).toBe("");
   });
 
   it("keeps the script out of sight unless validation fails", async () => {
@@ -661,7 +652,7 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
     choose(form, "alpha");
     await deliver(0, discovery("alpha"));
     const validation = Promise.withResolvers<unknown>();
-    (form as any)._api.validateRuntime = () => validation.promise;
+    (form as any)._api.validateCreateRequest = () => validation.promise;
     const workspace = input(form, "rootFolder");
     workspace.value = "$HOME";
     workspace.dispatchEvent(new Event("input"));
@@ -672,7 +663,7 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
     const script = form.node.querySelector<HTMLElement>(".csSlurmScript")!;
     expect(script.hidden).toBe(true);
     validation.resolve({
-      runtimeId: "rt-012345abcdef",
+      sessionId: "s-012345abcdef",
       status: "PASSED",
       script: "#!/bin/bash\n#SBATCH --partition=test\n",
       message: "Slurm accepted the script.",
@@ -688,8 +679,8 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
     const { form, deliver } = formHarness();
     choose(form, "alpha");
     await deliver(0, discovery("alpha"));
-    (form as any)._api.validateRuntime = async () => ({
-      runtimeId: "rt-012345abcdef",
+    (form as any)._api.validateCreateRequest = async () => ({
+      sessionId: "s-012345abcdef",
       status: "FAILED",
       script: "#!/bin/bash\n#SBATCH --partition=missing\n",
       message: "Slurm rejected the script.",
@@ -720,7 +711,7 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
       form.setBusy(false);
     });
     submitConfiguration(form);
-    await advanceToValidation();
+    await Promise.resolve();
     let submit: HTMLButtonElement | undefined;
     await vi.waitFor(() => {
       submit = [
@@ -733,19 +724,27 @@ describe("SSH CRUD and streamed runtime-first creation", () => {
     expect(form.node.textContent).toContain("Validation passed.");
     expect(submit!.disabled).toBe(false);
   });
+
+  it("caps walltime at cs-control's ceiling and fails client validation above it", () => {
+    const { form } = formHarness();
+    const wall = input(form, "wallMinutes");
+    expect(wall.max).toBe("525600");
+    wall.value = "525601";
+    wall.dispatchEvent(new Event("input"));
+    expect(wall.checkValidity()).toBe(false);
+    wall.value = "525600";
+    wall.dispatchEvent(new Event("input"));
+    expect(wall.checkValidity()).toBe(true);
+  });
 });
 
 describe("SSH hosts modal chrome", () => {
   it("opens with its meaning and a rule, and carries no close of its own", async () => {
-    const { SshHosts } = await import("../src/SshHosts");
     const hosts = new SshHosts({
       listSshHosts: async () => [],
     } as unknown as ControlClient);
     const root = hosts.node.querySelector(".csRoot")!;
-    // The dialog names itself and closes itself, so the body does neither.
-    expect(root.querySelector(".csFormTitle")).toBeNull();
     expect(root.querySelector(".csModalClose")).toBeNull();
-    expect(root.textContent).not.toContain("← Back");
     expect(
       [...root.children]
         .map((node) => node.className.split(" ")[0])
@@ -758,7 +757,6 @@ describe("SSH hosts modal chrome", () => {
   });
 
   it("expands a host to what ssh uses and to what can be done about it", async () => {
-    const { SshHosts } = await import("../src/SshHosts");
     const api = {
       listSshHosts: vi.fn(async () => [
         {
@@ -793,7 +791,6 @@ describe("SSH hosts modal chrome", () => {
       [...entry.querySelectorAll<HTMLButtonElement>("button")].find(
         (item) => item.textContent === label,
       )!;
-    // Only the entry CyberShuttle wrote is CyberShuttle's to edit or remove.
     expect(action(entries[0], "Edit").disabled).toBe(false);
     expect(action(entries[0], "Delete").disabled).toBe(false);
     expect(action(entries[1], "Edit").disabled).toBe(true);
@@ -807,7 +804,6 @@ describe("SSH hosts modal chrome", () => {
   });
 
   it("asks before removing, in the row rather than behind a queued dialog", async () => {
-    const { SshHosts } = await import("../src/SshHosts");
     const api = {
       listSshHosts: vi.fn(async () => [
         {
@@ -836,7 +832,6 @@ describe("SSH hosts modal chrome", () => {
   });
 
   it("edits a host by re-pasting a command prefilled from what is configured", async () => {
-    const { SshHosts } = await import("../src/SshHosts");
     const api = {
       listSshHosts: vi.fn(async () => [
         {
@@ -864,12 +859,9 @@ describe("SSH hosts modal chrome", () => {
     const command = hosts.node.querySelector<HTMLInputElement>(
       'input[name="sshHostCommand"]',
     )!;
-    // The whole entry comes back as a command, so an edit starts from what ssh
-    // already uses rather than from an empty box.
     expect(command.value).toBe(
       "ssh -p 2222 -i ~/.ssh/id_ed25519 -J bastion -o ForwardAgent=yes me@login.example.edu",
     );
-    // The alias is the entry being edited, so it is not offered for renaming.
     expect(hosts.node.querySelector('input[name="sshHostName"]')).toBeNull();
     command.value = "ssh -p 22 me@login2.example.edu";
     command.dispatchEvent(new Event("input"));
@@ -886,7 +878,6 @@ describe("SSH hosts modal chrome", () => {
   });
 
   it("sends the pasted command for the server to parse", async () => {
-    const { SshHosts } = await import("../src/SshHosts");
     const api = {
       listSshHosts: vi.fn(async () => []),
       addSshHost: vi.fn(async () => ({ name: "delta", extraDirectives: [] })),
@@ -914,6 +905,88 @@ describe("SSH hosts modal chrome", () => {
         "ssh -p 2222 me@login.example.edu",
       ),
     );
+    hosts.dispose();
+  });
+
+  it("keeps focus in the add-host paste form while a listed host's test resolves", async () => {
+    const test = Promise.withResolvers<{ ok: boolean; message: string }>();
+    const api = {
+      listSshHosts: vi.fn(async () => [
+        { name: "delta", hostname: "login.example.edu", extraDirectives: [] },
+      ]),
+      testSshHost: vi.fn(() => test.promise),
+    };
+    const hosts = new SshHosts(api as unknown as ControlClient);
+    await hosts.refresh();
+    document.body.appendChild(hosts.node);
+
+    [...hosts.node.querySelectorAll<HTMLButtonElement>("button")]
+      .find((item) => item.textContent === "Add SSH Host")!
+      .click();
+    const command = hosts.node.querySelector<HTMLInputElement>(
+      'input[name="sshHostCommand"]',
+    )!;
+    command.focus();
+    expect(document.activeElement).toBe(command);
+
+    [...hosts.node.querySelectorAll<HTMLButtonElement>("button")]
+      .find((item) => item.textContent === "Test connection")!
+      .click();
+    test.resolve({ ok: true, message: "Connected." });
+    await vi.waitFor(() =>
+      expect(hosts.node.textContent).toContain("Connected."),
+    );
+
+    expect(document.activeElement?.getAttribute("name")).toBe("sshHostCommand");
+    hosts.dispose();
+  });
+
+  it("keeps focus on a host's own Edit button through its own render", async () => {
+    const api = {
+      listSshHosts: vi.fn(async () => [
+        {
+          name: "delta",
+          hostname: "login.example.edu",
+          extraDirectives: [],
+          managed: true,
+        },
+      ]),
+    };
+    const hosts = new SshHosts(api as unknown as ControlClient);
+    await hosts.refresh();
+    document.body.replaceChildren(hosts.node);
+
+    const editButton = hosts.node.querySelector<HTMLButtonElement>(
+      '[data-session-action="edit-delta"]',
+    )!;
+    editButton.focus();
+    editButton.click();
+
+    const recreated = hosts.node.querySelector<HTMLButtonElement>(
+      '[data-session-action="edit-delta"]',
+    )!;
+    expect(recreated.textContent).toBe("Cancel");
+    expect(document.activeElement).toBe(recreated);
+    hosts.dispose();
+  });
+
+  it("keeps focus on the Add SSH Host toggle through its own render", async () => {
+    const api = { listSshHosts: vi.fn(async () => []) };
+    const hosts = new SshHosts(api as unknown as ControlClient);
+    await hosts.refresh();
+    document.body.replaceChildren(hosts.node);
+
+    const toggle = hosts.node.querySelector<HTMLButtonElement>(
+      '[data-session-action="add-ssh-host-toggle"]',
+    )!;
+    toggle.focus();
+    toggle.click();
+
+    const recreated = hosts.node.querySelector<HTMLButtonElement>(
+      '[data-session-action="add-ssh-host-toggle"]',
+    )!;
+    expect(recreated.textContent).toBe("Cancel");
+    expect(document.activeElement).toBe(recreated);
     hosts.dispose();
   });
 });

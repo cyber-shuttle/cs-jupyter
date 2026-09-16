@@ -1,3 +1,18 @@
+// Small DOM builders shared across the widgets: elements, detail grids, log
+// sections and disclosure lists. `disclosure` restores open state after a
+// rebuild by caller-supplied identifier.
+import type { ILogLine, ISession } from "./Common";
+import { countsDown, remainingBadge } from "./walltime";
+
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function element<K extends keyof HTMLElementTagNameMap>(
   tag: K,
   text = "",
@@ -28,7 +43,6 @@ export function button(
   return value;
 }
 
-// A message row is rendered only when there is a message to render.
 export const notes = (rows: Array<[string, string]>): HTMLElement[] =>
   rows
     .filter(([message]) => message)
@@ -40,72 +54,122 @@ export function field(label: string, control: HTMLElement): HTMLElement {
   return value;
 }
 
-export function closeButton(
-  onClick: () => void,
-  label = "Close",
-): HTMLButtonElement {
-  const value = button("", "csModalClose", onClick);
-  value.title = label;
-  value.setAttribute("aria-label", label);
-  value.innerHTML = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" /></svg>`;
+export function select(
+  name: string,
+  options: Array<[string, string]>,
+  required = true,
+): HTMLSelectElement {
+  const value = element("select", "", "csSelect");
+  value.name = name;
+  value.required = required;
+  fillOptions(value, options);
   return value;
 }
 
-// The one place a runtime's state becomes a pill, so the list and the detail
-// cannot drift apart on what a state looks like.
+export function fillOptions(
+  control: HTMLSelectElement,
+  options: Array<[string, string]>,
+  chosen = options[0]?.[0] ?? "",
+): void {
+  control.replaceChildren(
+    ...options.map(([value, label]) => new Option(label, value)),
+  );
+  control.value = chosen;
+}
+
 export function statePill(state: string): HTMLElement {
   return element(
     "span",
     state,
-    `csRuntimeState csRuntimeState-${state.toLowerCase()}`,
+    `csSessionState csSessionState-${state.toLowerCase()}`,
   );
 }
 
-/**
- * Rebuilds a node's contents, leaving keyboard focus on the same action
- * control it was on before.
- */
-export function keepingFocus(node: HTMLElement, rebuild: () => void): void {
-  const action = node.contains(document.activeElement)
-    ? (document.activeElement as HTMLElement).dataset.runtimeAction
-    : undefined;
-  rebuild();
-  if (action === undefined) return;
-  for (const control of Array.from(
-    node.querySelectorAll<HTMLElement>("[data-runtime-action]"),
-  )) {
-    if (control.dataset.runtimeAction === action) {
-      control.focus();
-      return;
-    }
+export function detailGrid(rows: Array<[string, string]>): HTMLDListElement {
+  const grid = element("dl", "", "csSessionDetailGrid");
+  for (const [label, value] of rows) {
+    grid.append(
+      element("dt", label, "csSessionDetailLabel"),
+      element("dd", value, "csSessionDetailValue"),
+    );
   }
+  return grid;
 }
 
-/**
- * One usage plot: a 3:2 panel with a faint grid behind a native SVG polyline.
- * Hand-rolled for the reason every other glyph here is -- currentColor follows
- * the theme, and a chart library would be the only dependency of its kind.
- */
-export function plot(points: string, title: string): HTMLElement {
-  const holder = element("div", "", "csPlot");
-  holder.innerHTML = `<svg viewBox="0 0 60 40" preserveAspectRatio="none" role="img"><title>${title}</title><path class="csPlotGrid" d="M0 10H60M0 20H60M0 30H60M15 0V40M30 0V40M45 0V40" /><rect class="csPlotFrame" x="0.5" y="0.5" width="59" height="39" /><polyline class="csPlotLine" points="${points}" /></svg>`;
-  return holder;
+export function detailGridWithRemaining(
+  rows: Array<[string, string]>,
+  session?: ISession,
+): HTMLDListElement {
+  const remaining =
+    session && countsDown(session)
+      ? remainingBadge(session, Date.now())
+      : undefined;
+  const grid = detailGrid(
+    remaining ? [...rows, ["Remaining", remaining.label]] : rows,
+  );
+  if (remaining) {
+    grid.children[rows.length * 2 + 1]?.classList.toggle(
+      "csSessionDetailLow",
+      remaining.low,
+    );
+  }
+  return grid;
 }
 
-/**
- * One line of an allocation's narration. The live tail on a running session and
- * the frozen one on a finished run are the same lines, so they are built here
- * rather than twice.
- */
-export function logLine(line: {
-  stream: string;
-  text: string;
-  at: string;
-}): HTMLElement {
+export function logSection(lines: ILogLine[]): {
+  section: HTMLElement;
+  scroller: HTMLElement;
+} {
+  const section = element("section", "", "csSessionLog");
+  section.appendChild(element("h4", "Status", "csSessionLogTitle"));
+  const scroller = element("div", "", "csSessionLogScroll");
+  scroller.role = "log";
+  for (const line of lines) {
+    scroller.appendChild(logLine(line));
+  }
+  section.appendChild(scroller);
+  return { section, scroller };
+}
+
+export function modalBody(
+  subtitle: string,
+  error: string,
+): { root: HTMLElement; scroll: HTMLElement; card: HTMLElement } {
+  const root = element("div", "", "csRoot csScrollRoot");
+  root.append(
+    element("div", subtitle, "csModalSubtitle"),
+    element("hr", "", "csModalRule"),
+  );
+  const scroll = element("div", "", "csModalScroll");
+  if (error) {
+    scroll.appendChild(element("div", error, "csError"));
+  }
+  root.appendChild(scroll);
+  return { root, scroll, card: element("div", "", "csCard") };
+}
+
+export function disclosure(
+  key: string,
+  openSet: Set<string>,
+  summaryChildren: HTMLElement[],
+): { entry: HTMLDetailsElement; body: HTMLElement } {
+  const entry = document.createElement("details");
+  entry.className = "csSshHostEntry";
+  entry.open = openSet.has(key);
+  entry.ontoggle = () => (entry.open ? openSet.add(key) : openSet.delete(key));
+  const summary = document.createElement("summary");
+  summary.className = "csSshHostSummary";
+  summary.append(...summaryChildren);
+  const body = element("div", "", "csSshHostBody");
+  entry.append(summary, body);
+  return { entry, body };
+}
+
+function logLine(line: ILogLine): HTMLElement {
   const row = element(
     "div",
     "",
-    `csRuntimeLogLine csRuntimeLog-${line.stream}`,
+    `csSessionLogLine csSessionLog-${line.stream}`,
   );
   const at = new Date(line.at);
   const stamp = Number.isFinite(at.getTime())
@@ -115,24 +179,18 @@ export function logLine(line: {
         second: "2-digit",
       })
     : "";
-  const time = element("time", stamp, "csRuntimeLogTime");
+  const time = element("time", stamp, "csSessionLogTime");
   if (stamp) time.dateTime = line.at;
   time.title = line.stream;
-  row.append(time, element("span", line.text, "csRuntimeLogText"));
+  row.append(time, element("span", line.text, "csSessionLogText"));
   return row;
 }
 
-/**
- * A one-second tick for the surfaces that count down. cs-control answers 304
- * while a running allocation is unchanged, so state alone would leave the
- * figure sitting still.
- */
 export class Clock {
   private id: number | undefined;
 
   constructor(private tick: () => void) {}
 
-  // Ticking is worth a re-render only while something is actually counting.
   sync(active: boolean): void {
     if (!active) return this.stop();
     this.id ??= window.setInterval(this.tick, 1000);
@@ -144,5 +202,4 @@ export class Clock {
   }
 }
 
-// One clock face for the card and the status bar.
 export const CLOCK_GLYPH = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"><circle cx="8" cy="8" r="5.6" /><path d="M8 4.9V8l2.1 1.6" /></g></svg>`;

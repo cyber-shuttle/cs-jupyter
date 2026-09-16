@@ -1,3 +1,7 @@
+// The extension's entry point: JupyterLab service-manager plugins that point
+// every service at the active session's server. It fails closed rather than
+// falling back to an unauthenticated default server. cs-control issues access
+// only once a session is up, so a response from it is the readiness signal.
 import type { JupyterFrontEndPlugin } from "@jupyterlab/application";
 import { PageConfig } from "@jupyterlab/coreutils";
 import type {
@@ -32,14 +36,19 @@ import {
   TerminalManager,
 } from "@jupyterlab/services";
 import { Token } from "@lumino/coreutils";
-import { ControlClient, createRuntimeServerSettings } from "./ControlClient.js";
-import { cacheRuntimeAccess, loadRuntimeAccess } from "./runtime-access.js";
+import { ControlClient, createSessionServerSettings } from "./ControlClient.js";
+import { jsonResponse, requestUrl } from "./Common.js";
+import { cacheSessionAccess, loadSessionAccess } from "./session-access.js";
 
-import { getActiveRuntimeId, setActiveRuntimeId } from "./runtime-state.js";
-import { runtimeUiPlugin, selectedRuntime } from "./runtime-ui.js";
+import {
+  getActiveSessionId,
+  selectedSession,
+  setActiveSessionId,
+} from "./session-state.js";
+import { sessionUiPlugin } from "./session-ui.js";
 import { walltimeStatusPlugin } from "./walltime-status.js";
 
-export const IRemoteServerSettings = new Token<ServerConnection.ISettings>(
+const IRemoteServerSettings = new Token<ServerConnection.ISettings>(
   "@cybershuttle/jupyter:IRemoteServerSettings",
   "Server settings for the selected READY CyberShuttle session.",
 );
@@ -47,10 +56,7 @@ export const IRemoteServerSettings = new Token<ServerConnection.ISettings>(
 function failClosedServerSettings(): ServerConnection.ISettings {
   const baseUrl = new URL(PageConfig.getBaseUrl(), window.location.origin);
   const fetch: typeof globalThis.fetch = async (input, init) => {
-    const url = new URL(
-      typeof input === "string" || input instanceof URL ? input : input.url,
-      baseUrl,
-    );
+    const url = new URL(requestUrl(input), baseUrl);
     const method = (
       init?.method ?? (input instanceof Request ? input.method : "GET")
     ).toUpperCase();
@@ -80,23 +86,15 @@ function failClosedServerSettings(): ServerConnection.ISettings {
     }
     return jsonResponse(
       { message: "Select a READY CyberShuttle session first." },
-      503,
+      { status: 503 },
     );
   };
-  const settings = ServerConnection.makeSettings({
+  return ServerConnection.makeSettings({
     appendToken: false,
     baseUrl: baseUrl.toString(),
     fetch,
     token: "",
     wsUrl: baseUrl.toString().replace(/^http/, "ws"),
-  });
-  return settings;
-}
-
-function jsonResponse(value: unknown, status = 200): Response {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: { "content-type": "application/json" },
   });
 }
 
@@ -109,30 +107,25 @@ const remoteServerSettingsPlugin: ServiceManagerPlugin<
   autoStart: true,
   provides: IRemoteServerSettings,
   activate: async () => {
-    const controlApiUrl = PageConfig.getOption("cybershuttleControlApiUrl");
     try {
-      const selected = selectedRuntime();
+      const selected = selectedSession();
       if (!selected) {
         throw new Error("No session selected.");
       }
-      const { runtimeId, generation } = selected;
-      // cs-control issues access only once the allocation is up, so its response
-      // is the readiness signal.
-      let access = loadRuntimeAccess(runtimeId, generation);
+      const { sessionId, generation } = selected;
+      let access = loadSessionAccess(sessionId, generation);
       if (!access) {
-        access = await new ControlClient(controlApiUrl).getRuntimeAccess(
-          runtimeId,
-        );
+        access = await new ControlClient().getSessionAccess(sessionId);
         if (access.generation !== generation)
           throw new Error("Selected session access generation changed.");
-        cacheRuntimeAccess(access);
+        cacheSessionAccess(access);
       }
       PageConfig.setOption("terminalsAvailable", "true");
-      setActiveRuntimeId(runtimeId);
-      return createRuntimeServerSettings(access);
+      setActiveSessionId(sessionId);
+      return createSessionServerSettings(access);
     } catch {
       PageConfig.setOption("terminalsAvailable", "false");
-      setActiveRuntimeId(undefined);
+      setActiveSessionId(undefined);
       return failClosedServerSettings();
     }
   },
@@ -177,7 +170,8 @@ const kernelSpecManagerPlugin: ServiceManagerPlugin<KernelSpec.IManager> = {
 
 const sessionManagerPlugin: ServiceManagerPlugin<Session.IManager> = {
   id: "@cybershuttle/jupyter:session-manager",
-  description: "Use the selected session's Jupyter Sessions REST API.",
+  description:
+    "Points JupyterLab's api/sessions service at the session's server.",
   autoStart: true,
   provides: ISessionManager,
   requires: [IKernelManager, IRemoteServerSettings],
@@ -193,10 +187,8 @@ const terminalManagerPlugin: ServiceManagerPlugin<
   autoStart: true,
   provides: ITerminalManager,
   requires: [IRemoteServerSettings],
-  // Trade-off: the active runtime id is the fail-closed signal; tag the settings
-  // object only if a second settings producer ever appears.
   activate: (_app, serverSettings) =>
-    getActiveRuntimeId()
+    getActiveSessionId()
       ? new TerminalManager({ serverSettings })
       : new TerminalManager.NoopManager({ serverSettings }),
 };
@@ -222,7 +214,6 @@ const serviceManagerPlugin: ServiceManagerPlugin<ServiceManagerType.IManager> =
     provides: IServiceManager,
     requires: [
       IServerSettings,
-      IRemoteServerSettings,
       IContentsManager,
       IKernelManager,
       IKernelSpecManager,
@@ -237,7 +228,6 @@ const serviceManagerPlugin: ServiceManagerPlugin<ServiceManagerType.IManager> =
     activate: (
       _app,
       shellServerSettings,
-      _remoteServerSettings,
       contents,
       kernels,
       kernelspecs,
@@ -261,11 +251,9 @@ const serviceManagerPlugin: ServiceManagerPlugin<ServiceManagerType.IManager> =
         terminals,
         user,
         workspaces,
-        standby: getActiveRuntimeId() ? "when-hidden" : () => true,
+        standby: getActiveSessionId() ? "when-hidden" : () => true,
       }),
   };
-
-export { runtimeLiteUrl, SELECT_RUNTIME_COMMAND } from "./runtime-ui.js";
 
 export const remoteServicePlugins = [
   remoteServerSettingsPlugin,
@@ -281,6 +269,6 @@ export const remoteServicePlugins = [
 export default [
   ...remoteServicePlugins,
   remoteTerminalUiPlugin,
-  runtimeUiPlugin,
+  sessionUiPlugin,
   walltimeStatusPlugin,
 ];

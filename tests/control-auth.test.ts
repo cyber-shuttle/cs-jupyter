@@ -1,3 +1,7 @@
+// Cross-origin auth headers and conditional ETag-based polling for
+// ControlClient's session list. A 304 response carries no ETag of its own. The
+// client must retain the previous ETag across an unchanged answer to send it
+// again.
 import { fakeAuth } from "./fakes";
 import { assert, describe, expect, it, vi } from "vitest";
 import {
@@ -48,7 +52,7 @@ describe("OAuth cross-origin control client", () => {
         ),
       );
       await expect(
-        guarded("https://control.example.edu/api/v1/runtimes"),
+        guarded("https://control.example.edu/api/v1/sessions"),
       ).resolves.toMatchObject({ status });
       expect(auth.invalidateToken).toHaveBeenCalledOnce();
     },
@@ -68,8 +72,8 @@ describe("OAuth cross-origin control client", () => {
   });
 });
 
-describe("conditional runtime polling", () => {
-  const list = { runtimes: [], logs: [] };
+describe("conditional session polling", () => {
+  const list = { sessions: [], logs: [] };
   const etag = '"abc123"';
 
   function client(browserFetch: typeof globalThis.fetch) {
@@ -80,30 +84,7 @@ describe("conditional runtime polling", () => {
     );
   }
 
-  it("offers the previous ETag and skips the body cs-control says is unchanged", async () => {
-    const browserFetch = vi
-      .fn<typeof globalThis.fetch>()
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify(list), {
-          headers: { "content-type": "application/json", ETag: etag },
-        }),
-      )
-      .mockResolvedValueOnce(new Response(null, { status: 304 }));
-    const api = client(browserFetch);
-
-    await expect(api.listRuntimes()).resolves.toEqual(list);
-    const [, firstInit] = browserFetch.mock.calls[0];
-    assert.isDefined(firstInit);
-    // Nothing to revalidate against on the first read.
-    expect(new Headers(firstInit.headers).has("If-None-Match")).toBe(false);
-
-    await expect(api.listRuntimes()).resolves.toBe(UNCHANGED);
-    const [, secondInit] = browserFetch.mock.calls[1];
-    assert.isDefined(secondInit);
-    expect(new Headers(secondInit.headers).get("If-None-Match")).toBe(etag);
-  });
-
-  it("keeps polling conditionally after an unchanged answer", async () => {
+  it("offers the previous ETag and keeps polling conditionally after an unchanged answer", async () => {
     const browserFetch = vi
       .fn<typeof globalThis.fetch>()
       .mockResolvedValueOnce(
@@ -114,12 +95,39 @@ describe("conditional runtime polling", () => {
       .mockResolvedValue(new Response(null, { status: 304 }));
     const api = client(browserFetch);
 
-    await api.listRuntimes();
-    await api.listRuntimes();
-    await expect(api.listRuntimes()).resolves.toBe(UNCHANGED);
-    const [, thirdInit] = browserFetch.mock.calls[2];
-    assert.isDefined(thirdInit);
-    // A 304 carries no ETag of its own; the stored one must survive it.
-    expect(new Headers(thirdInit.headers).get("If-None-Match")).toBe(etag);
+    await expect(api.listSessions()).resolves.toEqual(list);
+    const [, firstInit] = browserFetch.mock.calls[0];
+    assert.isDefined(firstInit);
+    expect(new Headers(firstInit.headers).has("If-None-Match")).toBe(false);
+
+    await expect(api.listSessions()).resolves.toBe(UNCHANGED);
+    await expect(api.listSessions()).resolves.toBe(UNCHANGED);
+    for (const [, init] of browserFetch.mock.calls.slice(1)) {
+      assert.isDefined(init);
+      expect(new Headers(init.headers).get("If-None-Match")).toBe(etag);
+    }
+  });
+
+  it("does not adopt an ETag from a session list that failed validation", async () => {
+    const browserFetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ sessions: [{ state: "READY" }], logs: [] }),
+          { headers: { "content-type": "application/json", ETag: etag } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(list), {
+          headers: { "content-type": "application/json", ETag: etag },
+        }),
+      );
+    const api = client(browserFetch);
+
+    await expect(api.listSessions()).rejects.toThrow("invalid session");
+    await expect(api.listSessions()).resolves.toEqual(list);
+    const [, secondInit] = browserFetch.mock.calls[1];
+    assert.isDefined(secondInit);
+    expect(new Headers(secondInit.headers).has("If-None-Match")).toBe(false);
   });
 });

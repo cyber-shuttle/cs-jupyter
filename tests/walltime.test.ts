@@ -1,42 +1,46 @@
+// A session only counts down once Slurm has started it; a queued session shows
+// its full limit. The status bar item renders over a resolved promise, so tests
+// drain the microtask queue directly rather than the clock.
 import { describe, expect, it, vi } from "vitest";
-import type { IRuntime } from "../src/Common";
+import type { ISession } from "../src/Common";
 import {
   LOW_TIME_MS,
   countsDown,
   formatRemaining,
   remainingMs,
 } from "../src/walltime";
+import { WalltimeStatus } from "../src/walltime-status";
+import { RunHistory } from "../src/RunHistory";
+import { SessionDetail } from "../src/SessionDetail";
+import { ControllerFake, sessionFixture as session, uiState } from "./fakes";
 
-const runtime = (over: Partial<IRuntime> = {}): IRuntime =>
-  ({
-    id: "rt-012345abcdef",
-    generation: "g-0123456789abcdef",
-    state: "READY",
-    sshHost: "delta",
-    partition: "cpu",
-    rootFolder: "$HOME/project",
-    resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 },
-    createdAt: "2030-01-01T00:00:00Z",
-    updatedAt: "2030-01-01T00:00:00Z",
-    ...over,
-  }) as IRuntime;
+function remainingText(node: HTMLElement): string {
+  const label = [...node.querySelectorAll(".csSessionDetailLabel")].find(
+    (dt) => dt.textContent === "Remaining",
+  );
+  return label?.nextElementSibling?.textContent ?? "";
+}
 
 describe("walltime countdown", () => {
   it("counts from when Slurm started the job, not from when it was created", () => {
-    const started = runtime({ startedAt: "2030-01-01T00:00:00Z" });
+    const started = session({
+      startedAt: "2030-01-01T00:00:00Z",
+      resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 },
+    });
     expect(remainingMs(started, Date.parse("2030-01-01T00:45:00Z"))).toBe(
       15 * 60_000,
     );
   });
 
-  // A queued allocation is waiting under no deadline: the whole limit is still
-  // ahead of it, which is what is actually left.
-  it("shows the whole limit while the allocation has not started", () => {
-    expect(remainingMs(runtime(), Date.now())).toBe(60 * 60_000);
+  it("shows the whole limit while the session has not started", () => {
+    const full = session({
+      resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 },
+    });
+    expect(remainingMs(full, Date.now())).toBe(60 * 60_000);
   });
 
   it("never counts past zero", () => {
-    const started = runtime({ startedAt: "2030-01-01T00:00:00Z" });
+    const started = session({ startedAt: "2030-01-01T00:00:00Z" });
     expect(remainingMs(started, Date.parse("2030-01-01T09:00:00Z"))).toBe(0);
     expect(formatRemaining(-5000)).toBe("0m 0s");
   });
@@ -47,8 +51,7 @@ describe("walltime countdown", () => {
     expect(formatRemaining(LOW_TIME_MS)).toBe("10m 0s");
   });
 
-  // Only a started allocation is under a deadline; the rest are waiting or over.
-  it("counts down only for a started allocation", () => {
+  it("counts down only for a started session", () => {
     for (const [state, want] of [
       ["STARTING", true],
       ["READY", true],
@@ -58,27 +61,48 @@ describe("walltime countdown", () => {
       ["STOPPED", false],
       ["FAILED", false],
     ] as const) {
-      expect(countsDown(runtime({ state }))).toBe(want);
+      expect(countsDown(session({ state }))).toBe(want);
     }
+  });
+
+  it("shows the same Remaining text in the session detail and run history", () => {
+    vi.setSystemTime(Date.parse("2030-01-01T00:30:00Z"));
+    const started = session({
+      startedAt: "2030-01-01T00:00:00Z",
+      resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 },
+    });
+    const detail = new SessionDetail(
+      new ControllerFake(uiState({ sessions: [started] })) as never,
+      started.id,
+    );
+    const history = new RunHistory(
+      new ControllerFake(uiState({ sessions: [started] })) as never,
+    );
+    expect(remainingText(detail.node)).toBe("30m 0s");
+    expect(remainingText(detail.node)).toBe(remainingText(history.node));
+    detail.dispose();
+    history.dispose();
   });
 });
 
 describe("walltime status bar item", () => {
-  const client = (value: IRuntime) =>
-    ({ getRuntime: vi.fn(async () => value) }) as never;
+  const client = (value: ISession) =>
+    ({ getSession: vi.fn(async () => value) }) as never;
 
-  // The read is a resolved promise, so its effect lands on the microtask queue.
-  // Polling the wall clock for it only made this slow, and flaky under load.
   const settled = async () => {
     for (let i = 0; i < 20; i++) await Promise.resolve();
   };
 
-  it("shows the remaining time for the runtime this page is attached to", async () => {
-    const { WalltimeStatus } = await import("../src/walltime-status");
+  it("shows the remaining time for the session this page is attached to", async () => {
     vi.setSystemTime(Date.parse("2030-01-01T00:30:00Z"));
     const item = new WalltimeStatus(
-      client(runtime({ startedAt: "2030-01-01T00:00:00Z" })),
-      "rt-012345abcdef",
+      client(
+        session({
+          startedAt: "2030-01-01T00:00:00Z",
+          resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 },
+        }),
+      ),
+      "s-012345abcdef",
     );
     await settled();
     expect(item.node.textContent).toContain("30m 0s");
@@ -87,20 +111,24 @@ describe("walltime status bar item", () => {
     item.dispose();
   });
 
-  it("warns under ten minutes and says nothing at all once the runtime is over", async () => {
-    const { WalltimeStatus } = await import("../src/walltime-status");
+  it("warns under ten minutes and says nothing at all once the session is over", async () => {
     vi.setSystemTime(Date.parse("2030-01-01T00:55:00Z"));
     const low = new WalltimeStatus(
-      client(runtime({ startedAt: "2030-01-01T00:00:00Z" })),
-      "rt-012345abcdef",
+      client(
+        session({
+          startedAt: "2030-01-01T00:00:00Z",
+          resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 },
+        }),
+      ),
+      "s-012345abcdef",
     );
     await settled();
     expect(low.hasClass("csWalltimeStatusLow")).toBe(true);
     low.dispose();
 
     const over = new WalltimeStatus(
-      client(runtime({ state: "STOPPED", startedAt: "2030-01-01T00:00:00Z" })),
-      "rt-012345abcdef",
+      client(session({ state: "STOPPED", startedAt: "2030-01-01T00:00:00Z" })),
+      "s-012345abcdef",
     );
     await settled();
     expect(over.isHidden).toBe(true);

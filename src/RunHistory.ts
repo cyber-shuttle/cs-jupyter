@@ -1,39 +1,41 @@
-import { Widget } from "@lumino/widgets";
-import type { IRun, IRuntime } from "./Common";
+// Every session this account has run, running ones first, then finished ones.
+// The history outlives the cards in it, so a deleted session's run stays. A
+// session's current generation is itself a run entry with no outcome yet.
+import { RebuildingWidget } from "./RebuildingWidget";
+import type { IRun, ISession, SessionState } from "./Common";
 import { isTerminal } from "./Common";
-import type { CyberShuttlePanel, IRuntimeUiState } from "./CyberShuttlePanel";
-import { element, statePill } from "./dom";
-import { latest, usagePlots } from "./usage";
+import { displayState, type ISessionUiState } from "./session-ui-state";
+import type { CyberShuttlePanel } from "./CyberShuttlePanel";
+import {
+  detailGridWithRemaining,
+  disclosure,
+  element,
+  modalBody,
+  statePill,
+} from "./dom";
+import { sessionSummary } from "./metrics";
+import { usagePlots } from "./usage";
 import { RunReport } from "./RunReport";
-import { countsDown, formatRemaining, remainingMs } from "./walltime";
+import { countsDown } from "./walltime";
 
-// One allocation, finished or in flight. A run is a generation, so the
-// generation a card is on now is a run like any other -- it simply has no
-// outcome yet, and saying it stopped would be a lie.
 interface IHistoryEntry {
   key: string;
   sshHost: string;
-  state: string;
+  state: SessionState;
   run?: IRun;
-  runtime?: IRuntime;
+  session?: ISession;
 }
 
-/**
- * Every allocation this account has run, newest first: the ones still going,
- * then the ones that finished. The history outlives the cards in it, so a run
- * whose runtime was deleted is still here.
- */
-export class RunHistory extends Widget {
-  private _state: IRuntimeUiState;
-  // Keyed by generation, so a re-render leaves the reader where they were.
+export class RunHistory extends RebuildingWidget {
+  private _state: ISessionUiState;
   private _open = new Set<string>();
 
-  constructor(private _controller: CyberShuttlePanel) {
+  constructor(private _panel: CyberShuttlePanel) {
     super();
     this.id = "cybershuttle-run-history";
-    this.addClass("csRuntimePanel");
-    this._state = _controller.state;
-    this._controller.stateChanged.connect(this._onStateChanged, this);
+    this.addClass("csSessionPanel");
+    this._state = _panel.state;
+    this._panel.stateChanged.connect(this._onStateChanged, this);
     this._render();
   }
 
@@ -41,54 +43,50 @@ export class RunHistory extends Widget {
     if (this.isDisposed) {
       return;
     }
-    this._controller.stateChanged.disconnect(this._onStateChanged, this);
+    this._panel.stateChanged.disconnect(this._onStateChanged, this);
     super.dispose();
   }
 
   private _onStateChanged(
     _sender: CyberShuttlePanel,
-    state: IRuntimeUiState,
+    state: ISessionUiState,
   ): void {
     this._state = state;
     this._render();
   }
 
-  // A live allocation is listed under the generation it is on; the runs behind
-  // it are the generations that already ended.
   private _entries(): IHistoryEntry[] {
-    const running = this._state.runtimes
-      .filter((runtime) => !isTerminal(runtime.state) && runtime.generation)
-      .map((runtime) => ({
-        key: `${runtime.id}/${runtime.generation}`,
-        sshHost: runtime.sshHost,
-        state: runtime.state,
-        runtime,
+    const running = this._state.sessions
+      .filter((session) => !isTerminal(session.state))
+      .map((session) => ({
+        key: `${session.id}/${session.generation}`,
+        sshHost: session.sshHost,
+        state: session.state,
+        session,
       }));
-    const finished = this._state.runs.map((run) => ({
-      key: `${run.runtimeId}/${run.generation}`,
-      sshHost: run.sshHost,
-      state: run.finalState,
-      run,
-    }));
+    const finished = this._state.runs.map((run) => {
+      const relaunching = this._state.sessions.find(
+        (session) =>
+          session.id === run.sessionId && session.generation === run.generation,
+      );
+      return {
+        key: `${run.sessionId}/${run.generation}`,
+        sshHost: run.sshHost,
+        state: relaunching
+          ? displayState(relaunching, this._state.busySessionIds)
+          : run.finalState,
+        run,
+      };
+    });
     return [...running, ...finished];
   }
 
-  private _render(): void {
+  protected _rebuild(): void {
     this.node.textContent = "";
-    const root = element("div", "", "csRoot csScrollRoot");
-    root.append(
-      element(
-        "div",
-        "Every allocation you have run, newest first. A run is kept even after its card is deleted.",
-        "csModalSubtitle",
-      ),
-      element("hr", "", "csModalRule"),
+    const { root, scroll, card } = modalBody(
+      "Every session you have run, still running first. A run is kept even after its card is deleted.",
+      this._state.error,
     );
-    const scroll = element("div", "", "csModalScroll");
-    if (this._state.error) {
-      scroll.appendChild(element("div", this._state.error, "csError"));
-    }
-    const card = element("div", "", "csCard");
     const entries = this._entries();
     for (const entry of entries) {
       card.appendChild(this._entry(entry));
@@ -97,28 +95,25 @@ export class RunHistory extends Widget {
       card.appendChild(element("div", "No runs yet.", "csStatus"));
     }
     scroll.appendChild(card);
-    root.appendChild(scroll);
     this.node.appendChild(root);
   }
 
+  protected _counting(): boolean {
+    return this._entries().some(
+      (entry) => entry.session && countsDown(entry.session),
+    );
+  }
+
   private _entry(entry: IHistoryEntry): HTMLElement {
-    const element_ = document.createElement("details");
-    element_.className = "csSshHostEntry";
-    element_.open = this._open.has(entry.key);
-    element_.ontoggle = () =>
-      element_.open ? this._open.add(entry.key) : this._open.delete(entry.key);
-    const summary = document.createElement("summary");
-    summary.className = "csSshHostSummary";
-    summary.append(
+    const { entry: element_, body } = disclosure(entry.key, this._open, [
       element("span", entry.sshHost, "csCardTitle"),
       element("span", this._when(entry), "csMeta csSshHostTarget"),
       statePill(entry.state),
-    );
-    const body = element("div", "", "csSshHostBody");
+    ]);
+    element_.querySelector("summary")!.dataset.sessionAction = entry.key;
     body.appendChild(
-      entry.run ? RunReport(entry.run) : this._inFlight(entry.runtime!),
+      entry.run ? RunReport(entry.run) : this._inFlight(entry.session!),
     );
-    element_.append(summary, body);
     return element_;
   }
 
@@ -126,41 +121,24 @@ export class RunHistory extends Widget {
     if (entry.run) {
       return new Date(entry.run.endedAt).toLocaleString();
     }
-    const started = entry.runtime?.startedAt;
+    const started = entry.session?.startedAt;
     return started
       ? `started ${new Date(started).toLocaleString()}`
       : "not started yet";
   }
 
-  // An allocation still going has no report yet, but it does have live figures,
-  // and they are the same three series a finished run shows. Same two columns:
-  // what it is on the left, what it is doing on the right.
-  private _inFlight(runtime: IRuntime): HTMLElement {
+  private _inFlight(session: ISession): HTMLElement {
     const section = element("section", "", "csRunReport");
     const columns = element("div", "", "csDetailColumns");
-    const grid = element("dl", "", "csRuntimeDetailGrid");
     const rows: Array<[string, string]> = [
-      ["State", runtime.state],
-      ["Partition", runtime.partition],
-      ["Cores", String(runtime.resources.cores)],
-      ["Memory", `${runtime.resources.memoryMb} MB`],
+      ["State", session.state],
+      ...sessionSummary(session),
     ];
-    if (countsDown(runtime)) {
-      rows.push([
-        "Remaining",
-        formatRemaining(remainingMs(runtime, Date.now())),
-      ]);
-    }
-    for (const [label, value] of rows) {
-      grid.append(
-        element("dt", label, "csRuntimeDetailLabel"),
-        element("dd", value, "csRuntimeDetailValue"),
-      );
-    }
+    const grid = detailGridWithRemaining(rows, session);
     columns.appendChild(grid);
-    const samples = this._state.samples.get(runtime.id) ?? [];
+    const samples = this._state.samples.get(session.id) ?? [];
     if (samples.length) {
-      columns.appendChild(usagePlots(runtime, samples, latest));
+      columns.appendChild(usagePlots(session, samples, "latest"));
     }
     section.appendChild(columns);
     return section;

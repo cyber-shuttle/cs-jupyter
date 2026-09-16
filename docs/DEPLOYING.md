@@ -11,7 +11,7 @@ own machine before they can sign in.
 - Each user runs [cs-control](https://github.com/cyber-shuttle/cs-control) (`csctl serve`) on their own
   machine; it listens on loopback only. They pass this site's origin as `--allowed-origin`, and the Microsoft
   Entra authority is configured there rather than here.
-- cs-control must be able to hand out `*.devtunnels.ms` Jupyter origins for the allocations it creates. This
+- cs-control must be able to hand out `*.devtunnels.ms` Jupyter origins for the sessions it creates. This
   client rejects anything else, and the rule is not configurable.
 
 ## 1. Build
@@ -58,7 +58,7 @@ csctl serve \
 
 ## 4. Verify
 
-With `csctl serve` running, open the site. The Launcher shows a **Runtimes** section offering **Sign in**;
-completing device-code sign-in lists the runtimes cs-control holds for that account. Until a `READY` runtime
+With `csctl serve` running, open the site. The title row shows **Sign in**; completing device-code sign-in
+lists the sessions cs-control holds for that account. Until a `READY` session
 is selected the file browser, kernels and terminals stay empty by design — see
 [ARCHITECTURE.md](ARCHITECTURE.md).

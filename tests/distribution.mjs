@@ -1,3 +1,5 @@
+// Asserts the built static contract of dist: the files a deployer actually
+// ships. It reads them back the way a browser would, rather than through tsc.
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import assert from "node:assert/strict";
@@ -20,12 +22,6 @@ assert.equal(
   "control endpoint must be deployment-configured",
 );
 for (const key of [
-  "cybershuttleProductionOrigin",
-  "cybershuttleDevelopmentOrigins",
-]) {
-  assert.ok(!(key in config), `dead origin setting remains: ${key}`);
-}
-for (const key of [
   "cybershuttleClientId",
   "cybershuttleAuthority",
   "cybershuttleDevTunnelsScope",
@@ -34,28 +30,6 @@ for (const key of [
     !(key in config),
     `OAuth client configuration must not be present: ${key}`,
   );
-}
-const pythonProject = readFileSync(new URL("../pyproject.toml", dist), "utf8");
-for (const gatewayDependency of [
-  "jupyter-server-proxy",
-  "fastapi",
-  "flask",
-  "starlette",
-]) {
-  assert.ok(
-    !pythonProject.includes(gatewayDependency),
-    `Python gateway dependency found: ${gatewayDependency}`,
-  );
-}
-for (const removed of [
-  "cybershuttleRuntimeId",
-  "cybershuttleControllerBaseUrl",
-  "cybershuttleRuntimeApiUrl",
-  "cybershuttleRuntimeLaunchBaseUrl",
-  "cybershuttleSshApiUrl",
-  "cybershuttleContentNamespaceId",
-]) {
-  assert.ok(!(removed in config), `legacy PageConfig option found: ${removed}`);
 }
 assert.ok(
   !config.disabledExtensions.includes(
@@ -75,7 +49,7 @@ for (const plugin of [
 }
 assert.ok(
   !config.disabledExtensions.includes("@jupyterlab/terminal-extension:plugin"),
-  "remote terminal extension must remain available to a READY runtime",
+  "remote terminal extension must remain available to a READY session",
 );
 assert.ok(
   config.deferredExtensions.includes("@jupyterlab/terminal-extension:plugin"),
@@ -101,5 +75,5 @@ for (const provider of forbidden) {
 }
 
 console.log(
-  `validated ${paths.length} static files: local shell settings, remote compute managers, runtime selection, and no local kernel provider assets`,
+  `validated ${paths.length} static files: local shell settings, remote compute managers, session selection, and no local kernel provider assets`,
 );

@@ -1,19 +1,18 @@
-/* The brand fill stays blue in both themes, so anything on it is white in both.
-   --jp-ui-inverse-font-color1 inverts the UI text instead, which in the dark
-   theme is dark: black on blue. Defined at the root because the dialogs render
-   outside the panel. */
+/* Skins the extension's launcher, dialogs and run-history views hosted inside
+   JupyterLab and Lumino. Most rules exist to countermand or coordinate with
+   the host, not add new design. The brand fill stays blue in both themes, so
+   anything painted with it forces white text. */
 :root {
   --cs-on-brand: #fff;
 }
 .csShell,
-.csRuntimePanel {
+.csSessionPanel {
   width: 100%;
 }
 .csDeviceCodeOverlay {
   position: fixed;
   z-index: 10000;
   inset: 0;
-  /* Undo the UA <dialog> box, which would shrink the scrim to a bordered card. */
   box-sizing: border-box;
   width: auto;
   height: auto;
@@ -43,14 +42,12 @@
   font-size: var(--jp-ui-font-size3);
 }
 .csDeviceCode {
-  /* Pull back the tracking's trailing gap so the copy control stays beside the code. */
   margin-right: -0.12em;
   font-size: 1.5rem;
   font-weight: 700;
   letter-spacing: 0.12em;
 }
 
-/* The code and the control that copies it are one thing, so they sit together. */
 .csDeviceCodeRow {
   display: flex;
   gap: 2px;
@@ -93,14 +90,12 @@
   right: 12px;
 }
 
-/* The subtitle says what the list is; the rule below it ends the title. */
 .csModalSubtitle {
   padding-right: 32px;
   color: var(--jp-ui-font-color2);
   font-size: var(--jp-ui-font-size1);
 }
 
-/* Every row reads label on the left, control on the right. */
 .csForm .csField,
 .csForm .csResourceType {
   display: grid;
@@ -112,8 +107,6 @@
   grid-column: 2;
 }
 
-/* The query is one line: it turns, says what it is doing, and can be stopped
-   without leaving the form. */
 .csDiscoveryCancel {
   margin-left: auto;
 }
@@ -141,27 +134,23 @@
   margin-top: 16px;
 }
 
-/* Inside the launcher the page lays the panel out, not a Lumino parent, whose
-   inline `position: absolute; contain: strict` collapses to nothing in flow. */
 .jp-Launcher-content > .csShell,
-.jp-Launcher-content > .csShell > .csRuntimePanel {
+.jp-Launcher-content > .csShell > .csSessionPanel {
   position: relative !important;
   width: auto !important;
   height: auto !important;
   contain: none !important;
 }
-.csRuntimePanel [hidden] {
+.csSessionPanel [hidden] {
   display: none !important;
 }
 
-/* As tall as what it holds and no taller; longer content scrolls in the body. */
 .jp-Dialog-content:has(.csWorkspaceModal) {
   width: min(90vw, 1100px);
   max-width: calc(100vw - 32px);
   max-height: min(85vh, 850px);
 }
 
-/* A view that carries its own action leaves no footer to reserve room for. */
 .jp-Dialog-content:has(.csWorkspaceModal)
   .jp-Dialog-footer:has(.jp-Dialog-footerButtons:empty) {
   display: none;
@@ -171,7 +160,6 @@
   min-height: 0;
 }
 
-/* A view whose head stays put while its list moves. */
 .csScrollRoot {
   display: flex;
   flex: 0 1 auto;
@@ -197,35 +185,27 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.csRuntimeHeaderWidget {
-  /* The ground the side rails stand on, so the row reads as chrome. */
+.csSessionHeaderWidget {
   background: var(--jp-layout-color2);
 }
 
-/* The account menu hangs below the header row. Every Lumino level between it and
-   the page is stamped `contain: strict` inline, which paint-clips the menu to it,
-and the content region is a later absolutely positioned sibling,
-which would paint over it. Both levels opt out,
-and the row is lifted. */
-.csRuntimeHeaderWidget,
-.lm-BoxPanel:has(> .csRuntimeHeaderWidget) {
+.csSessionHeaderWidget,
+.lm-BoxPanel:has(> .csSessionHeaderWidget) {
   z-index: 1;
   overflow: visible !important;
   contain: none !important;
 }
-.csRuntimeHeaderWidget .csRuntimeLauncherHeader {
-  /* One value, so the mark's and the account's spacing cannot drift apart. */
+.csSessionHeaderWidget .csSessionLauncherHeader {
   --cs-mark-gap: 6px;
 
   padding: 0 12px;
   margin: 0;
 }
-.csRuntimeLauncherHeader .csIdentity,
-.jp-Launcher-sectionHeader .csSshHostsButton {
+.csSessionLauncherHeader .csIdentity,
+.jp-Launcher-sectionHeader .csSectionHeaderButton {
   margin-left: auto;
 }
 
-/* The holder is the menu's positioning context, not the launcher body. */
 .csIdentity {
   position: relative;
 }
@@ -279,8 +259,7 @@ and the row is lifted. */
   text-align: center;
 }
 
-/* Matches the box and contrast JupyterLab gives its own section icons. */
-.csRuntimeSectionRack {
+.csSessionSectionRack {
   flex: 0 0 auto;
   box-sizing: border-box;
   width: 32px;
@@ -288,49 +267,45 @@ and the row is lifted. */
   margin-right: 12px;
   color: var(--jp-ui-font-color1);
 }
-.csRuntimeSectionRack svg {
+.csSessionSectionRack svg {
   width: 100%;
   height: 100%;
 }
-.csRuntimeCard,
-.csRuntimeAddCard {
+.csSessionCard,
+.csSessionAddCard {
   color: inherit;
   font: inherit;
 }
 
-/* Wide enough that 128 CPUs and 512G still reads on one line. */
-.jp-LauncherCard.csRuntimeCard,
-.jp-LauncherCard.csRuntimeAddCard {
+.jp-LauncherCard.csSessionCard,
+.jp-LauncherCard.csSessionAddCard {
   width: 152px;
 }
-.csRuntimeCardIdentity {
+.csSessionCardIdentity {
   display: flex;
   flex-direction: column;
   line-height: 1.2;
 }
-.csRuntimeCardAccount {
+.csSessionCardAccount {
   overflow: hidden;
   color: var(--jp-ui-font-color3);
   font-size: var(--jp-ui-font-size0);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.csRuntimeCardLabel {
+.csSessionCardLabel {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-/* Outranks `.jp-LauncherCard-label p`, whose two-line reserve for wrapped titles
-   is the gap that separated this never-wrapping one from the allocation. */
-.jp-LauncherCard-label p.csRuntimeCardTitle {
+.jp-LauncherCard-label p.csSessionCardTitle {
   min-height: 0;
   margin: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.csRuntimeCardMeta {
-  /* The allocation is why one card is picked over another, so it wraps. */
+.csSessionCardMeta {
   display: flex;
   flex-wrap: wrap;
   gap: 3px;
@@ -353,37 +328,31 @@ and the row is lifted. */
 .csResourceSeparator {
   color: var(--jp-ui-font-color3);
 }
-/* What the allocation has left. The same warning colour serves the card, the
-   detail row and the status bar, so one threshold reads one way everywhere. */
-.csRuntimeCardCountdown {
+.csSessionCardCountdown {
   display: flex;
   justify-content: center;
   color: var(--jp-ui-font-color2);
   font-size: var(--jp-ui-font-size0);
   line-height: 1.35;
 }
-.csRuntimeCardCountdownLow,
-.csRuntimeCardCountdownLow .csResourceMeasure svg,
-.csRuntimeDetailLow,
+.csSessionCardCountdownLow,
+.csSessionCardCountdownLow .csResourceMeasure svg,
+.csSessionDetailLow,
 .csWalltimeStatusLow {
   color: var(--jp-warn-color1);
 }
-/* What a session is beside what it is doing: details left, usage right, and the
-   same pair in a finished run's report. One column under a narrow dialog. */
 .csDetailColumns {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
   gap: 16px;
   align-items: start;
 }
-.csRuntimeUsage,
 .csRunReport {
   display: flex;
   flex-direction: column;
   gap: 6px;
   margin-top: 12px;
 }
-/* CPU, MEM and GPU stacked in one row, each panel the same width. */
 .csUsageRow {
   display: grid;
   grid-auto-flow: column;
@@ -395,8 +364,6 @@ and the row is lifted. */
   flex-direction: column;
   gap: 3px;
   margin: 0;
-  /* The series colour lives on the figure so the per-series rules below can
-     override it; setting it on the plot itself would outrank inheritance. */
   color: var(--jp-brand-color1);
 }
 .csUsageTitle {
@@ -410,7 +377,6 @@ and the row is lifted. */
   font-size: var(--jp-ui-font-size0);
   font-variant-numeric: tabular-nums;
 }
-/* A 3:2 panel, so every series is read at the same scale. */
 .csPlot {
   width: 100%;
   aspect-ratio: 3 / 2;
@@ -420,8 +386,6 @@ and the row is lifted. */
   width: 100%;
   height: 100%;
 }
-/* The stroke is drawn in the plot's own units and stretched with it, so it is
-   held at its real width rather than stretched too. */
 .csPlotGrid,
 .csPlotFrame,
 .csPlotLine {
@@ -442,7 +406,6 @@ and the row is lifted. */
   stroke-linejoin: round;
   stroke-linecap: round;
 }
-/* One colour per series, as cs-bridge distinguishes the same three. */
 .csUsagePlot-MEM {
   color: var(--jp-warn-color1);
 }
@@ -469,7 +432,7 @@ and the row is lifted. */
   height: 14px;
 }
 .csPill,
-.csRuntimeState,
+.csSessionState,
 .csCurrentPill {
   align-self: center;
   padding: 2px 7px;
@@ -479,40 +442,35 @@ and the row is lifted. */
   font-size: var(--jp-ui-font-size0);
   font-weight: 700;
 }
-.csRuntimeState-ready {
+.csSessionState-ready {
   background: var(--jp-success-color3);
   color: var(--jp-success-color1);
 }
-.csRuntimeState-failed {
+.csSessionState-failed {
   background: var(--jp-error-color3);
   color: var(--jp-error-color1);
 }
-.csRuntimeState-submitting,
-.csRuntimeState-queued,
-.csRuntimeState-starting,
-.csRuntimeState-stopping {
+.csSessionState-submitting,
+.csSessionState-queued,
+.csSessionState-starting,
+.csSessionState-stopping {
   background: var(--jp-warn-color3);
   color: var(--jp-warn-color1);
 }
 
-/* The session this page is attached to is an identity, not a scheduler state. */
 .csCurrentPill {
   background: var(--jp-brand-color1);
   color: var(--cs-on-brand);
 }
-.csRuntimeCardCurrent {
+.csSessionCardCurrent {
   border-color: var(--jp-brand-color1);
   box-shadow: inset 0 0 0 1px var(--jp-brand-color1);
 }
-.csRuntimeAddCard {
+.csSessionAddCard {
   border-style: dashed;
 }
 
-/* The mark identifies the section; a card is one machine. The size is explicit
-   because the launcher sizes its own icons through the SVG this div replaces,
-   and the mark is a bitmap filling whatever box it is given, so the box is the
-   ink: same drawn size as a section icon, with no inset to unbalance the row. */
-.csRuntimeSectionIcon {
+.csSessionSectionIcon {
   flex: 0 0 auto;
   box-sizing: border-box;
   width: 22px;
@@ -523,50 +481,49 @@ and the row is lifted. */
   background-position: center;
   background-size: contain;
 }
-.csRuntimeCardIcon {
+.csSessionCardIcon {
   color: var(--jp-ui-font-color3);
 }
-.csRuntimeCardIcon svg {
+.csSessionCardIcon svg {
   width: 100%;
   height: 100%;
   padding: 9px;
 }
-.csRuntimeAddIcon {
+.csSessionAddIcon {
   font-size: 28px;
 }
 
-/* The allocation names the runtime with its host, so it sits between the two. */
-.csRuntimeDetailAccount {
+.csSessionDetailAccount {
   margin-right: 8px;
   color: var(--jp-ui-font-color3);
   font-size: var(--jp-ui-font-size0);
 }
-.csRuntimeDetailHeader,
-.csRuntimeDetailActions {
+.csSessionDetailHeader,
+.csSessionDetailActions {
   display: flex;
   gap: 8px;
   align-items: center;
 }
-.csRuntimeDetailHeader {
+.csSessionDetailHeader {
   justify-content: space-between;
   padding: 12px 14px;
   border-bottom: 1px solid var(--jp-border-color2);
 }
-.csRuntimeDetailTitle {
+.csSessionDetailTitle {
   margin: 0 0 6px;
 }
-.csRuntimeDetailGrid {
+.csSessionDetailGrid {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
   gap: 6px 12px;
   margin: 0;
   padding: 12px 14px;
 }
-.csRuntimeDetailLabel {
+.csSessionDetailLabel {
   color: var(--jp-ui-font-color2);
   font-weight: 600;
 }
-.csRuntimeDetailValue {
+.csSessionDetailValue {
   min-width: 0;
   margin: 0;
   overflow-wrap: anywhere;
@@ -578,20 +535,20 @@ and the row is lifted. */
   border-radius: 8px;
   background: var(--jp-layout-color1);
 }
-.csRuntimeLog {
+.csSessionLog {
   margin: 0 10px 8px;
   border: 1px solid var(--jp-border-color2);
   border-radius: 4px;
   background: var(--jp-layout-color0);
 }
-.csRuntimeLogTitle {
+.csSessionLogTitle {
   padding: 6px 8px;
   margin: 0;
   color: var(--jp-ui-font-color2);
   font-size: var(--jp-ui-font-size0);
   font-weight: 600;
 }
-.csRuntimeLogScroll {
+.csSessionLogScroll {
   box-sizing: border-box;
   height: 160px;
   padding: 6px 8px;
@@ -602,26 +559,25 @@ and the row is lifted. */
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.csRuntimeLogLine {
+.csSessionLogLine {
   display: grid;
   grid-template-columns: 5.5rem minmax(0, 1fr);
   gap: 8px;
   min-height: 1.35em;
 }
 
-/* The first column dates the line; the stream is its colour, not a repeated word. */
-.csRuntimeLogTime {
+.csSessionLogTime {
   color: var(--jp-ui-font-color3);
   font-family: var(--jp-ui-font-family);
   font-size: var(--jp-ui-font-size0);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.csRuntimeLog-status .csRuntimeLogTime {
+.csSessionLog-status .csSessionLogTime {
   color: var(--jp-brand-color1);
 }
-.csRuntimeLog-stderr .csRuntimeLogTime,
-.csRuntimeLog-stderr .csRuntimeLogText {
+.csSessionLog-stderr .csSessionLogTime,
+.csSessionLog-stderr .csSessionLogText {
   color: var(--jp-error-color1);
 }
 .csCardTitle {
@@ -651,8 +607,6 @@ and the row is lifted. */
   color: var(--jp-brand-color1);
 }
 
-/* The brand fill stays blue in both themes, so its text is white in both; the
-   theme's inverse font colour would follow the theme and go black. */
 .csPrimaryButton {
   border: 1px solid var(--jp-brand-color1);
   background: var(--jp-brand-color1);
@@ -688,7 +642,7 @@ and the row is lifted. */
   padding: 4px 8px;
 }
 .csForm,
-.csRuntimeReview {
+.csSessionReview {
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -746,14 +700,12 @@ and the row is lifted. */
   white-space: pre-wrap;
 }
 
-/* A passing dry run still writes to stderr -- "Job N to start at ..." is what
-   Slurm says when it accepts a script it did not run. Detail, not failure. */
 .csValidationError.csValidationDetail {
   color: var(--jp-ui-font-color2);
 }
 
 @media (width <= 640px) {
-  .csRuntimeReview {
+  .csSessionReview {
     padding: 10px;
   }
   .csSlurmScript {
@@ -807,7 +759,6 @@ and the row is lifted. */
   font-weight: 600;
 }
 
-/* An SSH host opens to exactly what ssh will use. */
 .csSshAdd {
   display: flex;
   flex-direction: column;
@@ -833,7 +784,6 @@ and the row is lifted. */
   border-top: 0;
 }
 
-/* Name and target share a row where they fit, the target at the far end. */
 .csSshHostSummary {
   display: flex;
   flex-wrap: wrap;
@@ -901,6 +851,19 @@ and the row is lifted. */
   overflow: hidden;
   background: var(--jp-layout-color1);
 }
+.csSshLoginDock {
+  position: fixed;
+  z-index: 10001;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(100%, 480px);
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--jp-layout-color1);
+  box-shadow: var(--jp-elevation-z4);
+}
 .csSshAuthHeader {
   display: flex;
   align-items: center;
@@ -910,9 +873,7 @@ and the row is lifted. */
   background: var(--jp-layout-color2);
 }
 
-/* The transcript is alone on the terminal's ground; everything said about the
-   operation is said above it, with the rest of the form. */
-.csSshAuthSession {
+.csSshAuthTranscript {
   padding: 8px;
   background: #111827;
 }

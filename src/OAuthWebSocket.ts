@@ -1,9 +1,14 @@
-import type { ITokenProvider } from "./ControlClient";
-import { assertSecureOrLoopback, parseUrl } from "./Common";
+// A WebSocket cannot carry an Authorization header. The bearer and identity
+// tokens travel as subprotocols instead, refreshed on each open.
+import {
+  assertSecureOrLoopback,
+  parseUrl,
+  type ITokenProvider,
+} from "./Common";
 
 export const CYBERSHUTTLE_WEBSOCKET_PROTOCOL = "cybershuttle.v1";
-export const CYBERSHUTTLE_BEARER_PROTOCOL_PREFIX = "bearer.";
-export const CYBERSHUTTLE_IDENTITY_PROTOCOL_PREFIX = "identity.";
+const CYBERSHUTTLE_BEARER_PROTOCOL_PREFIX = "bearer.";
+const CYBERSHUTTLE_IDENTITY_PROTOCOL_PREFIX = "identity.";
 const MAX_ACCESS_TOKEN_BYTES = 16 * 1024;
 const TOKEN_CONTROL_OR_WHITESPACE = /[\s\u0000-\u001f\u007f-\u009f]/u;
 
@@ -14,7 +19,6 @@ export type WebSocketConstructor = new (
   protocols: string[],
 ) => WebSocket;
 
-// Each call sends a freshly acquired bearer as a subprotocol.
 export class OAuthWebSocketFactory {
   private readonly _controlOrigin: string;
 
@@ -40,21 +44,16 @@ export class OAuthWebSocketFactory {
     const credentials = await this._auth.acquireToken();
     const encodedAccess = encodeAccessToken(credentials.accessToken);
     const encodedIdentity = encodeAccessToken(credentials.idToken);
-    const socket = new this._WebSocket(url, [
+    return new this._WebSocket(url, [
       CYBERSHUTTLE_WEBSOCKET_PROTOCOL,
       `${CYBERSHUTTLE_BEARER_PROTOCOL_PREFIX}${encodedAccess}`,
       `${CYBERSHUTTLE_IDENTITY_PROTOCOL_PREFIX}${encodedIdentity}`,
     ]);
-    return socket;
   }
 }
 
-export function encodeAccessToken(token: string): string {
-  if (
-    !token ||
-    TOKEN_CONTROL_OR_WHITESPACE.test(token) ||
-    token.trim() !== token
-  ) {
+function encodeAccessToken(token: string): string {
+  if (!token || TOKEN_CONTROL_OR_WHITESPACE.test(token)) {
     throw new Error(
       "CyberShuttle delegated token contains invalid characters.",
     );

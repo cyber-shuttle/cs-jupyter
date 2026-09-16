@@ -1,69 +1,60 @@
+// The typed client for cs-control's REST and WebSocket API. Every response is
+// validated against Common.ts's shapes before a caller sees it. UNCHANGED marks
+// a 304 Not Modified response, meaning the caller's cached copy is still current.
 import { PageConfig, URLExt } from "@jupyterlab/coreutils";
 import { ServerConnection } from "@jupyterlab/services";
-import {
-  AuthClient,
-  validControlApiUrl,
-  type OAuthCredentials,
-} from "./AuthClient";
+import { AuthClient } from "./AuthClient";
+import type { OAuthCredentials } from "./Common";
 import {
   OAuthWebSocketFactory,
   type OAuthWebSocketConnector,
 } from "./OAuthWebSocket";
-import type { IRuntimeAccess } from "./runtime-access";
+import type { ISessionAccess } from "./session-access";
 import {
-  clearRuntimeAccess,
-  validateRuntimeAccess,
+  clearSessionAccess,
+  validateSessionAccess,
   validDevTunnelRoot,
-} from "./runtime-access";
+} from "./session-access";
 import {
+  ILogLine,
   IMetricSample,
   IRun,
-  IRuntime,
-  IRuntimeCreateRequest,
-  IRuntimeSeries,
-  IRuntimeValidation,
+  ISession,
+  ISessionCreateRequest,
+  ISessionSeries,
+  ISessionValidation,
   ISlurmInfo,
   ISshHost,
   ISshHostTest,
-  RUNTIME_ID,
-  RUNTIME_KEYS,
-  RUNTIME_STATES,
-  RuntimeState,
-  RuntimeValidationStatus,
+  ITokenProvider,
+  LogStream,
+  SESSION_ID,
+  SESSION_KEYS,
+  SESSION_STATES,
+  SessionState,
+  SessionValidationStatus,
   VALIDATION_STATUSES,
   exactKeys,
   isPlainObject,
+  jsonResponse,
   onlyKeys,
   requestUrl,
+  validControlApiUrl,
+  validSessionId,
 } from "./Common";
 
-const RUNTIME_LOG_CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
+const SESSION_LOG_CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
 
-export type RuntimeLogStream = "status" | "stdout" | "stderr";
-
-export interface IRuntimeLogLine {
-  stream: RuntimeLogStream;
-  text: string;
-  at: string;
+export interface ISessionLogTail {
+  sessionId: string;
+  lines: ILogLine[];
 }
 
-export interface IRuntimeLogTail {
-  runtimeId: string;
-  lines: IRuntimeLogLine[];
-}
+export const UNCHANGED = Symbol("cs-control session list unchanged");
 
-// cs-control answers 304 while the owner-filtered list and its tails are
-// byte-identical to the last poll: nothing to parse, nothing to re-render.
-export const UNCHANGED = Symbol("cs-control runtime list unchanged");
-
-export interface IRuntimeList {
-  runtimes: IRuntime[];
-  logs: IRuntimeLogTail[];
-}
-
-export interface ITokenProvider {
-  acquireToken(): Promise<OAuthCredentials>;
-  invalidateToken?(): void;
+export interface ISessionList {
+  sessions: ISession[];
+  logs: ISessionLogTail[];
 }
 
 export interface IControlAuth extends ITokenProvider {
@@ -83,14 +74,12 @@ export class ControlError extends Error {
 export const needsSshLogin = (error: unknown): boolean =>
   error instanceof ControlError && error.code === "ssh_authentication_required";
 
-export { validControlApiUrl } from "./AuthClient";
-
 export function safeControlFetch(
   controlApiUrl: string,
   auth: ITokenProvider,
   fetch: typeof globalThis.fetch = globalThis.fetch.bind(globalThis),
 ): typeof globalThis.fetch {
-  const controlOrigin = new URL(validControlApiUrl(controlApiUrl)).origin;
+  const controlOrigin = new URL(controlApiUrl).origin;
   return async (input, init = {}) => {
     const url = new URL(requestUrl(input));
     if (url.origin !== controlOrigin) {
@@ -123,9 +112,7 @@ export class ControlClient {
   private _fetch: typeof globalThis.fetch;
   private _webSockets: OAuthWebSocketFactory;
   private _auth: IControlAuth;
-  // Describes the list its holder already has, so entering or leaving a session
-  // drops it: a fresh panel has no list to revalidate, and a 304 leaves it empty.
-  private _runtimesTag: string | undefined;
+  private _sessionsTag: string | undefined;
 
   constructor(
     base = PageConfig.getOption("cybershuttleControlApiUrl"),
@@ -141,14 +128,12 @@ export class ControlClient {
   }
 
   async signIn(): Promise<void> {
-    this._runtimesTag = undefined;
+    this._sessionsTag = undefined;
     await this._auth.interactiveLogin();
   }
 
-  // Succeeds only on a still-valid credential, so a caller can tell a resumable
-  // session from one needing the device-code round trip.
-  async resumeSession(): Promise<void> {
-    this._runtimesTag = undefined;
+  async resumeSignIn(): Promise<void> {
+    this._sessionsTag = undefined;
     await this._auth.acquireToken();
   }
 
@@ -157,7 +142,7 @@ export class ControlClient {
   }
 
   signOut(): void {
-    this._runtimesTag = undefined;
+    this._sessionsTag = undefined;
     this._auth.invalidateToken?.();
   }
 
@@ -169,7 +154,6 @@ export class ControlClient {
     return value.hosts.map(validateHost);
   }
 
-  // cs-control parses the pasted command; the browser composes no SSH config.
   async addSshHost(name: string, command: string): Promise<ISshHost> {
     return validateHost(
       await this._request("ssh", {
@@ -180,8 +164,6 @@ export class ControlClient {
     );
   }
 
-  // The alias names the entry being edited, so an edit cannot rename what it
-  // edits; the command is parsed by cs-control exactly as an added one is.
   async updateSshHost(alias: string, command: string): Promise<ISshHost> {
     return validateHost(
       await this._request(`ssh/${encodeURIComponent(alias)}`, {
@@ -204,65 +186,68 @@ export class ControlClient {
     });
     if (
       !isPlainObject(value) ||
+      typeof value.host !== "string" ||
       typeof value.ok !== "boolean" ||
       typeof value.message !== "string"
     ) {
       throw new Error("cs-control returned an invalid SSH host test.");
     }
-    return { ok: value.ok, message: value.message };
+    if (value.host !== alias) {
+      throw new Error(
+        `Received an SSH host test for ${value.host}, not ${alias}.`,
+      );
+    }
+    return { host: value.host, ok: value.ok, message: value.message };
   }
 
-  // Aborting the signal cancels the request, which cancels the remote process group.
   async discoverSlurm(
     alias: string,
     signal?: AbortSignal,
   ): Promise<ISlurmInfo> {
-    return validateSlurmResource(
+    const value = validateSlurmResource(
       await this._request(`ssh/${encodeURIComponent(alias)}/slurm`, { signal }),
     );
+    if (value.host !== alias) {
+      throw new Error(
+        `Received Slurm discovery for ${value.host}, not ${alias}.`,
+      );
+    }
+    return value;
   }
 
   sshAuthWebSocket(alias: string): OAuthWebSocketConnector {
     return this._webSocketConnector(`ssh/${encodeURIComponent(alias)}/auth`);
   }
 
-  // Answers UNCHANGED while cs-control's reply is byte-identical to the last, as
-  // it is for most of a queued job's life. `cache: "no-store"` stops the browser
-  // revalidating on its own, so the conditional request is made here.
-  async listRuntimes(): Promise<IRuntimeList | typeof UNCHANGED> {
-    const response = await this._fetch(
-      URLExt.join(this._base, "runtimes"),
-      this._runtimesTag
-        ? { headers: { "If-None-Match": this._runtimesTag } }
-        : {},
+  async listSessions(): Promise<ISessionList | typeof UNCHANGED> {
+    let tag: string | undefined;
+    const value = await this._request(
+      "sessions",
+      {},
+      { tag: this._sessionsTag, onTag: (etag) => (tag = etag) },
     );
-    if (response.status === 304) {
+    if (value === UNCHANGED) {
       return UNCHANGED;
     }
-    if (!response.ok) {
-      await this._fail(response);
-    }
-    const value = await this._json(response);
     if (
       !isPlainObject(value) ||
-      !Array.isArray(value.runtimes) ||
+      !Array.isArray(value.sessions) ||
       !(value.logs === undefined || Array.isArray(value.logs))
     ) {
-      throw new Error("cs-control returned an invalid runtime list.");
+      throw new Error("cs-control returned an invalid session list.");
     }
-    this._runtimesTag = response.headers.get("ETag") ?? undefined;
-    return {
-      runtimes: value.runtimes.map(validateRuntime),
-      logs: (value.logs ?? []).map(validateRuntimeLogTail),
-    };
+    const sessions = value.sessions.map(validateSession);
+    const logs = (value.logs ?? []).map(validateSessionLogTail);
+    this._sessionsTag = tag;
+    return { sessions, logs };
   }
 
-  async validateRuntime(
-    request: IRuntimeCreateRequest,
+  async validateCreateRequest(
+    request: ISessionCreateRequest,
     signal?: AbortSignal,
-  ): Promise<IRuntimeValidation> {
-    return validateRuntimeValidation(
-      await this._request("runtimes/validate", {
+  ): Promise<ISessionValidation> {
+    return validateSessionValidation(
+      await this._request("sessions/validate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(request),
@@ -271,9 +256,9 @@ export class ControlClient {
     );
   }
 
-  async createRuntime(request: IRuntimeCreateRequest): Promise<IRuntime> {
-    return validateRuntime(
-      await this._request("runtimes", {
+  async createSession(request: ISessionCreateRequest): Promise<ISession> {
+    return validateSession(
+      await this._request("sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(request),
@@ -281,69 +266,67 @@ export class ControlClient {
     );
   }
 
-  async getRuntime(id: string): Promise<IRuntime> {
-    return validateRuntime(
-      await this._request(`runtimes/${encodeURIComponent(id)}`),
+  async getSession(id: string): Promise<ISession> {
+    const session = validateSession(
+      await this._request(`sessions/${encodeURIComponent(id)}`),
     );
+    if (session.id !== id) {
+      throw new Error("cs-control returned a different session.");
+    }
+    return session;
   }
 
-  async startRuntime(id: string): Promise<IRuntime> {
-    return this._runtimeAction(id, "start", "POST", "started");
+  async startSession(id: string): Promise<ISession> {
+    return this._sessionAction(id, "start", "POST", "started");
   }
 
-  async stopRuntime(id: string): Promise<IRuntime> {
-    return this._runtimeAction(id, "stop", "POST", "stopped");
+  async stopSession(id: string): Promise<ISession> {
+    return this._sessionAction(id, "stop", "POST", "stopped");
   }
 
-  async deleteRuntime(id: string): Promise<IRuntime> {
-    return this._runtimeAction(id, "", "DELETE", "deleted");
+  async deleteSession(id: string): Promise<ISession> {
+    return this._sessionAction(id, "", "DELETE", "deleted");
   }
 
-  // Start, stop, and delete differ only in the route and the word for what came
-  // back. All three must answer with the runtime they were asked about, and all
-  // three end the browser's session with the allocation it had.
-  private async _runtimeAction(
+  private async _sessionAction(
     id: string,
     suffix: string,
     method: string,
     past: string,
-  ): Promise<IRuntime> {
-    const runtimeId = validRuntimeId(id);
-    const path = `runtimes/${encodeURIComponent(runtimeId)}${suffix ? `/${suffix}` : ""}`;
-    const runtime = validateRuntime(await this._request(path, { method }));
-    if (runtime.id !== runtimeId) {
-      throw new Error(`cs-control returned an invalid ${past} runtime.`);
+  ): Promise<ISession> {
+    const sessionId = validSessionId(id);
+    const path = `sessions/${encodeURIComponent(sessionId)}${suffix ? `/${suffix}` : ""}`;
+    const session = validateSession(await this._request(path, { method }));
+    if (session.id !== sessionId) {
+      throw new Error(`cs-control returned an invalid ${past} session.`);
     }
-    clearRuntimeAccess(runtimeId);
-    return runtime;
+    clearSessionAccess(sessionId);
+    return session;
   }
 
-  // Samples are their own read: they change on every tick, so cs-control keeps
-  // them out of the poll whose ETag makes a queued job cheap to watch.
-  async getRuntimeMetrics(id: string): Promise<IRuntimeSeries> {
-    return validateRuntimeSeries(
+  async getSessionMetrics(id: string): Promise<ISessionSeries> {
+    return validateSessionSeries(
       await this._request(
-        `runtimes/${encodeURIComponent(validRuntimeId(id))}/metrics`,
+        `sessions/${encodeURIComponent(validSessionId(id))}/metrics`,
       ),
     );
   }
 
-  // The history outlives the runtimes in it, so it is its own collection: a run
-  // whose card was deleted is still the caller's.
   async listRuns(): Promise<IRun[]> {
-    const value = await this._request("runtimes/history");
+    const value = await this._request("sessions/history");
     if (!isPlainObject(value) || !Array.isArray(value.runs)) {
       throw new Error("cs-control returned an invalid run history.");
     }
     return value.runs.map(validateRun);
   }
 
-  async getRuntimeAccess(id: string): Promise<IRuntimeAccess> {
-    const access = validateRuntimeAccess(
-      await this._request(`runtimes/${encodeURIComponent(id)}/access`),
+  async getSessionAccess(id: string): Promise<ISessionAccess> {
+    const sessionId = validSessionId(id);
+    const access = validateSessionAccess(
+      await this._request(`sessions/${encodeURIComponent(sessionId)}/access`),
     );
-    if (access.runtimeId !== id) {
-      throw new Error("cs-control returned access for a different runtime.");
+    if (access.sessionId !== sessionId) {
+      throw new Error("cs-control returned access for a different session.");
     }
     return access;
   }
@@ -368,9 +351,7 @@ export class ControlClient {
           message = value.error.message;
         }
       }
-    } catch {
-      // Keep the status-only error.
-    }
+    } catch {}
     throw new ControlError(code, message);
   }
 
@@ -385,20 +366,30 @@ export class ControlClient {
   private async _request(
     path: string,
     init: RequestInit = {},
+    unless304?: {
+      tag: string | undefined;
+      onTag: (tag: string | undefined) => void;
+    },
   ): Promise<unknown> {
-    const response = await this._fetch(URLExt.join(this._base, path), init);
+    const headers = unless304?.tag
+      ? { ...init.headers, "If-None-Match": unless304.tag }
+      : init.headers;
+    const response = await this._fetch(URLExt.join(this._base, path), {
+      ...init,
+      headers,
+    });
+    if (unless304 && response.status === 304) {
+      return UNCHANGED;
+    }
     if (!response.ok) {
       await this._fail(response);
     }
-    return this._json(response);
+    const value = await this._json(response);
+    unless304?.onTag(response.headers.get("ETag") ?? undefined);
+    return value;
   }
 }
 
-// A kernel spec reports its logos as paths on the runtime, but an <img> cannot
-// carry the identity token: unauthenticated the runtime answers with its login
-// page, and its static handler refuses the preflight an Authorization header
-// forces. A token in the URL is the one thing that would work and the one thing
-// that must never happen, so the launcher falls back to its built-in icon.
 async function withoutUnreachableKernelSpecLogos(
   response: Response,
 ): Promise<Response> {
@@ -410,24 +401,23 @@ async function withoutUnreachableKernelSpecLogos(
       }
     }
   }
-  return new Response(JSON.stringify(payload), {
+  return jsonResponse(payload, {
     status: response.status,
     statusText: response.statusText,
-    headers: { "content-type": "application/json" },
   });
 }
 
-export function createRuntimeServerSettings(
-  descriptor: IRuntimeAccess,
+export function createSessionServerSettings(
+  descriptor: ISessionAccess,
   options: { fetch?: typeof globalThis.fetch } = {},
 ): ServerConnection.ISettings {
-  const access = validateRuntimeAccess(descriptor);
+  const access = validateSessionAccess(descriptor);
   const baseUrl = validDevTunnelRoot(access.jupyter.uri).origin + "/";
   const browserFetch = options.fetch ?? globalThis.fetch.bind(globalThis);
   const invalidatingFetch: typeof globalThis.fetch = async (input, init) => {
     const response = await browserFetch(input, init);
     if (response.status === 401 || response.status === 403) {
-      clearRuntimeAccess(access.runtimeId);
+      clearSessionAccess(access.sessionId);
       return response;
     }
     if (response.ok && requestUrl(input).includes("/api/kernelspecs")) {
@@ -444,120 +434,184 @@ export function createRuntimeServerSettings(
   });
 }
 
-export function validRuntimeId(value: string): string {
-  if (!RUNTIME_ID.test(value)) {
-    throw new Error("Invalid session id.");
-  }
-  return value;
-}
-
-function validateRuntimeValidation(value: unknown): IRuntimeValidation {
+function validateSessionValidation(value: unknown): ISessionValidation {
   if (
     !onlyKeys(value, [
-      "runtimeId",
+      "sessionId",
       "status",
       "script",
       "message",
       "stdout",
       "stderr",
     ]) ||
-    !VALIDATION_STATUSES.includes(value.status as RuntimeValidationStatus)
+    typeof value.sessionId !== "string" ||
+    !VALIDATION_STATUSES.includes(value.status as SessionValidationStatus) ||
+    typeof value.script !== "string" ||
+    typeof value.message !== "string" ||
+    (value.stdout !== undefined && typeof value.stdout !== "string") ||
+    (value.stderr !== undefined && typeof value.stderr !== "string")
   ) {
-    throw new Error("cs-control returned an invalid runtime validation.");
+    throw new Error("cs-control returned an invalid session validation.");
   }
-  return value as IRuntimeValidation;
+  return value as ISessionValidation;
 }
 
-function validateRuntimeLogTail(value: unknown): IRuntimeLogTail {
-  if (
-    !isPlainObject(value) ||
-    typeof value.runtimeId !== "string" ||
-    !RUNTIME_ID.test(value.runtimeId) ||
-    !Array.isArray(value.lines) ||
-    value.lines.length < 1 ||
-    value.lines.length > 100 ||
-    !exactKeys(value, ["runtimeId", "lines"])
-  ) {
-    throw new Error("cs-control returned an invalid runtime log event.");
-  }
+function validateLogLines(lines: unknown[]): ILogLine[] {
   let bytes = 0;
   const encoder = new TextEncoder();
-  const lines = value.lines.map((line): IRuntimeLogLine => {
+  return lines.map((line): ILogLine => {
     if (
       !isPlainObject(line) ||
       !["status", "stdout", "stderr"].includes(String(line.stream)) ||
       typeof line.text !== "string" ||
-      RUNTIME_LOG_CONTROL.test(line.text) ||
+      SESSION_LOG_CONTROL.test(line.text) ||
       typeof line.at !== "string" ||
       !exactKeys(line, ["stream", "text", "at"])
     ) {
-      throw new Error("cs-control returned an invalid runtime log line.");
+      throw new Error("cs-control returned an invalid session log line.");
     }
     const size = encoder.encode(line.text).byteLength;
     bytes += size;
     if (size > 4096 || bytes > 64 * 1024) {
-      throw new Error("cs-control returned an oversized runtime log event.");
+      throw new Error("cs-control returned an oversized session log event.");
     }
     return {
-      stream: line.stream as RuntimeLogStream,
+      stream: line.stream as LogStream,
       text: line.text,
       at: line.at,
     };
   });
-  return { runtimeId: value.runtimeId, lines };
 }
 
-function validateRuntime(value: unknown): IRuntime {
+function validateSessionLogTail(value: unknown): ISessionLogTail {
   if (
-    !onlyKeys(value, RUNTIME_KEYS) ||
-    !RUNTIME_STATES.includes(value.state as RuntimeState) ||
-    !isPlainObject(value.resources)
+    !isPlainObject(value) ||
+    typeof value.sessionId !== "string" ||
+    !SESSION_ID.test(value.sessionId) ||
+    !Array.isArray(value.lines) ||
+    value.lines.length > 100 ||
+    !exactKeys(value, ["sessionId", "lines"])
   ) {
-    throw new Error("cs-control returned an invalid runtime.");
+    throw new Error("cs-control returned an invalid session log event.");
   }
-  return value as unknown as IRuntime;
+  return { sessionId: value.sessionId, lines: validateLogLines(value.lines) };
+}
+
+function validateResources(value: unknown): boolean {
+  return (
+    isPlainObject(value) &&
+    typeof value.cores === "number" &&
+    typeof value.memoryMb === "number" &&
+    typeof value.wallMinutes === "number"
+  );
+}
+
+function validateGenerationAndJobSpec(value: Record<string, any>): boolean {
+  return (
+    typeof value.generation === "string" &&
+    typeof value.sshHost === "string" &&
+    typeof value.partition === "string" &&
+    typeof value.rootFolder === "string" &&
+    validateResources(value.resources)
+  );
+}
+
+function validateSession(value: unknown): ISession {
+  if (
+    !onlyKeys(value, SESSION_KEYS) ||
+    !SESSION_ID.test(String(value.id)) ||
+    !validateGenerationAndJobSpec(value) ||
+    !SESSION_STATES.includes(value.state as SessionState) ||
+    typeof value.createdAt !== "string" ||
+    typeof value.updatedAt !== "string"
+  ) {
+    throw new Error("cs-control returned an invalid session.");
+  }
+  return value as unknown as ISession;
 }
 
 function validateSample(value: unknown): IMetricSample {
-  if (!isPlainObject(value) || typeof value.at !== "string") {
+  if (
+    !isPlainObject(value) ||
+    typeof value.at !== "string" ||
+    (value.memBytes !== undefined && typeof value.memBytes !== "number") ||
+    (value.cpuUsageUsec !== undefined &&
+      typeof value.cpuUsageUsec !== "number") ||
+    (value.gpus !== undefined &&
+      (!Array.isArray(value.gpus) ||
+        !value.gpus.every(
+          (gpu) => isPlainObject(gpu) && typeof gpu.utilPct === "number",
+        )))
+  ) {
     throw new Error("cs-control returned an invalid metric sample.");
   }
   return value as unknown as IMetricSample;
 }
 
-function validateRuntimeSeries(value: unknown): IRuntimeSeries {
+function validateSessionSeries(value: unknown): ISessionSeries {
   if (
     !isPlainObject(value) ||
-    !RUNTIME_ID.test(String(value.runtimeId)) ||
+    !SESSION_ID.test(String(value.sessionId)) ||
     !(value.samples === undefined || Array.isArray(value.samples))
   ) {
     throw new Error("cs-control returned an invalid metric series.");
   }
   return {
-    runtimeId: value.runtimeId as string,
+    sessionId: value.sessionId as string,
     samples: ((value.samples ?? []) as unknown[]).map(validateSample),
   };
+}
+
+function validateRunStats(value: unknown): boolean {
+  return (
+    isPlainObject(value) &&
+    (value.requestedMemory === undefined ||
+      typeof value.requestedMemory === "string") &&
+    (value.elapsedSeconds === undefined ||
+      typeof value.elapsedSeconds === "number") &&
+    (value.maxRss === undefined || typeof value.maxRss === "string") &&
+    (value.cpuEfficiencyPct === undefined ||
+      typeof value.cpuEfficiencyPct === "number") &&
+    (value.memoryEfficiencyPct === undefined ||
+      typeof value.memoryEfficiencyPct === "number") &&
+    (value.cores === undefined || typeof value.cores === "number")
+  );
 }
 
 function validateRun(value: unknown): IRun {
   if (
     !isPlainObject(value) ||
-    !RUNTIME_ID.test(String(value.runtimeId)) ||
-    typeof value.generation !== "string" ||
-    typeof value.finalState !== "string" ||
+    !SESSION_ID.test(String(value.sessionId)) ||
+    !validateGenerationAndJobSpec(value) ||
+    !SESSION_STATES.includes(value.finalState as SessionState) ||
     typeof value.endedAt !== "string" ||
-    !isPlainObject(value.resources)
+    (value.stats !== undefined && !validateRunStats(value.stats)) ||
+    (value.samples !== undefined && !Array.isArray(value.samples)) ||
+    (value.logs !== undefined && !Array.isArray(value.logs))
   ) {
     throw new Error("cs-control returned an invalid run.");
   }
-  return value as unknown as IRun;
+  return {
+    ...(value as unknown as IRun),
+    samples: value.samples && (value.samples as unknown[]).map(validateSample),
+    logs: value.logs && validateLogLines(value.logs as unknown[]),
+  };
 }
 
 function validateHost(value: unknown): ISshHost {
   if (
     !isPlainObject(value) ||
     typeof value.name !== "string" ||
-    !Array.isArray(value.extraDirectives)
+    !Array.isArray(value.extraDirectives) ||
+    !value.extraDirectives.every(
+      (directive) => typeof directive === "string",
+    ) ||
+    (value.hostname !== undefined && typeof value.hostname !== "string") ||
+    (value.user !== undefined && typeof value.user !== "string") ||
+    (value.port !== undefined && typeof value.port !== "number") ||
+    (value.identityFile !== undefined &&
+      typeof value.identityFile !== "string") ||
+    (value.managed !== undefined && typeof value.managed !== "boolean")
   ) {
     throw new Error("cs-control returned an invalid SSH host.");
   }
@@ -567,17 +621,27 @@ function validateHost(value: unknown): ISshHost {
 export function validateSlurmResource(value: unknown): ISlurmInfo {
   if (
     !isPlainObject(value) ||
+    typeof value.host !== "string" ||
     !Array.isArray(value.accounts) ||
+    !value.accounts.every((account) => typeof account === "string") ||
     !Array.isArray(value.partitions) ||
     !value.partitions.every(
-      (part) => isPlainObject(part) && Array.isArray(part.gres),
-    )
+      (part) =>
+        isPlainObject(part) &&
+        typeof part.name === "string" &&
+        typeof part.cpuCount === "number" &&
+        typeof part.memoryMb === "number" &&
+        Array.isArray(part.gres) &&
+        part.gres.every(
+          (gres: unknown) =>
+            isPlainObject(gres) &&
+            typeof gres.name === "string" &&
+            typeof gres.count === "number",
+        ),
+    ) ||
+    (value.homeDir !== undefined && typeof value.homeDir !== "string")
   ) {
     throw new Error("cs-control returned invalid Slurm discovery.");
   }
   return value as unknown as ISlurmInfo;
-}
-
-export function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
