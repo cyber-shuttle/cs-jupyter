@@ -744,13 +744,13 @@ describe("SSH hosts modal chrome", () => {
       listSshHosts: async () => [],
     } as unknown as ControlClient);
     const root = hosts.node.querySelector(".csRoot")!;
-    expect(root.querySelector(".csModalClose")).toBeNull();
+    expect(root.querySelector(".csDialogClose")).toBeNull();
     expect(
       [...root.children]
         .map((node) => node.className.split(" ")[0])
         .slice(0, 2),
-    ).toEqual(["csModalSubtitle", "csModalRule"]);
-    expect(root.querySelector(".csModalSubtitle")?.textContent).toContain(
+    ).toEqual(["csDialogSubtitle", "csDialogRule"]);
+    expect(root.querySelector(".csDialogSubtitle")?.textContent).toContain(
       "~/.ssh/config",
     );
     hosts.dispose();

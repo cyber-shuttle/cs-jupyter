@@ -1,9 +1,23 @@
-// Turns raw metric samples and run accounting into series and summaries the
-// panel renders. A cumulative CPU counter is turned into a rate between
-// consecutive readings. A finished run reports Slurm's accounting once it lands,
-// or its own last samples otherwise.
+// Turns raw metric samples and run accounting into series, summaries,
+// CPU/MEM/GPU usage plots (USAGE_SLOTS wide, mirroring cs-control's window)
+// and the status-bar walltime countdown for the session this page is
+// attached to. It reads cs-control directly since the launcher panel is
+// disposed once anything opens, and hides for a queued, stopping or
+// finished session.
+import type { JupyterFrontEndPlugin } from "@jupyterlab/application";
+import { IStatusBar } from "@jupyterlab/statusbar";
+import { Widget } from "@lumino/widgets";
 import type { IMetricSample, IRun, IRunStats, ISession } from "./Common";
-import { formatRemaining } from "./walltime";
+import { ControlClient } from "./ControlClient";
+import {
+  Clock,
+  CLOCK_GLYPH,
+  countsDown,
+  element,
+  formatRemaining,
+  remainingBadge,
+} from "./dom";
+import { selectedSession } from "./session";
 
 export function cpuCoreSeries(samples: readonly IMetricSample[]): number[] {
   return samples.flatMap((sample, index) => {
@@ -29,11 +43,12 @@ export const memoryGigabytes = (samples: readonly IMetricSample[]): number[] =>
   );
 
 export const gpuUtilisation = (samples: readonly IMetricSample[]): number[] =>
-  samples.flatMap((sample) =>
-    sample.gpus?.length
-      ? [Math.max(...sample.gpus.map((gpu) => gpu.utilPct))]
-      : [],
-  );
+  samples.flatMap((sample) => {
+    const pcts = (sample.gpus ?? []).flatMap((gpu) =>
+      gpu.utilPct === undefined ? [] : [gpu.utilPct],
+    );
+    return pcts.length ? [Math.max(...pcts)] : [];
+  });
 
 interface IResourceGraph {
   label: string;
@@ -74,8 +89,8 @@ export function resourceGraphs(
   return graphs;
 }
 
-export const PLOT_WIDTH = 60;
-export const PLOT_HEIGHT = 40;
+const PLOT_WIDTH = 60;
+const PLOT_HEIGHT = 40;
 
 export function sparklinePoints(
   values: number[],
@@ -151,3 +166,130 @@ export function accountingState(
     ? "pending"
     : "never";
 }
+
+const USAGE_SLOTS = 20;
+
+function plot(points: string, title: string): HTMLElement {
+  const holder = element("div", "", "csPlot");
+  holder.innerHTML = `<svg viewBox="0 0 ${PLOT_WIDTH} ${PLOT_HEIGHT}" preserveAspectRatio="none" role="img"><title>${title}</title><path class="csPlotGrid" d="M0 10H60M0 20H60M0 30H60M15 0V40M30 0V40M45 0V40" /><rect class="csPlotFrame" x="0.5" y="0.5" width="59" height="39" /><polyline class="csPlotLine" points="${points}" /></svg>`;
+  return holder;
+}
+
+export function usagePlots(
+  spec: Pick<ISession, "resources"> & { stats?: IRunStats },
+  samples: readonly IMetricSample[],
+  mode: "latest" | "peak",
+): HTMLElement {
+  const prefix = mode === "peak" ? "peak " : "";
+  const reading = mode === "peak" ? peak : latest;
+  const row = element("div", "", "csUsageRow");
+  for (const graph of resourceGraphs(spec, samples)) {
+    const value = reading(graph.values);
+    const caption =
+      value === undefined ? "—" : `${prefix}${graph.format(value)}`;
+    const cell = element(
+      "figure",
+      "",
+      `csUsagePlot csUsagePlot-${graph.label}`,
+    );
+    cell.append(
+      element("figcaption", graph.label, "csUsageTitle"),
+      plot(
+        sparklinePoints(
+          graph.values,
+          graph.ceiling,
+          Math.max(USAGE_SLOTS, graph.values.length),
+        ),
+        `${graph.label}: ${caption}`,
+      ),
+      element("span", caption, "csUsageValue"),
+    );
+    row.appendChild(cell);
+  }
+  return row;
+}
+
+const latest = (values: number[]): number | undefined =>
+  values[values.length - 1];
+
+const peak = (values: number[]): number | undefined =>
+  values.length ? Math.max(...values) : undefined;
+
+const WALLTIME_REFRESH_MS = 30_000;
+
+export class WalltimeStatus extends Widget {
+  private _session: ISession | undefined;
+  private _clock = new Clock(() => this._render());
+  private _refresh: number | undefined;
+
+  constructor(
+    private _api: ControlClient,
+    private _sessionId: string,
+  ) {
+    super();
+    this.addClass("csWalltimeStatus");
+    this._render();
+    void this._reload();
+    this._refresh = window.setInterval(
+      () => void this._reload(),
+      WALLTIME_REFRESH_MS,
+    );
+  }
+
+  dispose(): void {
+    if (this.isDisposed) {
+      return;
+    }
+    this._clock.stop();
+    window.clearInterval(this._refresh);
+    super.dispose();
+  }
+
+  private async _reload(): Promise<void> {
+    try {
+      const session = await this._api.getSession(this._sessionId);
+      if (!this.isDisposed) {
+        this._session = session;
+        this._render();
+      }
+    } catch {}
+  }
+
+  private _render(): void {
+    const session = this._session;
+    const counting = !!session && countsDown(session);
+    this._clock.sync(counting);
+    this.setHidden(!counting);
+    if (!session || !counting) {
+      return;
+    }
+    const { label, low } = remainingBadge(session, Date.now());
+    this.toggleClass("csWalltimeStatusLow", low);
+    const caption = `${session.sshHost}: ${label} of the session's ${session.resources.wallMinutes} minutes left`;
+    this.node.textContent = "";
+    const item = element("span", "", "csWalltimeStatusItem");
+    item.innerHTML = CLOCK_GLYPH;
+    item.append(element("span", label));
+    item.title = caption;
+    this.node.appendChild(item);
+  }
+}
+
+export const walltimeStatusPlugin: JupyterFrontEndPlugin<void> = {
+  id: "@cybershuttle/jupyter:walltime-status",
+  description:
+    "Count the selected session's remaining walltime down in the status bar.",
+  autoStart: true,
+  requires: [IStatusBar],
+  activate: (_app, statusBar: IStatusBar) => {
+    const selected = selectedSession();
+    if (!selected) {
+      return;
+    }
+    statusBar.registerStatusItem("@cybershuttle/jupyter:walltime-status", {
+      align: "right",
+      rank: 100,
+      item: new WalltimeStatus(new ControlClient(), selected.sessionId),
+    });
+  },
+};

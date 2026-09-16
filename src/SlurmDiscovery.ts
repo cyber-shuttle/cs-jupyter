@@ -9,7 +9,7 @@ import {
   ISshOperationConsole,
   SshOperationConsole,
   SshOperationConsoleFactory,
-} from "./SshOperationConsole";
+} from "./ssh";
 import { button, element, field, fillOptions, select } from "./dom";
 
 interface ISlurmDiscoveryHooks {

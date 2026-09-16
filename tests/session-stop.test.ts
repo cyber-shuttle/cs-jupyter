@@ -2,12 +2,13 @@
 // a Jupyter server through Linkspan. A relaunch's busy state is driven by the
 // click that started it, not the next poll. cs-control can refuse a delete
 // repeatedly, and each refusal must leave it pending for the next poll.
-import { describe, expect, it, vi } from "vitest";
+import { Dialog } from "@jupyterlab/apputils";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ISession } from "../src/Common";
 import { CyberShuttlePanel } from "../src/CyberShuttlePanel";
 import { ControlError } from "../src/ControlClient";
-import { setActiveSessionId } from "../src/session-state";
-import { displayState } from "../src/session-ui-state";
+import { setActiveSessionId } from "../src/session";
+import { displayState } from "../src/session";
 import {
   acceptDialog,
   accessFixture,
@@ -249,9 +250,7 @@ describe("session stop action", () => {
     const api = controlFake({
       listSessions: vi.fn(async () => sessionListFixture([base, other])),
       deleteSession,
-      getSessionAccess: vi.fn(async () =>
-        accessFixture(other.id, other.generation),
-      ),
+      getSessionAccess: vi.fn(async () => accessFixture(other.id, other.seq)),
     });
     const panel = panelFake(api);
     await loaded(panel);
@@ -363,9 +362,7 @@ describe("session stop action", () => {
     const api = controlFake({
       listSessions: vi.fn(async () => sessionListFixture([ready])),
       stopSession: vi.fn(() => stopping.promise),
-      getSessionAccess: vi.fn(async () =>
-        accessFixture(ready.id, ready.generation),
-      ),
+      getSessionAccess: vi.fn(async () => accessFixture(ready.id, ready.seq)),
     });
     const panel = panelFake(api);
     await loaded(panel);
@@ -429,7 +426,79 @@ describe("session stop action", () => {
     await stopped;
 
     expect(panel.state.busySessionIds.has(ready.id)).toBe(true);
-    access.resolve(accessFixture(ready.id, ready.generation));
+    access.resolve(accessFixture(ready.id, ready.seq));
+    panel.dispose();
+  });
+});
+
+// Stopping or deleting from the post-create detail must reach its own
+// confirmation, even while Add Session is open. This regression-tests a bug
+// where the confirmation queued invisibly behind the wizard.
+afterEach(() => {
+  Dialog.flush();
+});
+
+describe("confirmations opened while the create wizard is open", () => {
+  const base = sessionFixture({ id: "s-333333333333", state: "READY" });
+  const other = sessionFixture({ id: "s-444444444444", state: "READY" });
+
+  it.each([
+    ["stop", "stopSession"],
+    ["remove", "deleteSession"],
+  ] as const)(
+    "lets %s show its confirmation without the wizard being closed first",
+    async (action, method) => {
+      const api = controlFake({
+        listSessions: vi.fn(async () => ({ sessions: [base], logs: [] })),
+        [method]: vi.fn(async () => {
+          if (method === "stopSession") {
+            return { ...base, state: "STOPPING" as const };
+          }
+          throw new ControlError("session_not_stopped", "still stopping");
+        }),
+      });
+      const panel = panelFake(api);
+      await panel.signIn();
+      await vi.waitFor(() =>
+        expect(panel.state.sessions.map((each) => each.id)).toContain(base.id),
+      );
+
+      void panel.openCreate();
+      await vi.waitFor(() => expect(Dialog.tracker.size).toBe(1));
+
+      void panel.actions[action](base.id);
+      await acceptDialog();
+      await vi.waitFor(() => expect(api[method]).toHaveBeenCalledWith(base.id));
+
+      panel.dispose();
+    },
+  );
+
+  it("keeps the second dialog rejectable after the first one closes", async () => {
+    const api = controlFake({
+      listSessions: vi.fn(async () => ({ sessions: [base, other], logs: [] })),
+    });
+    const panel = panelFake(api);
+    await panel.signIn();
+    await vi.waitFor(() =>
+      expect(panel.state.sessions.map((each) => each.id)).toEqual([
+        base.id,
+        other.id,
+      ]),
+    );
+
+    void panel.modals.openSession(base.id);
+    await vi.waitFor(() => expect(Dialog.tracker.size).toBe(1));
+    void panel.modals.openSession(other.id);
+    await vi.waitFor(() => expect(Dialog.tracker.size).toBe(2));
+
+    const [first] = Dialog.tracker.filter(() => true);
+    first.reject();
+    await vi.waitFor(() => expect(Dialog.tracker.size).toBe(1));
+
+    (panel as any)._modals.rejectDetail();
+    await vi.waitFor(() => expect(Dialog.tracker.size).toBe(0));
+
     panel.dispose();
   });
 });

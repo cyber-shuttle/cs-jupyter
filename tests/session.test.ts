@@ -16,12 +16,16 @@ import {
   installSessionCommandGuard,
   SessionController,
 } from "../src/SessionController";
-import { cacheSessionAccess } from "../src/session-access";
+import {
+  cacheSessionAccess,
+  selectedSession,
+  sessionLiteUrl,
+} from "../src/session";
 import { accessFixture, fakeAuth, sessionFixture } from "./fakes";
 
 const auth = fakeAuth("test-delegated-token");
 
-const access = accessFixture("s-012345abcdef", "g-0123456789abcdef");
+const access = accessFixture("s-012345abcdef", 1);
 
 const session = sessionFixture({
   account: "project-a",
@@ -293,5 +297,31 @@ describe("kernel spec logos", () => {
     const parsed = await response.json();
     expect(parsed.kernelspecs.python3.resources).toEqual({});
     expect(parsed.kernelspecs.python3.name).toBe("python3");
+  });
+});
+
+describe("native Lite session routing", () => {
+  const id = "s-012345abcdef";
+  const seq = 1;
+
+  it("selects only on a valid session and seq pair", () => {
+    expect(
+      selectedSession(`?session=not-a-session&seq=${seq}`),
+    ).toBeUndefined();
+    expect(selectedSession(`?session=${id}`)).toBeUndefined();
+    expect(selectedSession(`?session=${id}&seq=${seq}`)).toEqual({
+      sessionId: id,
+      seq,
+    });
+  });
+
+  it("keeps session selection within the current Lite application URL", () => {
+    expect(
+      sessionLiteUrl(id, seq, "folder/example.ipynb", {
+        href: "http://localhost/lite/lab/index.html?old=value",
+      }),
+    ).toBe(
+      "http://localhost/lite/lab/index.html?old=value&session=s-012345abcdef&seq=1&path=folder%2Fexample.ipynb",
+    );
   });
 });

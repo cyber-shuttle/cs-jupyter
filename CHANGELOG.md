@@ -18,7 +18,7 @@ All notable changes to CyberShuttle Jupyter are recorded here. The format follow
   under them, in the same two columns a finished run's report uses, and every live session is read — the run
   history shows the same figures for a session that is still going.
 - Run history lists a session that is still going in its live state rather than leaving it out. A run is a
-  generation, so the generation a card is on now is a run like any other — it simply has no outcome yet, and
+  seq, so the seq a card is on now is a run like any other — it simply has no outcome yet, and
   showing only the finished ones beside it made a previous run read as the live session.
 - A run report for a finished session — how long it ran, its peak memory, and how much of the CPU and
   memory its job spec requested it actually used — and a **Run history** dialog listing every run this account
@@ -38,7 +38,7 @@ All notable changes to CyberShuttle Jupyter are recorded here. The format follow
 - A session's dialog closes from the × in its header, like every other dialog here, rather than from a button
   along the bottom.
 - A session's card shows only what it is doing now. Its log appears while it is running and not after, and the
-  run report moved to Run history, which keeps every generation rather than only the last.
+  run report moved to Run history, which keeps every seq rather than only the last.
 - A run report carries the log its session produced, so what a session said survives the card it ran on.
 - A run report no longer promises accounting that will never arrive. cs-control chases Slurm's accounting for
   ten minutes and then leaves the record alone, so a run older than that says the figures are unknown instead
@@ -57,6 +57,13 @@ All notable changes to CyberShuttle Jupyter are recorded here. The format follow
   `session_provisioning_in_progress`, `session_access_unavailable`, `session_provisioning_failed`, and
   `invalid_session_id`. This extension now requires a cs-control running the matching `session-lingo`
   contract.
+- **Breaking:** a session's and a run's `generation` field is now `seq`, a positive integer starting at 1 and
+  incrementing on every start under the same session id, in place of the `g-<16 hex>` string. Session-access
+  and the JupyterLite page's own query carry `seq` the same way. The session detail dialog's "Generation" row
+  is now "Seq", showing `#<seq>`.
+- Every cs-control response shape is now validated with the same `Validator` vocabulary: a shared `vObject`
+  rejects any key not in its field list, so an unrecognized field now fails the same way a missing or
+  mistyped one already did, instead of passing through silently.
 
 ### Fixed
 
@@ -81,7 +88,7 @@ All notable changes to CyberShuttle Jupyter are recorded here. The format follow
 - A READY session whose first Jupyter access read answered `session_access_unavailable` kept showing "tunnel
   is not reachable yet" even after a later poll succeeded, because only the failure path touched the panel
   error. The error is now cleared once access is confirmed.
-- A session missing its id, generation, or other required fields validated anyway, rendering a card labelled
+- A session missing its id, seq, or other required fields validated anyway, rendering a card labelled
   "undefined, READY". A session or run's `resources`, an SSH host's optional fields and its `extraDirectives`
   entries and `managed` flag, a session validation's `script` and `message`, a discovered partition's
   `cpuCount`, `memoryMb`, `host`, `accounts` and `gres` entries, and a run's `finalState`, `stats`, `samples`
@@ -167,10 +174,10 @@ All notable changes to CyberShuttle Jupyter are recorded here. The format follow
   the moment the access read succeeded, since the access read cleared the banner unconditionally on success.
   It now clears only the error it reported itself, and leaves an unrelated one standing.
 - A session being relaunched showed twice in Run history: the card displays SUBMITTING before cs-control
-  responds, but the session underneath is still on its old, already-finished generation, so the same
-  generation appeared once as the live card and once as its own finished run. Run history now reads a
+  responds, but the session underneath is still on its old, already-finished seq, so the same
+  seq appeared once as the live card and once as its own finished run. Run history now reads a
   session's real state instead of the display override, so a relaunching card drops out of the running list
-  until the new generation arrives.
+  until the new seq arrives.
 - An SSH host list read still in flight when sign-out fired could land afterward and populate the next
   account's Add Session dialog with the previous account's hosts; the read is now discarded once sign-out has
   moved past it, the same way session, run and metric reads already are.
@@ -180,7 +187,7 @@ All notable changes to CyberShuttle Jupyter are recorded here. The format follow
   clear Connect's busy state early, re-enabling the card mid-connect; each action's busy state is now released
   only by the call that set it.
 - A refused Jupyter access read was retried on every one-second poll forever; it now backs off, doubling up
-  to a 30-second cap and resetting on success or once the session's generation changes.
+  to a 30-second cap and resetting on success or once the session's seq changes.
 - Run history's finished-run card showed the session's stale terminal state while a run-again was in flight,
   because the display override moved out of the shared session state and into individual views that Run
   history never adopted; it now shows SUBMITTING the same way the session card and detail dialog do.

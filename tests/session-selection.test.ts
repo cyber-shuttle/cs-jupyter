@@ -6,7 +6,7 @@
 import type { ReadonlyPartialJSONObject } from "@lumino/coreutils";
 import { describe, expect, it, vi } from "vitest";
 import { CyberShuttlePanel } from "../src/CyberShuttlePanel";
-import type { ISessionUiState } from "../src/session-ui-state";
+import type { ISessionUiState } from "../src/session";
 import type { ISession } from "../src/Common";
 import type { ISessionLogTail } from "../src/ControlClient";
 import { SessionController } from "../src/SessionController";
@@ -14,9 +14,9 @@ import {
   cacheSessionAccess,
   clearSessionAccess,
   loadSessionAccess,
-} from "../src/session-access";
-import { setActiveSessionId } from "../src/session-state";
-import { CyberShuttleHeader } from "../src/CyberShuttleHeader";
+} from "../src/session";
+import { setActiveSessionId } from "../src/session";
+import { CyberShuttleHeader } from "../src/CyberShuttlePanel";
 import { SessionList } from "../src/SessionList";
 import {
   accessFixture,
@@ -93,13 +93,11 @@ function harness(
     listSessions: vi.fn(async () => sessionListFixture(sessions)),
     getSession: vi.fn(getSession),
     stopSession: vi.fn(async () => first),
-    getSessionAccess: vi.fn(async (id: string) =>
-      accessFixture(id, "g-0123456789abcdef"),
-    ),
+    getSessionAccess: vi.fn(async (id: string) => accessFixture(id, 1)),
   });
   sessionStorage.clear();
   for (const session of sessions) {
-    cacheSessionAccess(accessFixture(session.id, session.generation));
+    cacheSessionAccess(accessFixture(session.id, session.seq));
   }
   const controller = new SessionController(
     app as any,
@@ -233,14 +231,14 @@ describe("serialized session selection", () => {
       window.history.replaceState(
         {},
         "",
-        `/lite/lab/?session=${active.id}&generation=${active.generation}`,
+        `/lite/lab/?session=${active.id}&seq=${active.seq}`,
       );
       const { panel, api, navigate, execute } = harness(
         [first, second],
         async (id) => (id === first.id ? first : second),
         active.id,
       );
-      cacheSessionAccess(accessFixture(active.id, active.generation));
+      cacheSessionAccess(accessFixture(active.id, active.seq));
       await ready(panel);
       if (failure === "target access") {
         clearSessionAccess(first.id);
@@ -255,7 +253,7 @@ describe("serialized session selection", () => {
 
       await panel.actions.connect(first.id);
 
-      expect(loadSessionAccess(active.id, active.generation)).toBeDefined();
+      expect(loadSessionAccess(active.id, active.seq)).toBeDefined();
       expect(navigate).not.toHaveBeenCalled();
       panel.dispose();
     },
@@ -281,13 +279,13 @@ describe("serialized session selection", () => {
     panel.dispose();
   });
 
-  it.each(["terminal snapshot", "generation change", "session stop"] as const)(
+  it.each(["terminal snapshot", "seq change", "session stop"] as const)(
     "cancels deferred save-all selection at the %s boundary",
     async (boundary) => {
       window.history.replaceState(
         {},
         "",
-        `/lite/lab/?session=${active.id}&generation=${active.generation}`,
+        `/lite/lab/?session=${active.id}&seq=${active.seq}`,
       );
       const save = Promise.withResolvers<void>();
       const { panel, navigate, execute } = harness(
@@ -305,11 +303,8 @@ describe("serialized session selection", () => {
       );
       if (boundary === "terminal snapshot") {
         await emitSessions(panel, [active, { ...first, state: "STOPPED" }]);
-      } else if (boundary === "generation change") {
-        await emitSessions(panel, [
-          active,
-          { ...first, generation: "g-fedcba9876543210" },
-        ]);
+      } else if (boundary === "seq change") {
+        await emitSessions(panel, [active, { ...first, seq: 2 }]);
       } else {
         const stopping = panel.actions.stop(first.id);
         await acceptDialog();
@@ -319,16 +314,16 @@ describe("serialized session selection", () => {
       await selecting;
 
       expect(navigate).not.toHaveBeenCalled();
-      expect(loadSessionAccess(active.id, active.generation)).toBeDefined();
+      expect(loadSessionAccess(active.id, active.seq)).toBeDefined();
       panel.dispose();
     },
   );
 
-  it("rechecks live generation after deferred save before navigating", async () => {
+  it("rechecks live seq after deferred save before navigating", async () => {
     window.history.replaceState(
       {},
       "",
-      `/lite/lab/?session=${active.id}&generation=${active.generation}`,
+      `/lite/lab/?session=${active.id}&seq=${active.seq}`,
     );
     const live = Promise.withResolvers<ISession>();
     let calls = 0;
@@ -345,15 +340,12 @@ describe("serialized session selection", () => {
 
     const selecting = panel.actions.connect(first.id);
     await vi.waitFor(() => expect(api.getSession).toHaveBeenCalledTimes(2));
-    await emitSessions(panel, [
-      active,
-      { ...first, generation: "g-fedcba9876543210" },
-    ]);
+    await emitSessions(panel, [active, { ...first, seq: 2 }]);
     live.resolve(first);
     await selecting;
 
     expect(navigate).not.toHaveBeenCalled();
-    expect(loadSessionAccess(active.id, active.generation)).toBeDefined();
+    expect(loadSessionAccess(active.id, active.seq)).toBeDefined();
     panel.dispose();
   });
 
@@ -361,7 +353,7 @@ describe("serialized session selection", () => {
     window.history.replaceState(
       {},
       "",
-      "/lite/lab/?session=s-333333333333&generation=g-0123456789abcdef",
+      "/lite/lab/?session=s-333333333333&seq=1",
     );
     const requests = new Map([
       [first.id, Promise.withResolvers<ISession>()],

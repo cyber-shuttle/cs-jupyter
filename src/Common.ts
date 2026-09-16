@@ -1,7 +1,9 @@
-// Types, identifier and URL validation, and small response and object helpers
-// shared across the extension. Nothing here depends on the DOM or on cs-control,
-// so other modules can import freely. Optional fields mean not observed or not
-// yet, never a stand-in for false or zero.
+// Types, identifier and URL validation, and the Validator vocabulary
+// (vString, vNumber, vObject, ...) cs-control response shapes are built from;
+// vObject matches iff every listed field validates and no other key is
+// present. Nothing here depends on the DOM or on cs-control, so other modules
+// can import freely. Optional fields mean not observed or not yet, never a
+// stand-in for false or zero.
 
 export interface OAuthCredentials {
   accessToken: string;
@@ -9,13 +11,16 @@ export interface OAuthCredentials {
 }
 
 export const SESSION_ID = /^s-[a-f0-9]{12}$/;
-export const GENERATION = /^g-[a-f0-9]{16}$/;
 
 export function validSessionId(value: string): string {
   if (!SESSION_ID.test(value)) {
     throw new Error("Invalid session id.");
   }
   return value;
+}
+
+export function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1;
 }
 
 export interface ITokenProvider {
@@ -37,7 +42,7 @@ export const SESSION_STATES = [
 export type SessionState = (typeof SESSION_STATES)[number];
 
 export const VALIDATION_STATUSES = ["PASSED", "FAILED"] as const;
-export type SessionValidationStatus = (typeof VALIDATION_STATUSES)[number];
+type SessionValidationStatus = (typeof VALIDATION_STATUSES)[number];
 
 export function isTerminal(state: SessionState): boolean {
   return state === "STOPPED" || state === "FAILED";
@@ -74,35 +79,13 @@ export interface ISessionValidation {
 
 export interface ISession extends IJobSpec {
   id: string;
-  generation: string;
+  seq: number;
   state: SessionState;
   error?: string;
   createdAt: string;
   startedAt?: string;
   updatedAt: string;
 }
-
-export const SESSION_KEYS = [
-  "id",
-  "generation",
-  "state",
-  "sshHost",
-  "account",
-  "partition",
-  "rootFolder",
-  "resources",
-  "error",
-  "createdAt",
-  "startedAt",
-  "updatedAt",
-] as const satisfies readonly (keyof ISession)[];
-
-const sessionKeysCoverISession: [
-  Exclude<keyof ISession, (typeof SESSION_KEYS)[number]>,
-] extends [never]
-  ? true
-  : false = true;
-void sessionKeysCoverISession;
 
 export interface IMetricSample {
   at: string;
@@ -112,7 +95,10 @@ export interface IMetricSample {
 }
 
 interface IGpuUtilisation {
-  utilPct: number;
+  index: number;
+  utilPct?: number;
+  memUsedMiB?: number;
+  memTotalMiB?: number;
 }
 
 export interface ISessionSeries {
@@ -131,7 +117,7 @@ export interface IRunStats {
 
 export interface IRun extends IJobSpec {
   sessionId: string;
-  generation: string;
+  seq: number;
   finalState: SessionState;
   error?: string;
   startedAt?: string;
@@ -141,7 +127,7 @@ export interface IRun extends IJobSpec {
   logs?: ILogLine[];
 }
 
-export type LogStream = "status" | "stdout" | "stderr";
+type LogStream = "status" | "stdout" | "stderr";
 
 export interface ILogLine {
   stream: LogStream;
@@ -165,7 +151,7 @@ export interface ISshHostTest {
   message: string;
 }
 
-interface IGres {
+export interface IGres {
   name: string;
   count: number;
 }
@@ -252,20 +238,72 @@ export function exactKeys(
   expected: string[],
 ): value is Record<string, any> {
   return (
-    onlyKeys(value, expected) && Object.keys(value).length === expected.length
-  );
-}
-
-export function onlyKeys(
-  value: unknown,
-  allowed: readonly string[],
-): value is Record<string, any> {
-  return (
     isPlainObject(value) &&
-    Object.keys(value).every((key) => allowed.includes(key))
+    Object.keys(value).length === expected.length &&
+    Object.keys(value).every((key) => expected.includes(key))
   );
 }
 
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+type Validator<T> = (value: unknown) => value is T;
+
+export function vString(pattern?: RegExp): Validator<string> {
+  return (v): v is string =>
+    typeof v === "string" && (!pattern || pattern.test(v));
+}
+
+export const vBoolean: Validator<boolean> = (v): v is boolean =>
+  typeof v === "boolean";
+
+export const vNumber: Validator<number> = (v): v is number =>
+  typeof v === "number";
+
+export const vPositiveInt: Validator<number> = isPositiveInteger;
+
+export function vOptional<T>(field: Validator<T>): Validator<T | undefined> {
+  return (v): v is T | undefined => v === undefined || field(v);
+}
+
+export function vArray<T>(
+  of: Validator<T>,
+  maxLength?: number,
+): Validator<T[]> {
+  return (v): v is T[] =>
+    Array.isArray(v) &&
+    (maxLength === undefined || v.length <= maxLength) &&
+    v.every((item) => of(item));
+}
+
+export function vOneOf<T extends string>(options: readonly T[]): Validator<T> {
+  return (v): v is T =>
+    typeof v === "string" && (options as readonly string[]).includes(v);
+}
+
+export function vObject<T>(fields: {
+  [K in keyof T]: Validator<T[K]>;
+}): Validator<T> {
+  const keys = Object.keys(fields);
+  return (v): v is T =>
+    isPlainObject(v) &&
+    Object.keys(v).every((key) => keys.includes(key)) &&
+    keys.every((key) =>
+      (fields as Record<string, Validator<unknown>>)[key](
+        (v as Record<string, unknown>)[key],
+      ),
+    );
+}
+
+export function expect<T>(
+  shape: Validator<T>,
+  what: string,
+): (value: unknown) => T {
+  return (value) => {
+    if (!shape(value)) {
+      throw new Error(`cs-control returned an invalid ${what}.`);
+    }
+    return value;
+  };
 }

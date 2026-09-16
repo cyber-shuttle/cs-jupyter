@@ -1,7 +1,7 @@
-// The stateful controller behind the launcher panel: it polls cs-control and
-// holds session, run and log state. It composes auth, actions and modals rather
-// than owning their logic itself. Log tails are replaced wholly each poll rather
-// than merged.
+// The stateful controller behind the launcher panel: polls cs-control, holds
+// session/run/log state and the sign-in state machine, and renders the title
+// row's sign-in status. It composes actions and modals rather than owning
+// their logic, and replaces log tails wholly each poll rather than merging.
 import { Signal } from "@lumino/signaling";
 import { StackedPanel } from "@lumino/widgets";
 import {
@@ -12,19 +12,194 @@ import {
   ISshHost,
   isTerminal,
 } from "./Common";
-import { ControlClient, ISessionLogTail, UNCHANGED } from "./ControlClient";
-import { SessionController } from "./SessionController";
-import { clearSessionAccess } from "./session-access";
-import { SessionActions } from "./session-actions";
-import { getActiveSessionId } from "./session-state";
-import type { ISessionUiState } from "./session-ui-state";
-import { CyberShuttleHeader } from "./CyberShuttleHeader";
-import { SessionList } from "./SessionList";
-import { SignInController } from "./SignInController";
-import { SessionModals } from "./modals";
 import { AuthInteractionRequiredError } from "./AuthClient";
+import { ControlClient, ISessionLogTail, UNCHANGED } from "./ControlClient";
+import { RebuildingWidget } from "./RebuildingWidget";
+import { SessionController } from "./SessionController";
+import {
+  clearSessionAccess,
+  emptyState,
+  getActiveSessionId,
+  type ISessionUiState,
+} from "./session";
+import { SessionActions } from "./session-actions";
+import { SessionList } from "./SessionList";
+import { SessionModals } from "./modals";
+import { button, element } from "./dom";
 
 const SESSION_POLL_INTERVAL_MS = 1000;
+
+export class CyberShuttleHeader extends RebuildingWidget {
+  readonly signInRequested = new Signal<this, void>(this);
+  readonly signOutRequested = new Signal<this, void>(this);
+
+  private _state = emptyState();
+  private _accountMenuOpen = false;
+
+  constructor() {
+    super();
+    this.addClass("csSessionHeaderWidget");
+    this._render();
+  }
+
+  setState(state: ISessionUiState): void {
+    this._state = state;
+    this._render();
+  }
+
+  protected _rebuild(): void {
+    this.node.textContent = "";
+    const header = element(
+      "header",
+      "",
+      "jp-Launcher-sectionHeader csSessionLauncherHeader",
+    );
+    const title = element("h2", "CyberShuttle", "jp-Launcher-sectionTitle");
+    header.append(
+      element("div", "", "csSessionSectionIcon"),
+      title,
+      this._identityControl(),
+    );
+    this.node.appendChild(header);
+  }
+
+  private _identityControl(): HTMLElement {
+    const holder = element("div", "", "csIdentity");
+    if (!this._state.signedIn) {
+      const signIn = button("", "csTextButton csIdentityButton csSignInButton");
+      signIn.append(
+        userGlyph(),
+        element("span", this._state.signingIn ? "Signing in…" : "Sign in"),
+      );
+      signIn.dataset.sessionAction = "sign-in";
+      signIn.disabled = this._state.signingIn;
+      signIn.onclick = () => this.signInRequested.emit(undefined);
+      holder.appendChild(signIn);
+      return holder;
+    }
+    const trigger = button("", "csTextButton csIdentityButton csAccountButton");
+    trigger.append(
+      userGlyph(),
+      element("span", this._state.account ?? "Account"),
+    );
+    trigger.dataset.sessionAction = "account";
+    trigger.setAttribute("aria-haspopup", "menu");
+    trigger.setAttribute("aria-expanded", String(this._accountMenuOpen));
+    trigger.onclick = () => {
+      this._accountMenuOpen = !this._accountMenuOpen;
+      this._render();
+    };
+    holder.appendChild(trigger);
+    if (this._accountMenuOpen) {
+      const menu = element("div", "", "csAccountMenu", { role: "menu" });
+      const signOut = button("Sign out", "csAccountMenuItem");
+      signOut.dataset.sessionAction = "sign-out";
+      signOut.setAttribute("role", "menuitem");
+      signOut.onclick = () => {
+        this._accountMenuOpen = false;
+        this.signOutRequested.emit(undefined);
+      };
+      menu.appendChild(signOut);
+      holder.appendChild(menu);
+    }
+    return holder;
+  }
+}
+
+function userGlyph(): SVGSVGElement {
+  const holder = element("div", "");
+  holder.innerHTML = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><circle cx="10" cy="10" r="8.6" /><circle cx="10" cy="8.2" r="2.6" /><path d="M5.3 16.5a5 5 0 0 1 9.4 0" /></g></svg>`;
+  return holder.firstElementChild as SVGSVGElement;
+}
+
+interface ISignInHooks {
+  isDisposed: () => boolean;
+  emitState: () => void;
+  activate: () => Promise<void>;
+  stopPolling: () => void;
+  setUpdatesStatus: (message: string) => void;
+  onError: (message: string) => void;
+}
+
+class SignInController {
+  private _signedIn = false;
+  private _signingIn = false;
+  private _signInPromise: Promise<void> | undefined;
+
+  constructor(
+    private _api: ControlClient,
+    private _hooks: ISignInHooks,
+  ) {}
+
+  get signedIn(): boolean {
+    return this._signedIn;
+  }
+
+  get signingIn(): boolean {
+    return this._signingIn;
+  }
+
+  get account(): string | undefined {
+    return this._signedIn ? this._api.account : undefined;
+  }
+
+  signIn(): Promise<void> {
+    if (!this._signInPromise) {
+      this._signingIn = true;
+      this._hooks.onError("");
+      this._hooks.emitState();
+      this._signInPromise = this._signIn().finally(() => {
+        this._signingIn = false;
+        this._signInPromise = undefined;
+        if (!this._hooks.isDisposed()) this._hooks.emitState();
+      });
+    }
+    return this._signInPromise;
+  }
+
+  private async _signIn(): Promise<void> {
+    try {
+      await this._api.signIn();
+      if (this._hooks.isDisposed()) return;
+      await this._activate();
+    } catch (error) {
+      if (!this._hooks.isDisposed()) {
+        if (error instanceof AuthInteractionRequiredError) {
+          this.requireAuthentication();
+        } else {
+          this._hooks.onError(errorMessage(error));
+        }
+      }
+    }
+  }
+
+  signOut(): void {
+    this._api.signOut();
+    this._hooks.stopPolling();
+    this._signedIn = false;
+  }
+
+  async resume(): Promise<void> {
+    try {
+      await this._api.resumeSignIn();
+    } catch {
+      return;
+    }
+    if (!this._hooks.isDisposed()) await this._activate();
+  }
+
+  requireAuthentication(): void {
+    if (this._hooks.isDisposed()) return;
+    this._signedIn = false;
+    this._hooks.stopPolling();
+    this._hooks.setUpdatesStatus("Sign in again to resume session updates.");
+  }
+
+  private async _activate(): Promise<void> {
+    this._signedIn = true;
+    await this._hooks.activate();
+  }
+}
 
 export class CyberShuttlePanel extends StackedPanel {
   readonly stateChanged = new Signal<this, ISessionUiState>(this);
@@ -123,7 +298,7 @@ export class CyberShuttlePanel extends StackedPanel {
     const next = new Map(sessions.map((session) => [session.id, session]));
     for (const previous of this._sessions) {
       const session = next.get(previous.id);
-      if (!session || session.generation !== previous.generation) {
+      if (!session || session.seq !== previous.seq) {
         this._actions.releaseSession(previous.id);
       } else if (session.state !== "READY") {
         this._actions.releaseJupyter(previous.id);

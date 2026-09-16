@@ -15,10 +15,10 @@ import { CreateSessionForm } from "./CreateSessionForm";
 import { RunHistory } from "./RunHistory";
 import { SessionDetail } from "./SessionDetail";
 import { SshHosts } from "./SshHosts";
-import { SshLoginDock } from "./SshLoginDock";
+import { SshLoginDock } from "./ssh";
 
-function openModal(title: string, widget: Widget): Dialog<unknown> {
-  widget.addClass("csWorkspaceModal");
+function openDialog(title: string, widget: Widget): Dialog<unknown> {
+  widget.addClass("csWorkspaceDialog");
   return new Dialog({ title, body: widget, buttons: [], hasClose: true });
 }
 
@@ -65,7 +65,7 @@ export class SessionModals {
   async openSession(sessionId: string): Promise<void> {
     const body = new Panel();
     body.addWidget(new SessionDetail(this._panel, sessionId));
-    await this._launchTracked(openModal("CyberShuttle Session", body));
+    await this._launchTracked(openDialog("CyberShuttle Session", body));
   }
 
   async openCreate(hosts: readonly ISshHost[]): Promise<void> {
@@ -73,7 +73,7 @@ export class SessionModals {
     const form = this._createForm();
     body.addWidget(form);
     form.setHosts([...hosts]);
-    const dialog = openModal("Add Session", body);
+    const dialog = openDialog("Add Session", body);
     const show = (widget: Widget): void => {
       for (const child of body.widgets) {
         child === widget ? child.show() : child.hide();
@@ -85,7 +85,7 @@ export class SessionModals {
       void this._panel.openSshHosts();
     });
     form.createRequested.connect((_sender, intent) => {
-      void this._createInModal(intent, form, body, show);
+      void this._createInDialog(intent, form, body, show);
     });
     show(form);
     await this._launchTracked(dialog);
@@ -94,18 +94,18 @@ export class SessionModals {
   async openSshHosts(): Promise<void> {
     const hosts = this._sshHostsWidget();
     void hosts.refresh();
-    await openModal("SSH Hosts", hosts)
+    await openDialog("SSH Hosts", hosts)
       .launch()
       .catch(() => undefined);
   }
 
   async openRunHistory(): Promise<void> {
-    await openModal("Run history", new RunHistory(this._panel))
+    await openDialog("Run history", new RunHistory(this._panel))
       .launch()
       .catch(() => undefined);
   }
 
-  private async _createInModal(
+  private async _createInDialog(
     request: ISessionCreateRequest,
     form: CreateSessionForm,
     body: Panel,

@@ -4,21 +4,23 @@
 // disclosure, since it shows when a session last said anything.
 import { RebuildingWidget } from "./RebuildingWidget";
 import { isTerminal, type ISession } from "./Common";
-import { displayState, type ISessionUiState } from "./session-ui-state";
 import type { CyberShuttlePanel } from "./CyberShuttlePanel";
 import type { ISessionLogTail } from "./ControlClient";
 import {
   button,
+  countsDown,
   detailGridWithRemaining,
   element,
   logSection,
   notes,
   statePill,
 } from "./dom";
-import { sessionSummary } from "./metrics";
-import { getActiveSessionId } from "./session-state";
-import { usagePlots } from "./usage";
-import { countsDown } from "./walltime";
+import { sessionSummary, usagePlots } from "./metrics";
+import {
+  displayState,
+  getActiveSessionId,
+  type ISessionUiState,
+} from "./session";
 
 interface ISessionLogView {
   scrollTop: number;
@@ -151,7 +153,7 @@ export class SessionDetail extends RebuildingWidget {
         "Jupyter",
         this._state.jupyterReady.has(session.id) ? "ready" : "pending",
       ],
-      ["Generation", session.generation],
+      ["Seq", `#${session.seq}`],
       ["Workspace", session.rootFolder],
       ...sessionSummary(session),
       ["Walltime", `${session.resources.wallMinutes} min`],

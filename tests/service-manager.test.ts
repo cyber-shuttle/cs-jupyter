@@ -1,6 +1,10 @@
 // The service manager registry is fail-closed until a READY session is
 // selected, keeping compute calls off the wrong session. It shares one
 // ServerConnection.ISettings across contents, kernels, sessions and terminals.
+// This workspace ships no local kernel and runs against a remote session's
+// own Jupyter server; package.json's JupyterLab config must keep it that way.
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { PageConfig } from "@jupyterlab/coreutils";
 import { PluginRegistry } from "@lumino/coreutils";
 import {
@@ -26,7 +30,7 @@ import {
 import { afterEach, assert, describe, expect, it, vi } from "vitest";
 
 import { remoteServicePlugins } from "../src/index.js";
-import { getActiveSessionId } from "../src/session-state.js";
+import { getActiveSessionId } from "../src/session.js";
 import { accessFixture, sessionFixture } from "./fakes";
 
 const id = "s-012345abcdef";
@@ -134,9 +138,7 @@ describe("remote service manager registry", () => {
           }),
       ),
     );
-    const registry = registryFor(
-      `/lite/lab/index.html?session=${id}&generation=g-0123456789abcdef`,
-    );
+    const registry = registryFor(`/lite/lab/index.html?session=${id}&seq=1`);
     const manager = await registry.resolveRequiredService(IServiceManager);
     await manager.ready;
     expect(manager.serverSettings.baseUrl).toBe(PageConfig.getBaseUrl());
@@ -175,11 +177,9 @@ describe("remote service manager registry", () => {
     vi.stubGlobal("fetch", browserFetch);
     window.sessionStorage.setItem(
       `cybershuttle.session-access.v1.${id}`,
-      JSON.stringify(accessFixture(id, "g-0123456789abcdef")),
+      JSON.stringify(accessFixture(id, 1)),
     );
-    const registry = registryFor(
-      `/lite/lab/index.html?session=${id}&generation=g-0123456789abcdef`,
-    );
+    const registry = registryFor(`/lite/lab/index.html?session=${id}&seq=1`);
 
     const manager = await registry.resolveRequiredService(IServiceManager);
     const contents = await registry.resolveRequiredService(IContentsManager);
@@ -239,5 +239,66 @@ describe("remote service manager registry", () => {
     manager.dispose();
     kernels.dispose();
     kernelspecs.dispose();
+  });
+});
+
+describe("remote-only native workspace distribution", () => {
+  const root = resolve(import.meta.dirname, "..");
+  const packageJson = JSON.parse(
+    readFileSync(resolve(root, "package.json"), "utf8"),
+  );
+  const liteConfig = JSON.parse(
+    readFileSync(resolve(root, "jupyter-lite.json"), "utf8"),
+  )["jupyter-config-data"];
+
+  const localKernelPackages = [
+    "@jupyterlite/pyodide-kernel",
+    "@jupyterlite/pyodide-kernel-extension",
+    "@jupyterlite/xeus",
+    "@jupyterlite/javascript-kernel",
+    "@jupyterlite/javascript-kernel-extension",
+  ];
+
+  const requiredLiteSupportServices = [
+    "@jupyterlite/services-extension:event-manager",
+    "@jupyterlite/services-extension:nbconvert-manager",
+    "@jupyterlite/services-extension:settings",
+    "@jupyterlite/services-extension:user-manager",
+    "@jupyterlite/services-extension:workspace-manager",
+  ];
+
+  const disabledUpstreamServices = [
+    "@jupyterlab/services-extension:default-drive",
+    "@jupyterlab/services-extension:contents-manager",
+    "@jupyterlab/services-extension:kernel-manager",
+    "@jupyterlab/services-extension:kernel-spec-manager",
+    "@jupyterlab/services-extension:session-manager",
+    "@jupyterlab/services-extension:service-manager",
+    "@jupyterlite/services-extension:default-drive",
+    "@jupyterlite/services-extension:kernel-client",
+    "@jupyterlite/services-extension:kernel-manager",
+    "@jupyterlite/services-extension:kernel-spec-client",
+    "@jupyterlite/services-extension:kernel-spec-manager",
+    "@jupyterlite/services-extension:kernel-specs",
+    "@jupyterlite/services-extension:session-manager",
+  ];
+
+  it("does not install a local kernel provider", () => {
+    const installed = {
+      ...packageJson.dependencies,
+      ...packageJson.devDependencies,
+    };
+    for (const provider of localKernelPackages) {
+      expect(installed).not.toHaveProperty(provider);
+    }
+  });
+
+  it("keeps local shell settings while replacing compute services", () => {
+    expect(liteConfig.disabledExtensions).toEqual(
+      expect.arrayContaining(disabledUpstreamServices),
+    );
+    for (const support of requiredLiteSupportServices) {
+      expect(liteConfig.disabledExtensions).not.toContain(support);
+    }
   });
 });

@@ -5,12 +5,16 @@
 import type { JupyterFrontEnd } from "@jupyterlab/application";
 import type { Widget } from "@lumino/widgets";
 import { ControlClient } from "./ControlClient";
-import { clearSessionAccess, loadSessionAccess } from "./session-access";
-import { getActiveSessionId, selectedSession } from "./session-state";
+import {
+  clearSessionAccess,
+  getActiveSessionId,
+  loadSessionAccess,
+  selectedSession,
+} from "./session";
 
 type SessionDestination = (
   sessionId: string,
-  generation: string,
+  seq: number,
   documentPath?: string,
 ) => string;
 
@@ -43,10 +47,10 @@ export class SessionController {
     }
     if (
       session.id === getActiveSessionId() &&
-      session.generation === selectedSession()?.generation
+      session.seq === selectedSession()?.seq
     )
       return;
-    if (!loadSessionAccess(session.id, session.generation)) {
+    if (!loadSessionAccess(session.id, session.seq)) {
       throw new Error("Jupyter access is not available for selection.");
     }
     const previous = getActiveSessionId();
@@ -64,9 +68,9 @@ export class SessionController {
       if (!isCurrent()) return;
       if (
         live.id !== session.id ||
-        live.generation !== session.generation ||
+        live.seq !== session.seq ||
         live.state !== "READY" ||
-        !loadSessionAccess(live.id, live.generation)
+        !loadSessionAccess(live.id, live.seq)
       ) {
         throw new Error("Session changed before selection completed.");
       }
@@ -77,9 +81,7 @@ export class SessionController {
     if (previous && previous !== session.id) {
       clearSessionAccess(previous);
     }
-    this._navigate(
-      this._destination(session.id, session.generation, documentPath),
-    );
+    this._navigate(this._destination(session.id, session.seq, documentPath));
   }
 
   private _activeDocumentContext(): IDocumentContextLike | undefined {

@@ -16,7 +16,7 @@ assert.ok(existsSync(join(dist, "lab", "index.html")), "dist is missing");
 const sessionId = "s-111111111111";
 const restartId = "s-222222222222";
 const createdId = "s-333333333333";
-const generation = "g-0123456789abcdef";
+const seq = 1;
 const directOrigin = "https://31002.use.devtunnels.ms";
 const directBase = "/";
 const accessToken = "browser-access-token";
@@ -231,7 +231,7 @@ const controlServer = createServer((request, response) => {
   if (accessMatch) {
     return json(response, {
       sessionId: accessMatch[1],
-      generation,
+      seq,
       expiresAt: "2030-01-01T00:00:00Z",
       jupyter: { uri: `${directOrigin}/`, token: jupyterToken },
     });
@@ -242,7 +242,7 @@ const controlServer = createServer((request, response) => {
   if (startMatch && request.method === "POST") {
     const item = sessions.find(({ id }) => id === startMatch[1]);
     item.state = "QUEUED";
-    item.generation = "g-fedcba9876543210";
+    item.seq = 2;
     item.error = undefined;
     return json(response, item);
   }
@@ -589,10 +589,9 @@ try {
   });
   const controlBeforeCachedRestore = controlRequests.length;
   await createdDetail.getByRole("button", { name: "Connect" }).click();
-  await page.waitForURL(
-    new RegExp(`session=${createdId}.*generation=${generation}`),
-    { timeout: 20_000 },
-  );
+  await page.waitForURL(new RegExp(`session=${createdId}.*seq=${seq}`), {
+    timeout: 20_000,
+  });
   await page.waitForFunction(() => {
     const categories = [
       ...document.querySelectorAll(".jp-Launcher-sectionTitle"),
@@ -819,7 +818,7 @@ async function waitForCondition(condition, timeout = 10_000) {
 function session(id, rootFolder, state = "READY") {
   return {
     id,
-    generation,
+    seq,
     state,
     sshHost: "cluster",
     account: "project-a",

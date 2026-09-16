@@ -1,24 +1,27 @@
 // The typed client for cs-control's REST and WebSocket API. Every response is
-// validated against Common.ts's shapes before a caller sees it. UNCHANGED marks
-// a 304 Not Modified response, meaning the caller's cached copy is still current.
+// validated against a Common.ts vObject shape covering every field cs-control's
+// response may carry, per docs/API.md in cs-control, rejecting any other key;
+// expect() turns a shape into a throwing parser for one call site. UNCHANGED
+// marks a 304 Not Modified response, meaning the caller's cached copy is still
+// current.
 import { PageConfig, URLExt } from "@jupyterlab/coreutils";
 import { ServerConnection } from "@jupyterlab/services";
 import { AuthClient } from "./AuthClient";
 import type { OAuthCredentials } from "./Common";
-import {
-  OAuthWebSocketFactory,
-  type OAuthWebSocketConnector,
-} from "./OAuthWebSocket";
-import type { ISessionAccess } from "./session-access";
+import { OAuthWebSocketFactory, type OAuthWebSocketConnector } from "./ssh";
 import {
   clearSessionAccess,
+  type ISessionAccess,
   validateSessionAccess,
   validDevTunnelRoot,
-} from "./session-access";
+} from "./session";
 import {
+  IGres,
   ILogLine,
   IMetricSample,
+  IPartition,
   IRun,
+  IRunStats,
   ISession,
   ISessionCreateRequest,
   ISessionSeries,
@@ -27,18 +30,21 @@ import {
   ISshHost,
   ISshHostTest,
   ITokenProvider,
-  LogStream,
   SESSION_ID,
-  SESSION_KEYS,
   SESSION_STATES,
-  SessionState,
-  SessionValidationStatus,
   VALIDATION_STATUSES,
-  exactKeys,
+  expect,
   isPlainObject,
   jsonResponse,
-  onlyKeys,
   requestUrl,
+  vArray,
+  vBoolean,
+  vNumber,
+  vObject,
+  vOneOf,
+  vOptional,
+  vPositiveInt,
+  vString,
   validControlApiUrl,
   validSessionId,
 } from "./Common";
@@ -147,11 +153,8 @@ export class ControlClient {
   }
 
   async listSshHosts(): Promise<ISshHost[]> {
-    const value = await this._request("ssh");
-    if (!isPlainObject(value) || !Array.isArray(value.hosts)) {
-      throw new Error("cs-control returned an invalid SSH host list.");
-    }
-    return value.hosts.map(validateHost);
+    return expect(sshHostListShape, "SSH host list")(await this._request("ssh"))
+      .hosts;
   }
 
   async addSshHost(name: string, command: string): Promise<ISshHost> {
@@ -181,23 +184,20 @@ export class ControlClient {
   }
 
   async testSshHost(alias: string): Promise<ISshHostTest> {
-    const value = await this._request(`ssh/${encodeURIComponent(alias)}/test`, {
-      method: "POST",
-    });
-    if (
-      !isPlainObject(value) ||
-      typeof value.host !== "string" ||
-      typeof value.ok !== "boolean" ||
-      typeof value.message !== "string"
-    ) {
-      throw new Error("cs-control returned an invalid SSH host test.");
-    }
+    const value = expect(
+      sshHostTestShape,
+      "SSH host test",
+    )(
+      await this._request(`ssh/${encodeURIComponent(alias)}/test`, {
+        method: "POST",
+      }),
+    );
     if (value.host !== alias) {
       throw new Error(
         `Received an SSH host test for ${value.host}, not ${alias}.`,
       );
     }
-    return { host: value.host, ok: value.ok, message: value.message };
+    return value;
   }
 
   async discoverSlurm(
@@ -229,17 +229,12 @@ export class ControlClient {
     if (value === UNCHANGED) {
       return UNCHANGED;
     }
-    if (
-      !isPlainObject(value) ||
-      !Array.isArray(value.sessions) ||
-      !(value.logs === undefined || Array.isArray(value.logs))
-    ) {
-      throw new Error("cs-control returned an invalid session list.");
+    const parsed = expect(sessionListShape, "session list")(value);
+    for (const tail of parsed.logs ?? []) {
+      checkLogBudget(tail.lines);
     }
-    const sessions = value.sessions.map(validateSession);
-    const logs = (value.logs ?? []).map(validateSessionLogTail);
     this._sessionsTag = tag;
-    return { sessions, logs };
+    return { sessions: parsed.sessions, logs: parsed.logs ?? [] };
   }
 
   async validateCreateRequest(
@@ -313,11 +308,16 @@ export class ControlClient {
   }
 
   async listRuns(): Promise<IRun[]> {
-    const value = await this._request("sessions/history");
-    if (!isPlainObject(value) || !Array.isArray(value.runs)) {
-      throw new Error("cs-control returned an invalid run history.");
+    const { runs } = expect(
+      runListShape,
+      "run history",
+    )(await this._request("sessions/history"));
+    for (const run of runs) {
+      if (run.logs) {
+        checkLogBudget(run.logs);
+      }
     }
-    return value.runs.map(validateRun);
+    return runs;
   }
 
   async getSessionAccess(id: string): Promise<ISessionAccess> {
@@ -434,40 +434,30 @@ export function createSessionServerSettings(
   });
 }
 
-function validateSessionValidation(value: unknown): ISessionValidation {
-  if (
-    !onlyKeys(value, [
-      "sessionId",
-      "status",
-      "script",
-      "message",
-      "stdout",
-      "stderr",
-    ]) ||
-    typeof value.sessionId !== "string" ||
-    !VALIDATION_STATUSES.includes(value.status as SessionValidationStatus) ||
-    typeof value.script !== "string" ||
-    typeof value.message !== "string" ||
-    (value.stdout !== undefined && typeof value.stdout !== "string") ||
-    (value.stderr !== undefined && typeof value.stderr !== "string")
-  ) {
-    throw new Error("cs-control returned an invalid session validation.");
-  }
-  return value as ISessionValidation;
-}
+const sessionValidationShape = vObject<ISessionValidation>({
+  sessionId: vString(),
+  status: vOneOf(VALIDATION_STATUSES),
+  script: vString(),
+  message: vString(),
+  stdout: vOptional(vString()),
+  stderr: vOptional(vString()),
+});
+const validateSessionValidation = expect(
+  sessionValidationShape,
+  "session validation",
+);
 
-function validateLogLines(lines: unknown[]): ILogLine[] {
+const logLineShape = vObject<ILogLine>({
+  stream: vOneOf(["status", "stdout", "stderr"] as const),
+  text: vString(),
+  at: vString(),
+});
+
+function checkLogBudget(lines: ILogLine[]): ILogLine[] {
   let bytes = 0;
   const encoder = new TextEncoder();
-  return lines.map((line): ILogLine => {
-    if (
-      !isPlainObject(line) ||
-      !["status", "stdout", "stderr"].includes(String(line.stream)) ||
-      typeof line.text !== "string" ||
-      SESSION_LOG_CONTROL.test(line.text) ||
-      typeof line.at !== "string" ||
-      !exactKeys(line, ["stream", "text", "at"])
-    ) {
+  for (const line of lines) {
+    if (SESSION_LOG_CONTROL.test(line.text)) {
       throw new Error("cs-control returned an invalid session log line.");
     }
     const size = encoder.encode(line.text).byteLength;
@@ -475,173 +465,131 @@ function validateLogLines(lines: unknown[]): ILogLine[] {
     if (size > 4096 || bytes > 64 * 1024) {
       throw new Error("cs-control returned an oversized session log event.");
     }
-    return {
-      stream: line.stream as LogStream,
-      text: line.text,
-      at: line.at,
-    };
-  });
-}
-
-function validateSessionLogTail(value: unknown): ISessionLogTail {
-  if (
-    !isPlainObject(value) ||
-    typeof value.sessionId !== "string" ||
-    !SESSION_ID.test(value.sessionId) ||
-    !Array.isArray(value.lines) ||
-    value.lines.length > 100 ||
-    !exactKeys(value, ["sessionId", "lines"])
-  ) {
-    throw new Error("cs-control returned an invalid session log event.");
   }
-  return { sessionId: value.sessionId, lines: validateLogLines(value.lines) };
+  return lines;
 }
 
-function validateResources(value: unknown): boolean {
-  return (
-    isPlainObject(value) &&
-    typeof value.cores === "number" &&
-    typeof value.memoryMb === "number" &&
-    typeof value.wallMinutes === "number"
-  );
-}
+const sessionLogTailShape = vObject<ISessionLogTail>({
+  sessionId: vString(SESSION_ID),
+  lines: vArray(logLineShape, 100),
+});
 
-function validateGenerationAndJobSpec(value: Record<string, any>): boolean {
-  return (
-    typeof value.generation === "string" &&
-    typeof value.sshHost === "string" &&
-    typeof value.partition === "string" &&
-    typeof value.rootFolder === "string" &&
-    validateResources(value.resources)
-  );
-}
+const resourcesShape = vObject<ISession["resources"]>({
+  cores: vNumber,
+  memoryMb: vNumber,
+  wallMinutes: vNumber,
+  gpuType: vOptional(vString()),
+  gpuCount: vOptional(vNumber),
+});
 
-function validateSession(value: unknown): ISession {
-  if (
-    !onlyKeys(value, SESSION_KEYS) ||
-    !SESSION_ID.test(String(value.id)) ||
-    !validateGenerationAndJobSpec(value) ||
-    !SESSION_STATES.includes(value.state as SessionState) ||
-    typeof value.createdAt !== "string" ||
-    typeof value.updatedAt !== "string"
-  ) {
-    throw new Error("cs-control returned an invalid session.");
-  }
-  return value as unknown as ISession;
-}
+const seqAndJobSpecFields = {
+  seq: vPositiveInt,
+  sshHost: vString(),
+  account: vOptional(vString()),
+  partition: vString(),
+  rootFolder: vString(),
+  resources: resourcesShape,
+};
 
-function validateSample(value: unknown): IMetricSample {
-  if (
-    !isPlainObject(value) ||
-    typeof value.at !== "string" ||
-    (value.memBytes !== undefined && typeof value.memBytes !== "number") ||
-    (value.cpuUsageUsec !== undefined &&
-      typeof value.cpuUsageUsec !== "number") ||
-    (value.gpus !== undefined &&
-      (!Array.isArray(value.gpus) ||
-        !value.gpus.every(
-          (gpu) => isPlainObject(gpu) && typeof gpu.utilPct === "number",
-        )))
-  ) {
-    throw new Error("cs-control returned an invalid metric sample.");
-  }
-  return value as unknown as IMetricSample;
-}
+const sessionShape = vObject<ISession>({
+  id: vString(SESSION_ID),
+  ...seqAndJobSpecFields,
+  state: vOneOf(SESSION_STATES),
+  error: vOptional(vString()),
+  createdAt: vString(),
+  startedAt: vOptional(vString()),
+  updatedAt: vString(),
+});
+const validateSession = expect(sessionShape, "session");
 
-function validateSessionSeries(value: unknown): ISessionSeries {
-  if (
-    !isPlainObject(value) ||
-    !SESSION_ID.test(String(value.sessionId)) ||
-    !(value.samples === undefined || Array.isArray(value.samples))
-  ) {
-    throw new Error("cs-control returned an invalid metric series.");
-  }
-  return {
-    sessionId: value.sessionId as string,
-    samples: ((value.samples ?? []) as unknown[]).map(validateSample),
-  };
-}
+const gpuUtilisationShape = vObject<NonNullable<IMetricSample["gpus"]>[number]>(
+  {
+    index: vNumber,
+    utilPct: vOptional(vNumber),
+    memUsedMiB: vOptional(vNumber),
+    memTotalMiB: vOptional(vNumber),
+  },
+);
 
-function validateRunStats(value: unknown): boolean {
-  return (
-    isPlainObject(value) &&
-    (value.requestedMemory === undefined ||
-      typeof value.requestedMemory === "string") &&
-    (value.elapsedSeconds === undefined ||
-      typeof value.elapsedSeconds === "number") &&
-    (value.maxRss === undefined || typeof value.maxRss === "string") &&
-    (value.cpuEfficiencyPct === undefined ||
-      typeof value.cpuEfficiencyPct === "number") &&
-    (value.memoryEfficiencyPct === undefined ||
-      typeof value.memoryEfficiencyPct === "number") &&
-    (value.cores === undefined || typeof value.cores === "number")
-  );
-}
+const sampleShape = vObject<IMetricSample>({
+  at: vString(),
+  memBytes: vOptional(vNumber),
+  cpuUsageUsec: vOptional(vNumber),
+  gpus: vOptional(vArray(gpuUtilisationShape)),
+});
 
-function validateRun(value: unknown): IRun {
-  if (
-    !isPlainObject(value) ||
-    !SESSION_ID.test(String(value.sessionId)) ||
-    !validateGenerationAndJobSpec(value) ||
-    !SESSION_STATES.includes(value.finalState as SessionState) ||
-    typeof value.endedAt !== "string" ||
-    (value.stats !== undefined && !validateRunStats(value.stats)) ||
-    (value.samples !== undefined && !Array.isArray(value.samples)) ||
-    (value.logs !== undefined && !Array.isArray(value.logs))
-  ) {
-    throw new Error("cs-control returned an invalid run.");
-  }
-  return {
-    ...(value as unknown as IRun),
-    samples: value.samples && (value.samples as unknown[]).map(validateSample),
-    logs: value.logs && validateLogLines(value.logs as unknown[]),
-  };
-}
+const sessionSeriesShape = vObject<ISessionSeries>({
+  sessionId: vString(SESSION_ID),
+  samples: vArray(sampleShape),
+});
+const validateSessionSeries = expect(sessionSeriesShape, "metric series");
 
-function validateHost(value: unknown): ISshHost {
-  if (
-    !isPlainObject(value) ||
-    typeof value.name !== "string" ||
-    !Array.isArray(value.extraDirectives) ||
-    !value.extraDirectives.every(
-      (directive) => typeof directive === "string",
-    ) ||
-    (value.hostname !== undefined && typeof value.hostname !== "string") ||
-    (value.user !== undefined && typeof value.user !== "string") ||
-    (value.port !== undefined && typeof value.port !== "number") ||
-    (value.identityFile !== undefined &&
-      typeof value.identityFile !== "string") ||
-    (value.managed !== undefined && typeof value.managed !== "boolean")
-  ) {
-    throw new Error("cs-control returned an invalid SSH host.");
-  }
-  return value as unknown as ISshHost;
-}
+const runStatsShape = vObject<IRunStats>({
+  requestedMemory: vOptional(vString()),
+  elapsedSeconds: vOptional(vNumber),
+  maxRss: vOptional(vString()),
+  cpuEfficiencyPct: vOptional(vNumber),
+  memoryEfficiencyPct: vOptional(vNumber),
+  cores: vOptional(vNumber),
+});
 
-export function validateSlurmResource(value: unknown): ISlurmInfo {
-  if (
-    !isPlainObject(value) ||
-    typeof value.host !== "string" ||
-    !Array.isArray(value.accounts) ||
-    !value.accounts.every((account) => typeof account === "string") ||
-    !Array.isArray(value.partitions) ||
-    !value.partitions.every(
-      (part) =>
-        isPlainObject(part) &&
-        typeof part.name === "string" &&
-        typeof part.cpuCount === "number" &&
-        typeof part.memoryMb === "number" &&
-        Array.isArray(part.gres) &&
-        part.gres.every(
-          (gres: unknown) =>
-            isPlainObject(gres) &&
-            typeof gres.name === "string" &&
-            typeof gres.count === "number",
-        ),
-    ) ||
-    (value.homeDir !== undefined && typeof value.homeDir !== "string")
-  ) {
-    throw new Error("cs-control returned invalid Slurm discovery.");
-  }
-  return value as unknown as ISlurmInfo;
-}
+const runShape = vObject<IRun>({
+  sessionId: vString(SESSION_ID),
+  ...seqAndJobSpecFields,
+  finalState: vOneOf(SESSION_STATES),
+  error: vOptional(vString()),
+  startedAt: vOptional(vString()),
+  endedAt: vString(),
+  stats: vOptional(runStatsShape),
+  samples: vOptional(vArray(sampleShape)),
+  logs: vOptional(vArray(logLineShape)),
+});
+
+const hostShape = vObject<ISshHost>({
+  name: vString(),
+  hostname: vOptional(vString()),
+  user: vOptional(vString()),
+  port: vOptional(vNumber),
+  identityFile: vOptional(vString()),
+  extraDirectives: vArray(vString()),
+  managed: vOptional(vBoolean),
+});
+const validateHost = expect(hostShape, "SSH host");
+
+const sshHostTestShape = vObject<ISshHostTest>({
+  host: vString(),
+  ok: vBoolean,
+  message: vString(),
+});
+
+const sshHostListShape = vObject<{ hosts: ISshHost[] }>({
+  hosts: vArray(hostShape),
+});
+
+const gresShape = vObject<IGres>({ name: vString(), count: vNumber });
+
+const partitionShape = vObject<IPartition>({
+  name: vString(),
+  cpuCount: vNumber,
+  memoryMb: vNumber,
+  gres: vArray(gresShape),
+});
+
+const slurmShape = vObject<ISlurmInfo>({
+  host: vString(),
+  accounts: vArray(vString()),
+  partitions: vArray(partitionShape),
+  homeDir: vOptional(vString()),
+});
+
+export const validateSlurmResource = expect(slurmShape, "Slurm discovery");
+
+const sessionListShape = vObject<{
+  sessions: ISession[];
+  logs?: ISessionLogTail[];
+}>({
+  sessions: vArray(sessionShape),
+  logs: vOptional(vArray(sessionLogTailShape)),
+});
+
+const runListShape = vObject<{ runs: IRun[] }>({ runs: vArray(runShape) });

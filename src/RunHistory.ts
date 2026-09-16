@@ -1,22 +1,28 @@
 // Every session this account has run, running ones first, then finished ones.
-// The history outlives the cards in it, so a deleted session's run stays. A
-// session's current generation is itself a run entry with no outcome yet.
+// The history outlives the cards in it, so a deleted session's run stays, and
+// a session's current seq is itself a run entry with no outcome yet.
+// RunReport renders one finished entry's accounting, usage and frozen log.
 import { RebuildingWidget } from "./RebuildingWidget";
 import type { IRun, ISession, SessionState } from "./Common";
 import { isTerminal } from "./Common";
-import { displayState, type ISessionUiState } from "./session-ui-state";
+import { displayState, type ISessionUiState } from "./session";
 import type { CyberShuttlePanel } from "./CyberShuttlePanel";
 import {
+  countsDown,
+  detailGrid,
   detailGridWithRemaining,
   disclosure,
   element,
-  modalBody,
+  logSection,
+  dialogBody,
   statePill,
 } from "./dom";
-import { sessionSummary } from "./metrics";
-import { usagePlots } from "./usage";
-import { RunReport } from "./RunReport";
-import { countsDown } from "./walltime";
+import {
+  accountingState,
+  runSummary,
+  sessionSummary,
+  usagePlots,
+} from "./metrics";
 
 interface IHistoryEntry {
   key: string;
@@ -59,18 +65,17 @@ export class RunHistory extends RebuildingWidget {
     const running = this._state.sessions
       .filter((session) => !isTerminal(session.state))
       .map((session) => ({
-        key: `${session.id}/${session.generation}`,
+        key: `${session.id}/${session.seq}`,
         sshHost: session.sshHost,
         state: session.state,
         session,
       }));
     const finished = this._state.runs.map((run) => {
       const relaunching = this._state.sessions.find(
-        (session) =>
-          session.id === run.sessionId && session.generation === run.generation,
+        (session) => session.id === run.sessionId && session.seq === run.seq,
       );
       return {
-        key: `${run.sessionId}/${run.generation}`,
+        key: `${run.sessionId}/${run.seq}`,
         sshHost: run.sshHost,
         state: relaunching
           ? displayState(relaunching, this._state.busySessionIds)
@@ -83,7 +88,7 @@ export class RunHistory extends RebuildingWidget {
 
   protected _rebuild(): void {
     this.node.textContent = "";
-    const { root, scroll, card } = modalBody(
+    const { root, scroll, card } = dialogBody(
       "Every session you have run, still running first. A run is kept even after its card is deleted.",
       this._state.error,
     );
@@ -143,4 +148,36 @@ export class RunHistory extends RebuildingWidget {
     section.appendChild(columns);
     return section;
   }
+}
+
+export function RunReport(run: IRun): HTMLElement {
+  const section = element("section", "", "csRunReport");
+  section.appendChild(element("h4", "Run report", "csSessionLogTitle"));
+  const columns = element("div", "", "csDetailColumns");
+  columns.appendChild(detailGrid(runSummary(run)));
+  const samples = run.samples ?? [];
+  if (samples.length) {
+    columns.appendChild(usagePlots(run, samples, "peak"));
+  }
+  section.appendChild(columns);
+  const accounting = accountingState(run, Date.now());
+  if (accounting !== "present") {
+    section.appendChild(
+      element(
+        "div",
+        accounting === "pending"
+          ? "Slurm's accounting for this run has not flushed yet; peak memory and efficiency will appear here."
+          : "Slurm recorded no accounting for this run, so peak memory and efficiency are unknown.",
+        "csStatus",
+      ),
+    );
+  }
+  if (run.error) {
+    section.appendChild(element("div", run.error, "csError"));
+  }
+  const logs = run.logs ?? [];
+  if (logs.length) {
+    section.appendChild(logSection(logs).section);
+  }
+  return section;
 }

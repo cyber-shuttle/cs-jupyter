@@ -7,11 +7,18 @@ import type { ISession } from "./Common";
 import {
   displayState,
   emptyState,
+  getActiveSessionId,
   type ISessionUiState,
-} from "./session-ui-state";
-import { button, CLOCK_GLYPH, element, notes, statePill } from "./dom";
-import { getActiveSessionId } from "./session-state";
-import { countsDown, remainingBadge } from "./walltime";
+} from "./session";
+import {
+  button,
+  CLOCK_GLYPH,
+  countsDown,
+  element,
+  notes,
+  remainingBadge,
+  statePill,
+} from "./dom";
 
 export class SessionList extends RebuildingWidget {
   readonly sessionRequested = new Signal<this, string>(this);

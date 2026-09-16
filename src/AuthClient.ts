@@ -11,7 +11,7 @@ import {
   validControlApiUrl,
   type OAuthCredentials,
 } from "./Common";
-import { showDeviceCodeModal } from "./DeviceCodeDialog";
+import { showDeviceCodeDialog } from "./DeviceCodeDialog";
 
 const MAX_BROKER_BODY = 64 * 1024;
 const BROKER_REQUEST_TIMEOUT_MS = 15 * 1000;
@@ -160,7 +160,7 @@ export class AuthClient {
   ): Promise<OAuthCredentials> {
     try {
       const authorization = await this._requestDeviceCode(signal);
-      const modal = showDeviceCodeModal(authorization, () =>
+      const dialog = showDeviceCodeDialog(authorization, () =>
         this._interaction?.controller.abort(),
       );
       try {
@@ -176,7 +176,7 @@ export class AuthClient {
         );
         return { ...this._credentials };
       } finally {
-        modal.close();
+        dialog.close();
       }
     } catch (error) {
       if (signal.aborted) throw new Error("Microsoft sign-in was cancelled.");

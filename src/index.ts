@@ -38,15 +38,15 @@ import {
 import { Token } from "@lumino/coreutils";
 import { ControlClient, createSessionServerSettings } from "./ControlClient.js";
 import { jsonResponse, requestUrl } from "./Common.js";
-import { cacheSessionAccess, loadSessionAccess } from "./session-access.js";
-
 import {
+  cacheSessionAccess,
   getActiveSessionId,
+  loadSessionAccess,
   selectedSession,
   setActiveSessionId,
-} from "./session-state.js";
+} from "./session.js";
 import { sessionUiPlugin } from "./session-ui.js";
-import { walltimeStatusPlugin } from "./walltime-status.js";
+import { walltimeStatusPlugin } from "./metrics.js";
 
 const IRemoteServerSettings = new Token<ServerConnection.ISettings>(
   "@cybershuttle/jupyter:IRemoteServerSettings",
@@ -112,12 +112,12 @@ const remoteServerSettingsPlugin: ServiceManagerPlugin<
       if (!selected) {
         throw new Error("No session selected.");
       }
-      const { sessionId, generation } = selected;
-      let access = loadSessionAccess(sessionId, generation);
+      const { sessionId, seq } = selected;
+      let access = loadSessionAccess(sessionId, seq);
       if (!access) {
         access = await new ControlClient().getSessionAccess(sessionId);
-        if (access.generation !== generation)
-          throw new Error("Selected session access generation changed.");
+        if (access.seq !== seq)
+          throw new Error("Selected session access seq changed.");
         cacheSessionAccess(access);
       }
       PageConfig.setOption("terminalsAvailable", "true");

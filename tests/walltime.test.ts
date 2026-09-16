@@ -8,8 +8,8 @@ import {
   countsDown,
   formatRemaining,
   remainingMs,
-} from "../src/walltime";
-import { WalltimeStatus } from "../src/walltime-status";
+} from "../src/dom";
+import { WalltimeStatus } from "../src/metrics";
 import { RunHistory } from "../src/RunHistory";
 import { SessionDetail } from "../src/SessionDetail";
 import { ControllerFake, sessionFixture as session, uiState } from "./fakes";

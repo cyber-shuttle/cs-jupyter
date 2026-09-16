@@ -282,7 +282,7 @@ describe("AuthClient device-code broker flow", () => {
     );
     expect(copy.classList.contains("csDeviceCodeCopied")).toBe(true);
 
-    const close = dialog.querySelector<HTMLButtonElement>(".csModalClose")!;
+    const close = dialog.querySelector<HTMLButtonElement>(".csDialogClose")!;
     expect(close.getAttribute("aria-label")).toBe("Close");
     close.click();
     await expect(login).rejects.toThrow("Microsoft sign-in was cancelled.");

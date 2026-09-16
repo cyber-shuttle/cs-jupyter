@@ -5,7 +5,7 @@
 import { RebuildingWidget } from "./RebuildingWidget";
 import { errorMessage, ISshHost } from "./Common";
 import { ControlClient } from "./ControlClient";
-import { button, disclosure, element, field, modalBody } from "./dom";
+import { button, disclosure, element, field, dialogBody } from "./dom";
 
 interface IHostTest {
   busy: boolean;
@@ -113,7 +113,7 @@ export class SshHosts extends RebuildingWidget {
 
   protected _rebuild(): void {
     this.node.textContent = "";
-    const { root, scroll, card } = modalBody(
+    const { root, scroll, card } = dialogBody(
       "Hosts come from your SSH configuration. Add one here, or edit ~/.ssh/config directly.",
       this._error,
     );

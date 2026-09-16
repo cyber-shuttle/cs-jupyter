@@ -88,7 +88,7 @@ export class ReviewStep {
     }
   }
 
-  private validationState(): { text: string; modifier: string } {
+  private _validationState(): { text: string; modifier: string } {
     if (this._validating) {
       return {
         text: "Validating with Slurm…",
@@ -116,7 +116,7 @@ export class ReviewStep {
         busy || this._validating || this._validation?.status !== "PASSED";
     }
     if (this._status) {
-      const { text, modifier } = this.validationState();
+      const { text, modifier } = this._validationState();
       this._status.replaceChildren(
         ...(this._validating ? [element("span", "", "csSpinner")] : []),
         document.createTextNode(text),
