@@ -9,6 +9,7 @@ import { displayState, type ISessionUiState } from "./session";
 import type { CyberShuttlePanel } from "./CyberShuttlePanel";
 import {
   countsDown,
+  detailColumns,
   detailGrid,
   detailGridWithRemaining,
   disclosure,
@@ -134,18 +135,17 @@ export class RunHistory extends RebuildingWidget {
 
   private _inFlight(session: ISession): HTMLElement {
     const section = element("section", "", "csRunReport");
-    const columns = element("div", "", "csDetailColumns");
     const rows: Array<[string, string]> = [
       ["State", session.state],
       ...sessionSummary(session),
     ];
-    const grid = detailGridWithRemaining(rows, session);
-    columns.appendChild(grid);
     const samples = this._state.samples.get(session.id) ?? [];
-    if (samples.length) {
-      columns.appendChild(usagePlots(session, samples, "latest"));
-    }
-    section.appendChild(columns);
+    section.appendChild(
+      detailColumns(
+        detailGridWithRemaining(rows, session),
+        samples.length ? usagePlots(session, samples, "latest") : undefined,
+      ),
+    );
     return section;
   }
 }
@@ -153,13 +153,13 @@ export class RunHistory extends RebuildingWidget {
 export function RunReport(run: IRun): HTMLElement {
   const section = element("section", "", "csRunReport");
   section.appendChild(element("h4", "Run report", "csSessionLogTitle"));
-  const columns = element("div", "", "csDetailColumns");
-  columns.appendChild(detailGrid(runSummary(run)));
   const samples = run.samples ?? [];
-  if (samples.length) {
-    columns.appendChild(usagePlots(run, samples, "peak"));
-  }
-  section.appendChild(columns);
+  section.appendChild(
+    detailColumns(
+      detailGrid(runSummary(run)),
+      samples.length ? usagePlots(run, samples, "peak") : undefined,
+    ),
+  );
   const accounting = accountingState(run, Date.now());
   if (accounting !== "present") {
     section.appendChild(

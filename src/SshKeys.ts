@@ -1,7 +1,7 @@
 // SSH login key dialog: list, upload and remove the private keys a host can be
 // assigned. Removal confirms inline, since JupyterLab would otherwise queue a
 // second dialog behind the one open.
-import { RebuildingWidget } from "./RebuildingWidget";
+import { RemoteListWidget } from "./RebuildingWidget";
 import { errorMessage, ISshKey } from "./Common";
 import { ControlClient } from "./ControlClient";
 import {
@@ -14,15 +14,12 @@ import {
   formFooter,
 } from "./dom";
 
-export class SshKeys extends RebuildingWidget {
+export class SshKeys extends RemoteListWidget {
   private _api: ControlClient;
   private _keys: ISshKey[] = [];
-  private _busy = false;
-  private _error = "";
   private _form: { name: string; file: File | undefined } | undefined;
   private _formError = "";
   private _saving = false;
-  private _confirming = "";
 
   constructor(api: ControlClient) {
     super();
@@ -33,17 +30,9 @@ export class SshKeys extends RebuildingWidget {
   }
 
   async refresh(): Promise<void> {
-    this._busy = true;
-    this._error = "";
-    this._sync();
-    try {
+    await this._refreshing(async () => {
       this._keys = await this._api.listSshKeys();
-    } catch (error) {
-      this._error = errorMessage(error);
-    } finally {
-      this._busy = false;
-      this._sync();
-    }
+    });
   }
 
   private async _upload(name: string, file: File): Promise<void> {
@@ -66,20 +55,7 @@ export class SshKeys extends RebuildingWidget {
   }
 
   private async _remove(key: ISshKey): Promise<void> {
-    this._confirming = "";
-    try {
-      await this._api.removeSshKey(key.name);
-      await this.refresh();
-    } catch (error) {
-      this._error = errorMessage(error);
-      this._sync();
-    }
-  }
-
-  private _sync(): void {
-    if (!this.isDisposed) {
-      this._render();
-    }
+    await this._removeItem(() => this._api.removeSshKey(key.name));
   }
 
   protected _rebuild(): void {

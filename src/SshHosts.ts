@@ -2,7 +2,7 @@
 // ~/.ssh/config. Only entries CyberShuttle itself wrote can be edited or
 // removed. Removal confirms inline, since JupyterLab would otherwise queue a
 // second dialog behind the one already open.
-import { RebuildingWidget } from "./RebuildingWidget";
+import { RemoteListWidget } from "./RebuildingWidget";
 import { errorMessage, ISshHost, ISshKey } from "./Common";
 import { ControlClient } from "./ControlClient";
 import {
@@ -30,18 +30,15 @@ interface IHostTest {
   message?: string;
 }
 
-export class SshHosts extends RebuildingWidget {
+export class SshHosts extends RemoteListWidget {
   private _api: ControlClient;
   private _hosts: ISshHost[] = [];
   private _keys: ISshKey[] = [];
-  private _busy = false;
-  private _error = "";
   private _form: IHostDraft | undefined;
   private _addError = "";
   private _saving = false;
   private _open = new Set<string>();
   private _tests = new Map<string, IHostTest>();
-  private _confirming = "";
 
   constructor(api: ControlClient) {
     super();
@@ -52,20 +49,12 @@ export class SshHosts extends RebuildingWidget {
   }
 
   async refresh(): Promise<void> {
-    this._busy = true;
-    this._error = "";
-    this._sync();
-    try {
+    await this._refreshing(async () => {
       [this._hosts, this._keys] = await Promise.all([
         this._api.listSshHosts(),
         this._api.listSshKeys(),
       ]);
-    } catch (error) {
-      this._error = errorMessage(error);
-    } finally {
-      this._busy = false;
-      this._sync();
-    }
+    });
   }
 
   private async _save(form: IHostDraft): Promise<void> {
@@ -100,14 +89,7 @@ export class SshHosts extends RebuildingWidget {
   }
 
   private async _remove(host: ISshHost): Promise<void> {
-    this._confirming = "";
-    try {
-      await this._api.removeSshHost(host.name);
-      await this.refresh();
-    } catch (error) {
-      this._error = errorMessage(error);
-      this._sync();
-    }
+    await this._removeItem(() => this._api.removeSshHost(host.name));
   }
 
   private async _test(host: ISshHost): Promise<void> {
@@ -124,12 +106,6 @@ export class SshHosts extends RebuildingWidget {
       });
     }
     this._sync();
-  }
-
-  private _sync(): void {
-    if (!this.isDisposed) {
-      this._render();
-    }
   }
 
   protected _rebuild(): void {

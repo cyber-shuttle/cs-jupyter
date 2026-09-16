@@ -9,6 +9,7 @@ import type { ISessionLogTail } from "./ControlClient";
 import {
   button,
   countsDown,
+  detailColumns,
   detailGridWithRemaining,
   element,
   logSection,
@@ -164,15 +165,16 @@ export class SessionDetail extends RebuildingWidget {
         `${session.resources.gpuCount} ${session.resources.gpuType || ""}`.trim(),
       ]);
     }
-    const details = detailGridWithRemaining(rows, session);
-    const columns = element("div", "", "csDetailColumns");
-    columns.appendChild(details);
     const samples = this._state.samples.get(session.id);
     const live = !isTerminal(state);
-    if (live && samples?.length) {
-      columns.appendChild(usagePlots(session, samples, "latest"));
-    }
-    root.appendChild(columns);
+    root.appendChild(
+      detailColumns(
+        detailGridWithRemaining(rows, session),
+        live && samples?.length
+          ? usagePlots(session, samples, "latest")
+          : undefined,
+      ),
+    );
 
     root.append(
       ...notes([

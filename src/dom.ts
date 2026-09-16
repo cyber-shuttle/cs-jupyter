@@ -171,6 +171,15 @@ export function detailGrid(rows: Array<[string, string]>): HTMLDListElement {
   return grid;
 }
 
+export function detailColumns(
+  grid: HTMLElement,
+  plots?: HTMLElement,
+): HTMLElement {
+  const columns = element("div", "", "csDetailColumns");
+  columns.append(grid, ...(plots ? [plots] : []));
+  return columns;
+}
+
 export function detailGridWithRemaining(
   rows: Array<[string, string]>,
   session?: ISession,
