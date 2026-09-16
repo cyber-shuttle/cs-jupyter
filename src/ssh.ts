@@ -18,6 +18,7 @@ import { element } from "./dom";
 const CYBERSHUTTLE_WEBSOCKET_PROTOCOL = "cybershuttle.v1";
 const CYBERSHUTTLE_BEARER_PROTOCOL_PREFIX = "bearer.";
 const CYBERSHUTTLE_IDENTITY_PROTOCOL_PREFIX = "identity.";
+const CYBERSHUTTLE_GITHUB_PROTOCOL_PREFIX = "github.";
 const MAX_ACCESS_TOKEN_BYTES = 16 * 1024;
 const TOKEN_CONTROL_OR_WHITESPACE = /[\s\u0000-\u001f\u007f-\u009f]/u;
 
@@ -52,11 +53,14 @@ export class OAuthWebSocketFactory {
     }
     const credentials = await this._auth.acquireToken();
     const encodedAccess = encodeAccessToken(credentials.accessToken);
-    const encodedIdentity = encodeAccessToken(credentials.idToken);
     return new this._WebSocket(url, [
       CYBERSHUTTLE_WEBSOCKET_PROTOCOL,
-      `${CYBERSHUTTLE_BEARER_PROTOCOL_PREFIX}${encodedAccess}`,
-      `${CYBERSHUTTLE_IDENTITY_PROTOCOL_PREFIX}${encodedIdentity}`,
+      ...(credentials.scheme === "github"
+        ? [`${CYBERSHUTTLE_GITHUB_PROTOCOL_PREFIX}${encodedAccess}`]
+        : [
+            `${CYBERSHUTTLE_BEARER_PROTOCOL_PREFIX}${encodedAccess}`,
+            `${CYBERSHUTTLE_IDENTITY_PROTOCOL_PREFIX}${encodeAccessToken(credentials.idToken ?? "")}`,
+          ]),
     ]);
   }
 }

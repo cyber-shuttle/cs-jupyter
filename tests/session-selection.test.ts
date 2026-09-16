@@ -460,7 +460,16 @@ describe("identity control", () => {
     expect(list.node.querySelector(".csSessionCard")).toBeNull();
     expect(header.node.querySelector(".csAccountButton")).toBeNull();
     header.node.querySelector<HTMLButtonElement>(".csSignInButton")!.click();
-    expect(signIn).toHaveBeenCalledTimes(1);
+    const items = [
+      ...header.node.querySelectorAll<HTMLButtonElement>(".csAccountMenuItem"),
+    ];
+    expect(items.map((each) => each.textContent)).toEqual([
+      "Microsoft",
+      "GitHub",
+    ]);
+    expect(items.every((each) => each.querySelector("svg"))).toBe(true);
+    items[1].click();
+    expect(signIn).toHaveBeenCalledWith(header, "github");
   });
 
   it("names the account and keeps sign out behind its menu", () => {

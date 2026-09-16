@@ -1,7 +1,7 @@
-// Runs the Microsoft device-code flow against cs-control's OAuth broker. The
-// token is held in per-tab sessionStorage so it survives the session's own
-// navigation. Every broker response is validated strictly against its expected
-// shape.
+// Runs the Microsoft or GitHub device-code flow through cs-control's broker.
+// The token is held in per-tab sessionStorage so it survives the session's
+// own navigation. Every broker response is validated strictly against its
+// expected shape.
 import { PageConfig } from "@jupyterlab/coreutils";
 import {
   TOKEN_43,
@@ -10,11 +10,17 @@ import {
   parseUrl,
   validControlApiUrl,
   type OAuthCredentials,
+  type SignInProvider,
 } from "./Common";
 import { showDeviceCodeDialog } from "./DeviceCodeDialog";
 
 const MAX_BROKER_BODY = 64 * 1024;
 const BROKER_REQUEST_TIMEOUT_MS = 15 * 1000;
+const GITHUB_USER_URL = "https://api.github.com/user";
+const PROVIDER_LABEL: Record<SignInProvider, string> = {
+  microsoft: "Microsoft",
+  github: "GitHub",
+};
 
 export class AuthInteractionRequiredError extends Error {
   constructor(message = "Sign in to CyberShuttle to continue.") {
@@ -30,6 +36,7 @@ export interface IAuthClientDependencies {
 }
 
 interface DeviceAuthorization {
+  label: string;
   handle: string;
   userCode: string;
   verificationUri: string;
@@ -70,22 +77,33 @@ function accountFromIdToken(idToken: string): string | undefined {
 
 function readStoredCredentials(
   now: number,
-): { credentials: OAuthCredentials; expiresAt: number } | undefined {
+):
+  | { credentials: OAuthCredentials; account?: string; expiresAt: number }
+  | undefined {
   const raw = sessionStorage.getItem(SIGN_IN_KEY);
   if (!raw) return undefined;
   try {
-    const { accessToken, idToken, expiresAt } = JSON.parse(raw) as Record<
-      string,
-      unknown
-    >;
+    const { scheme, accessToken, idToken, account, expiresAt } = JSON.parse(
+      raw,
+    ) as Record<string, unknown>;
     if (
+      (scheme !== "Bearer" && scheme !== "github") ||
       typeof accessToken !== "string" ||
-      typeof idToken !== "string" ||
+      (scheme === "Bearer") !== (typeof idToken === "string") ||
+      (account !== undefined && typeof account !== "string") ||
       !(typeof expiresAt === "number" && expiresAt > now)
     ) {
       throw new Error("stored credentials are unusable");
     }
-    return { credentials: { accessToken, idToken }, expiresAt };
+    return {
+      credentials: {
+        scheme,
+        accessToken,
+        ...(typeof idToken === "string" ? { idToken } : {}),
+      },
+      account,
+      expiresAt,
+    };
   } catch {
     sessionStorage.removeItem(SIGN_IN_KEY);
     return undefined;
@@ -102,6 +120,7 @@ export class AuthClient {
     signal: AbortSignal,
   ) => Promise<void>;
   private _credentials: OAuthCredentials | undefined;
+  private _account: string | undefined;
   private _expiresAt = 0;
   private _interaction:
     | { promise: Promise<OAuthCredentials>; controller: AbortController }
@@ -122,12 +141,13 @@ export class AuthClient {
     const stored = readStoredCredentials(this._now());
     if (stored) {
       this._credentials = stored.credentials;
+      this._account = stored.account;
       this._expiresAt = stored.expiresAt;
     }
   }
 
   get account(): string | undefined {
-    return this._credentials && accountFromIdToken(this._credentials.idToken);
+    return this._credentials && this._account;
   }
 
   async acquireToken(): Promise<OAuthCredentials> {
@@ -140,14 +160,20 @@ export class AuthClient {
 
   invalidateToken(): void {
     this._credentials = undefined;
+    this._account = undefined;
     this._expiresAt = 0;
     sessionStorage.removeItem(SIGN_IN_KEY);
   }
 
-  interactiveLogin(): Promise<OAuthCredentials> {
+  interactiveLogin(
+    provider: SignInProvider = "microsoft",
+  ): Promise<OAuthCredentials> {
     if (!this._interaction) {
       const controller = new AbortController();
-      const promise = this._interactiveLogin(controller.signal).finally(() => {
+      const promise = this._interactiveLogin(
+        provider,
+        controller.signal,
+      ).finally(() => {
         this._interaction = undefined;
       });
       this._interaction = { promise, controller };
@@ -156,43 +182,76 @@ export class AuthClient {
   }
 
   private async _interactiveLogin(
+    provider: SignInProvider,
     signal: AbortSignal,
   ): Promise<OAuthCredentials> {
+    const label = PROVIDER_LABEL[provider];
     try {
-      const authorization = await this._requestDeviceCode(signal);
+      const authorization = await this._requestDeviceCode(provider, signal);
       const dialog = showDeviceCodeDialog(authorization, () =>
         this._interaction?.controller.abort(),
       );
       try {
-        const result = await this._pollForToken(authorization, signal);
-        this._credentials = {
-          accessToken: result.accessToken,
-          idToken: result.idToken,
-        };
-        this._expiresAt = this._now() + result.expiresInSeconds * 1000;
+        const { expiresInSeconds, ...credentials } = await this._pollForToken(
+          authorization,
+          signal,
+        );
+        this._credentials = credentials;
+        this._account =
+          credentials.scheme === "github"
+            ? await this._githubLogin(credentials.accessToken, signal)
+            : accountFromIdToken(credentials.idToken ?? "");
+        this._expiresAt = this._now() + expiresInSeconds * 1000;
         sessionStorage.setItem(
           SIGN_IN_KEY,
-          JSON.stringify({ ...this._credentials, expiresAt: this._expiresAt }),
+          JSON.stringify({
+            ...this._credentials,
+            account: this._account,
+            expiresAt: this._expiresAt,
+          }),
         );
         return { ...this._credentials };
       } finally {
         dialog.close();
       }
     } catch (error) {
-      if (signal.aborted) throw new Error("Microsoft sign-in was cancelled.");
+      if (signal.aborted) throw new Error(`${label} sign-in was cancelled.`);
       throw error;
     }
   }
 
+  private async _githubLogin(
+    token: string,
+    signal: AbortSignal,
+  ): Promise<string | undefined> {
+    try {
+      const response = await this._fetch(GITHUB_USER_URL, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+        credentials: "omit",
+        signal,
+      });
+      const user: unknown = await response.json();
+      return isPlainObject(user) && typeof user.login === "string"
+        ? user.login
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   private async _requestDeviceCode(
+    provider: SignInProvider,
     signal: AbortSignal,
   ): Promise<DeviceAuthorization> {
+    const label = PROVIDER_LABEL[provider];
     const attempt = (): Promise<{ response: Response; value: unknown }> =>
       this._post(
         this._startEndpoint,
         signal,
         BROKER_REQUEST_TIMEOUT_MS,
         "cs-control device authorization request timed out.",
+        JSON.stringify({ provider }),
       );
     let { response, value } = await attempt();
     if (response.status === 429) {
@@ -205,7 +264,7 @@ export class AuthClient {
         );
       }
     }
-    if (!response.ok) throw brokerFailure(response.status, value);
+    if (!response.ok) throw brokerFailure(label, response.status, value);
     if (
       response.status !== 200 ||
       !exactKeys(value, [
@@ -226,9 +285,10 @@ export class AuthClient {
       throw new Error("cs-control returned an invalid device authorization.");
     }
     return {
+      label,
       handle: value.handle,
       userCode: value.userCode,
-      verificationUri: safeVerificationUri(value.verificationUri),
+      verificationUri: safeVerificationUri(value.verificationUri, label),
       expiresInSeconds: value.expiresInSeconds,
       intervalSeconds: value.intervalSeconds,
     };
@@ -255,7 +315,9 @@ export class AuthClient {
         }
         continue;
       }
-      if (!response.ok) throw brokerFailure(response.status, value);
+      if (!response.ok) {
+        throw brokerFailure(authorization.label, response.status, value);
+      }
       if (response.status === 202) {
         if (
           !exactKeys(value, ["status", "intervalSeconds"]) ||
@@ -267,30 +329,33 @@ export class AuthClient {
         interval = value.intervalSeconds * 1000;
         continue;
       }
+      const github = isPlainObject(value) && value.scheme === "github";
       if (
         response.status !== 200 ||
         !exactKeys(value, [
           "status",
+          "scheme",
           "accessToken",
-          "idToken",
+          ...(github ? [] : ["idToken"]),
           "expiresInSeconds",
         ]) ||
         value.status !== "complete" ||
+        (value.scheme !== "Bearer" && value.scheme !== "github") ||
         typeof value.accessToken !== "string" ||
         !value.accessToken ||
-        typeof value.idToken !== "string" ||
-        !value.idToken ||
+        (!github && (typeof value.idToken !== "string" || !value.idToken)) ||
         !boundedInteger(value.expiresInSeconds, 1, 86400)
       ) {
         throw new Error("cs-control token response was invalid.");
       }
       return {
+        scheme: value.scheme,
         accessToken: value.accessToken,
-        idToken: value.idToken,
+        ...(github ? {} : { idToken: value.idToken as string }),
         expiresInSeconds: value.expiresInSeconds,
       };
     }
-    throw new Error("Microsoft device sign-in expired.");
+    throw new Error(`${authorization.label} device sign-in expired.`);
   }
 
   private async _post(
@@ -298,12 +363,16 @@ export class AuthClient {
     signal: AbortSignal,
     timeoutMilliseconds: number,
     timeoutMessage: string,
+    payload?: string,
   ): Promise<{ response: Response; value: unknown }> {
     const timeout = new AbortController();
     const timer = window.setTimeout(() => timeout.abort(), timeoutMilliseconds);
     try {
       const response = await this._fetch(endpoint, {
         method: "POST",
+        ...(payload
+          ? { body: payload, headers: { "Content-Type": "application/json" } }
+          : {}),
         cache: "no-store",
         credentials: "omit",
         redirect: "error",
@@ -334,19 +403,19 @@ export class AuthClient {
   }
 }
 
-function brokerFailure(status: number, value: unknown): Error {
+function brokerFailure(label: string, status: number, value: unknown): Error {
   switch ((value as any)?.error?.code) {
     case "authorization_denied":
-      return new Error("Microsoft sign-in was denied.");
+      return new Error(`${label} sign-in was denied.`);
     case "authorization_expired":
-      return new Error("Microsoft device sign-in expired.");
+      return new Error(`${label} device sign-in expired.`);
     default:
       return new Error(`cs-control device authorization failed (${status}).`);
   }
 }
 
-function safeVerificationUri(value: string): string {
-  const invalid = "Microsoft returned an invalid verification URI.";
+function safeVerificationUri(value: string, label: string): string {
+  const invalid = `${label} returned an invalid verification URI.`;
   const uri = parseUrl(value, invalid);
   if (uri.protocol !== "https:" || uri.username || uri.password || uri.hash) {
     throw new Error(invalid);

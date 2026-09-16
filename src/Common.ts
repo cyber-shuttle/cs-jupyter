@@ -5,9 +5,12 @@
 // can import freely. Optional fields mean not observed or not yet, never a
 // stand-in for false or zero.
 
+export type SignInProvider = "microsoft" | "github";
+
 export interface OAuthCredentials {
+  scheme: "Bearer" | "github";
   accessToken: string;
-  idToken: string;
+  idToken?: string;
 }
 
 export const SESSION_ID = /^s-[a-f0-9]{12}$/;

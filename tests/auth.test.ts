@@ -19,11 +19,16 @@ const deviceAuthorization = {
   intervalSeconds: 1,
 };
 
+const resolvedCredentials = {
+  scheme: "Bearer",
+  accessToken: "access-token",
+  idToken: "id-token",
+};
+
 const tokens = {
   status: "complete",
   expiresInSeconds: 60,
-  accessToken: "access-token",
-  idToken: "id-token",
+  ...resolvedCredentials,
 };
 
 interface MockReply {
@@ -93,14 +98,8 @@ describe("AuthClient device-code broker flow", () => {
     await expect(auth.acquireToken()).rejects.toBeInstanceOf(
       AuthInteractionRequiredError,
     );
-    await expect(auth.interactiveLogin()).resolves.toEqual({
-      accessToken: "access-token",
-      idToken: "id-token",
-    });
-    await expect(auth.acquireToken()).resolves.toEqual({
-      accessToken: "access-token",
-      idToken: "id-token",
-    });
+    await expect(auth.interactiveLogin()).resolves.toEqual(resolvedCredentials);
+    await expect(auth.acquireToken()).resolves.toEqual(resolvedCredentials);
 
     expect(dependencies.sleep).toHaveBeenCalledTimes(3);
     expect(
@@ -113,7 +112,7 @@ describe("AuthClient device-code broker flow", () => {
       `https://control.example.edu/api/v1/oauth/device/poll/${deviceAuthorization.handle}`,
       `https://control.example.edu/api/v1/oauth/device/poll/${deviceAuthorization.handle}`,
     ]);
-    for (const [, init] of calls) {
+    for (const [index, [, init]] of calls.entries()) {
       expect(init).toMatchObject({
         method: "POST",
         cache: "no-store",
@@ -121,10 +120,53 @@ describe("AuthClient device-code broker flow", () => {
         redirect: "error",
         referrerPolicy: "no-referrer",
       });
-      expect(init?.body).toBeUndefined();
+      expect(init?.body).toBe(
+        index === 0 ? '{"provider":"microsoft"}' : undefined,
+      );
     }
     expect(calls.map(([url]) => String(url)).join(" ")).not.toContain(
       "microsoftonline.com",
+    );
+  });
+
+  it("signs in with GitHub through the broker and names the account by its login", async () => {
+    const dependencies = advancingDependencies([
+      {
+        body: {
+          ...deviceAuthorization,
+          verificationUri: "https://github.com/login/device",
+        },
+      },
+      {
+        body: {
+          status: "complete",
+          scheme: "github",
+          accessToken: "gho_token",
+          expiresInSeconds: 86400,
+        },
+      },
+      { body: { id: 17297498, login: "yasithdev" } },
+    ]);
+    const auth = new AuthClient(controlApiUrl, dependencies);
+    await expect(auth.interactiveLogin("github")).resolves.toEqual({
+      scheme: "github",
+      accessToken: "gho_token",
+    });
+    expect(auth.account).toBe("yasithdev");
+    const calls = vi.mocked(dependencies.fetch).mock.calls;
+    expect(calls[0][1]?.body).toBe('{"provider":"github"}');
+    expect(String(calls[2][0])).toBe("https://api.github.com/user");
+    expect(new Headers(calls[2][1]?.headers).get("Authorization")).toBe(
+      "Bearer gho_token",
+    );
+    expect(
+      JSON.parse(sessionStorage.getItem("cybershuttle.oauth.v1")!),
+    ).toMatchObject({
+      scheme: "github",
+      account: "yasithdev",
+    });
+    expect(new AuthClient(controlApiUrl, dependencies).account).toBe(
+      "yasithdev",
     );
   });
 
@@ -140,10 +182,7 @@ describe("AuthClient device-code broker flow", () => {
     ]);
     const auth = new AuthClient(controlApiUrl, dependencies);
 
-    await expect(auth.interactiveLogin()).resolves.toEqual({
-      accessToken: "access-token",
-      idToken: "id-token",
-    });
+    await expect(auth.interactiveLogin()).resolves.toEqual(resolvedCredentials);
     expect(
       vi.mocked(dependencies.sleep!).mock.calls.map(([wait]) => wait),
     ).toEqual([1000, 3000]);
@@ -163,10 +202,9 @@ describe("AuthClient device-code broker flow", () => {
       ]);
       const auth = new AuthClient(controlApiUrl, dependencies);
 
-      await expect(auth.interactiveLogin()).resolves.toEqual({
-        accessToken: "access-token",
-        idToken: "id-token",
-      });
+      await expect(auth.interactiveLogin()).resolves.toEqual(
+        resolvedCredentials,
+      );
       expect(
         vi.mocked(dependencies.sleep!).mock.calls.map(([wait]) => wait),
       ).toEqual([5000, 5000]);
@@ -185,10 +223,7 @@ describe("AuthClient device-code broker flow", () => {
     ]);
     const auth = new AuthClient(controlApiUrl, dependencies);
 
-    await expect(auth.interactiveLogin()).resolves.toEqual({
-      accessToken: "access-token",
-      idToken: "id-token",
-    });
+    await expect(auth.interactiveLogin()).resolves.toEqual(resolvedCredentials);
     expect(vi.mocked(dependencies.sleep!).mock.calls[0]?.[0]).toBe(2000);
   });
 
@@ -471,7 +506,7 @@ describe("AuthClient device-code broker flow", () => {
 
       await expect(
         new AuthClient(controlApiUrl, dependencies).interactiveLogin(),
-      ).resolves.toEqual({ accessToken: "access-token", idToken: "id-token" });
+      ).resolves.toEqual(resolvedCredentials);
     },
   );
 
@@ -543,7 +578,7 @@ describe("AuthClient device-code broker flow", () => {
 
     await expect(
       new AuthClient(controlApiUrl, dependencies).interactiveLogin(),
-    ).resolves.toEqual({ accessToken: "access-token", idToken: "id-token" });
+    ).resolves.toEqual(resolvedCredentials);
     expect(dependencies.sleep).toHaveBeenCalledWith(
       60_000,
       expect.any(AbortSignal),
@@ -588,10 +623,7 @@ describe("AuthClient device-code broker flow", () => {
       dependencies,
     ).interactiveLogin();
 
-    expect(result).toEqual({
-      accessToken: "access-token",
-      idToken: "id-token",
-    });
+    expect(result).toEqual(resolvedCredentials);
     expect(localStorage.length).toBe(0);
     expect(sessionStorage.getItem("cybershuttle.oauth.v1")).toContain(
       "access-token",
@@ -614,10 +646,18 @@ describe("AuthClient device-code broker flow", () => {
 
 describe("AuthClient credential persistence", () => {
   it.each([
-    { name: "no id token", record: { accessToken: "a", expiresAt: 3_600_000 } },
+    {
+      name: "no id token",
+      record: { scheme: "Bearer", accessToken: "a", expiresAt: 3_600_000 },
+    },
     {
       name: "a non-string id token",
-      record: { accessToken: "a", idToken: 12345, expiresAt: 3_600_000 },
+      record: {
+        scheme: "Bearer",
+        accessToken: "a",
+        idToken: 12345,
+        expiresAt: 3_600_000,
+      },
     },
     {
       name: "no access token",
@@ -648,10 +688,7 @@ describe("AuthClient credential persistence", () => {
       fetch: fetchSequence([]),
       now: dependencies.now,
     });
-    await expect(reloaded.acquireToken()).resolves.toEqual({
-      accessToken: "access-token",
-      idToken: "id-token",
-    });
+    await expect(reloaded.acquireToken()).resolves.toEqual(resolvedCredentials);
 
     const expired = new AuthClient(controlApiUrl, {
       fetch: fetchSequence([]),

@@ -40,6 +40,30 @@ describe("OAuth cross-origin control client", () => {
     expect(init.redirect).toBe("error");
   });
 
+  it("sends a GitHub token under its own scheme with no identity header", async () => {
+    const browserFetch = vi.fn<typeof globalThis.fetch>(
+      async () =>
+        new Response(JSON.stringify({ hosts: [] }), {
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    const client = new ControlClient(
+      "https://control.example.edu/api/v1",
+      {
+        ...auth,
+        acquireToken: vi.fn(async () => ({
+          scheme: "github" as const,
+          accessToken: "gho_token",
+        })),
+      },
+      browserFetch,
+    );
+    await expect(client.listSshHosts()).resolves.toEqual([]);
+    const headers = new Headers(browserFetch.mock.calls[0][1]?.headers);
+    expect(headers.get("Authorization")).toBe("github gho_token");
+    expect(headers.get("X-CyberShuttle-Identity")).toBeNull();
+  });
+
   it.each([401, 403])(
     "invalidates delegated access after HTTP %i",
     async (status) => {
