@@ -1,7 +1,7 @@
-// Exercises AuthClient's Microsoft device-code OAuth flow: dialog, polling,
-// cancellation and credential storage. Polling must give up if a broker never
-// stops answering pending. Credentials persist only in per-tab session storage,
-// since local storage would outlive the tab.
+// Exercises AuthClient's CILogon authorization-code flow with PKCE: the
+// outbound redirect it builds, the inbound callback it completes on load, and
+// the token refresh acquireToken performs near expiry. Credentials persist
+// only in per-tab session storage, since local storage would outlive the tab.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AuthClient,
@@ -11,45 +11,37 @@ import {
 
 const controlApiUrl = "https://control.example.edu/api/v1";
 
-const deviceAuthorization = {
-  handle: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-  userCode: "ABCD-EFGH",
-  verificationUri: "https://microsoft.com/devicelogin",
-  expiresInSeconds: 900,
-  intervalSeconds: 1,
+const config = {
+  issuer: "https://cilogon.org",
+  authorizationEndpoint: "https://cilogon.org/authorize",
+  clientId: "cilogon:/client_id/abc",
+  scope: "openid email profile offline_access",
 };
 
-const resolvedCredentials = {
-  scheme: "Bearer",
-  accessToken: "access-token",
-  idToken: "id-token",
-};
-
-const tokens = {
-  status: "complete",
-  expiresInSeconds: 60,
-  ...resolvedCredentials,
-};
+function jwt(payload: Record<string, unknown>): string {
+  const part = (value: unknown): string =>
+    btoa(JSON.stringify(value))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+  return `${part({ alg: "none" })}.${part(payload)}.sig`;
+}
 
 interface MockReply {
   status?: number;
   body: unknown;
   contentType?: string;
   redirected?: boolean;
-  headers?: Record<string, string>;
 }
 
 function fetchSequence(replies: Array<MockReply | Error>): typeof fetch {
   return vi.fn(async () => {
     const next = replies.shift();
-    if (!next) throw new Error("unexpected broker request");
+    if (!next) throw new Error("unexpected sign-in request");
     if (next instanceof Error) throw next;
     const response = new Response(JSON.stringify(next.body), {
       status: next.status ?? 200,
-      headers: {
-        "content-type": next.contentType ?? "application/json",
-        ...next.headers,
-      },
+      headers: { "content-type": next.contentType ?? "application/json" },
     });
     if (next.redirected) {
       Object.defineProperty(response, "redirected", { value: true });
@@ -58,644 +50,326 @@ function fetchSequence(replies: Array<MockReply | Error>): typeof fetch {
   }) as unknown as typeof fetch;
 }
 
-const abortableRequest = (signal?: AbortSignal | null): Promise<Response> =>
-  new Promise((_resolve, reject) =>
-    signal?.addEventListener("abort", () => reject(signal.reason)),
-  );
-
-function advancingDependencies(
-  replies: Array<MockReply | Error>,
-  initialNow = 1_000,
-): IAuthClientDependencies & { fetch: typeof fetch; now: () => number } {
-  let now = initialNow;
-  return {
-    fetch: fetchSequence(replies),
-    now: () => now,
-    sleep: vi.fn(async (milliseconds: number) => {
-      now += milliseconds;
-    }),
-  };
+function setUrl(path: string): void {
+  window.history.replaceState({}, "", path);
 }
 
 beforeEach(() => {
-  document
-    .querySelectorAll(".csDeviceCodeOverlay")
-    .forEach((node) => node.remove());
   localStorage.clear();
   sessionStorage.clear();
+  setUrl("/lite/lab/");
 });
 
-describe("AuthClient device-code broker flow", () => {
-  it("uses only cs-control start and poll shapes and retains unexpired credentials", async () => {
-    const dependencies = advancingDependencies([
-      { body: deviceAuthorization },
-      { status: 202, body: { status: "pending", intervalSeconds: 1 } },
-      { status: 202, body: { status: "pending", intervalSeconds: 6 } },
-      { body: tokens },
-    ]);
-    const auth = new AuthClient(controlApiUrl, dependencies);
+describe("AuthClient interactive sign-in", () => {
+  it("builds the authorize URL from cs-control's config and stores state and verifier", async () => {
+    const navigate = vi.fn();
+    const auth = new AuthClient(controlApiUrl, {
+      fetch: fetchSequence([{ body: config }]),
+      navigate,
+    });
 
-    await expect(auth.acquireToken()).rejects.toBeInstanceOf(
-      AuthInteractionRequiredError,
+    await auth.interactiveLogin();
+
+    expect(navigate).toHaveBeenCalledTimes(1);
+    const url = new URL(navigate.mock.calls[0][0]);
+    expect(url.origin + url.pathname).toBe(config.authorizationEndpoint);
+    expect(url.searchParams.get("response_type")).toBe("code");
+    expect(url.searchParams.get("client_id")).toBe(config.clientId);
+    expect(url.searchParams.get("scope")).toBe(config.scope);
+    expect(url.searchParams.get("redirect_uri")).toBe(
+      "http://localhost:3000/lite/lab/",
     );
-    await expect(auth.interactiveLogin()).resolves.toEqual(resolvedCredentials);
-    await expect(auth.acquireToken()).resolves.toEqual(resolvedCredentials);
+    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
+    const state = url.searchParams.get("state")!;
+    const challenge = url.searchParams.get("code_challenge")!;
+    expect(state).toBeTruthy();
+    expect(challenge).toBeTruthy();
 
-    expect(dependencies.sleep).toHaveBeenCalledTimes(3);
-    expect(
-      vi.mocked(dependencies.sleep!).mock.calls.map(([wait]) => wait),
-    ).toEqual([1000, 1000, 6000]);
-    const calls = vi.mocked(dependencies.fetch).mock.calls;
-    expect(calls.map(([url]) => String(url))).toEqual([
-      "https://control.example.edu/api/v1/oauth/device/start",
-      `https://control.example.edu/api/v1/oauth/device/poll/${deviceAuthorization.handle}`,
-      `https://control.example.edu/api/v1/oauth/device/poll/${deviceAuthorization.handle}`,
-      `https://control.example.edu/api/v1/oauth/device/poll/${deviceAuthorization.handle}`,
-    ]);
-    for (const [index, [, init]] of calls.entries()) {
-      expect(init).toMatchObject({
-        method: "POST",
-        cache: "no-store",
-        credentials: "omit",
-        redirect: "error",
-        referrerPolicy: "no-referrer",
-      });
-      expect(init?.body).toBe(
-        index === 0 ? '{"provider":"microsoft"}' : undefined,
+    const pending = JSON.parse(
+      sessionStorage.getItem("cybershuttle.oauth.pkce.v1")!,
+    );
+    expect(pending.state).toBe(state);
+    expect(pending.redirectUri).toBe("http://localhost:3000/lite/lab/");
+    const expectedChallenge = await crypto.subtle
+      .digest("SHA-256", new TextEncoder().encode(pending.verifier))
+      .then((digest) =>
+        btoa(String.fromCharCode(...new Uint8Array(digest)))
+          .replace(/\+/g, "-")
+          .replace(/\//g, "_")
+          .replace(/=+$/, ""),
       );
-    }
-    expect(calls.map(([url]) => String(url)).join(" ")).not.toContain(
-      "microsoftonline.com",
+    expect(challenge).toBe(expectedChallenge);
+  });
+});
+
+describe("AuthClient callback exchange", () => {
+  function seedPending(state: string, verifier = "verifier-value"): void {
+    sessionStorage.setItem(
+      "cybershuttle.oauth.pkce.v1",
+      JSON.stringify({
+        state,
+        verifier,
+        redirectUri: "http://localhost:3000/lite/lab/",
+      }),
     );
+  }
+
+  it("returns to the page the sign-in left, query included", async () => {
+    sessionStorage.setItem(
+      "cybershuttle.oauth.pkce.v1",
+      JSON.stringify({
+        state: "s",
+        verifier: "v",
+        redirectUri: "http://localhost:3000/lite/lab/",
+        returnTo:
+          "http://localhost:3000/lite/lab/?session=s-abc&workspace=s-abc",
+      }),
+    );
+    setUrl("/lite/lab/?code=auth-code&state=s");
+    const auth = new AuthClient(controlApiUrl, {
+      fetch: fetchSequence([
+        { body: { idToken: jwt({ sub: "x" }), expiresInSeconds: 900 } },
+      ]),
+    });
+    await auth.acquireToken();
+    expect(window.location.search).toBe("?session=s-abc&workspace=s-abc");
   });
 
-  it("signs in with GitHub through the broker and names the account by its login", async () => {
-    const dependencies = advancingDependencies([
-      {
-        body: {
-          ...deviceAuthorization,
-          verificationUri: "https://github.com/login/device",
-        },
-      },
-      {
-        body: {
-          status: "complete",
-          scheme: "github",
-          accessToken: "gho_token",
-          expiresInSeconds: 86400,
-        },
-      },
-      { body: { id: 17297498, login: "yasithdev" } },
-    ]);
+  it("exchanges the code for a credential and strips the query", async () => {
+    seedPending("matching-state");
+    setUrl("/lite/lab/?code=auth-code&state=matching-state");
+    const idToken = jwt({ email: "user@example.edu" });
+    const dependencies: IAuthClientDependencies = {
+      fetch: fetchSequence([
+        { body: { idToken, refreshToken: "refresh-1", expiresInSeconds: 900 } },
+      ]),
+    };
     const auth = new AuthClient(controlApiUrl, dependencies);
-    await expect(auth.interactiveLogin("github")).resolves.toEqual({
-      scheme: "github",
-      accessToken: "gho_token",
-    });
-    expect(auth.account).toBe("yasithdev");
-    const calls = vi.mocked(dependencies.fetch).mock.calls;
-    expect(calls[0][1]?.body).toBe('{"provider":"github"}');
-    expect(String(calls[2][0])).toBe("https://api.github.com/user");
-    expect(new Headers(calls[2][1]?.headers).get("Authorization")).toBe(
-      "Bearer gho_token",
-    );
+
+    await expect(auth.acquireToken()).resolves.toEqual({ idToken });
+    expect(auth.account).toBe("user@example.edu");
+    expect(window.location.search).toBe("");
+    expect(sessionStorage.getItem("cybershuttle.oauth.pkce.v1")).toBeNull();
     expect(
       JSON.parse(sessionStorage.getItem("cybershuttle.oauth.v1")!),
-    ).toMatchObject({
-      scheme: "github",
-      account: "yasithdev",
+    ).toMatchObject({ idToken, refreshToken: "refresh-1" });
+
+    const [url, init] = vi.mocked(dependencies.fetch!).mock.calls[0];
+    expect(String(url)).toBe(`${controlApiUrl}/oauth/exchange`);
+    expect(JSON.parse(String(init?.body))).toEqual({
+      code: "auth-code",
+      codeVerifier: "verifier-value",
+      redirectUri: "http://localhost:3000/lite/lab/",
     });
-    expect(new AuthClient(controlApiUrl, dependencies).account).toBe(
-      "yasithdev",
+  });
+
+  it("rejects a state mismatch and leaves the caller unauthenticated", async () => {
+    seedPending("expected-state");
+    setUrl("/lite/lab/?code=auth-code&state=wrong-state");
+    const auth = new AuthClient(controlApiUrl, { fetch: fetchSequence([]) });
+
+    await expect(auth.acquireToken()).rejects.toThrow("state did not match");
+  });
+
+  it("rejects a callback with no sign-in in progress", async () => {
+    setUrl("/lite/lab/?code=auth-code&state=some-state");
+    const auth = new AuthClient(controlApiUrl, { fetch: fetchSequence([]) });
+
+    await expect(auth.acquireToken()).rejects.toThrow(
+      "No sign-in was in progress",
     );
   });
+});
 
-  it("keeps polling on a 429 rate limit, honoring Retry-After above the broker interval", async () => {
-    const dependencies = advancingDependencies([
-      { body: { ...deviceAuthorization, intervalSeconds: 1 } },
-      {
-        status: 429,
-        body: { error: { code: "rate_limited" } },
-        headers: { "Retry-After": "3" },
-      },
-      { body: tokens },
-    ]);
-    const auth = new AuthClient(controlApiUrl, dependencies);
-
-    await expect(auth.interactiveLogin()).resolves.toEqual(resolvedCredentials);
-    expect(
-      vi.mocked(dependencies.sleep!).mock.calls.map(([wait]) => wait),
-    ).toEqual([1000, 3000]);
-  });
-
-  it.each(["0.001", "1"])(
-    "never lets a Retry-After of %s drop the interval below the broker's own",
-    async (retryAfter) => {
-      const dependencies = advancingDependencies([
-        { body: { ...deviceAuthorization, intervalSeconds: 5 } },
-        {
-          status: 429,
-          body: { error: { code: "rate_limited" } },
-          headers: { "Retry-After": retryAfter },
-        },
-        { body: tokens },
-      ]);
-      const auth = new AuthClient(controlApiUrl, dependencies);
-
-      await expect(auth.interactiveLogin()).resolves.toEqual(
-        resolvedCredentials,
-      );
-      expect(
-        vi.mocked(dependencies.sleep!).mock.calls.map(([wait]) => wait),
-      ).toEqual([5000, 5000]);
-    },
-  );
-
-  it("retries a rate-limited device authorization start once, honoring Retry-After", async () => {
-    const dependencies = advancingDependencies([
-      {
-        status: 429,
-        body: { error: { code: "rate_limited" } },
-        headers: { "Retry-After": "2" },
-      },
-      { body: deviceAuthorization },
-      { body: tokens },
-    ]);
-    const auth = new AuthClient(controlApiUrl, dependencies);
-
-    await expect(auth.interactiveLogin()).resolves.toEqual(resolvedCredentials);
-    expect(vi.mocked(dependencies.sleep!).mock.calls[0]?.[0]).toBe(2000);
-  });
-
-  it("surfaces a rate limit that persists past the one retry as a clear message", async () => {
-    const dependencies = advancingDependencies([
-      {
-        status: 429,
-        body: { error: { code: "rate_limited" } },
-        headers: { "Retry-After": "2" },
-      },
-      {
-        status: 429,
-        body: { error: { code: "rate_limited" } },
-        headers: { "Retry-After": "2" },
-      },
-    ]);
-    const auth = new AuthClient(controlApiUrl, dependencies);
-
-    await expect(auth.interactiveLogin()).rejects.toThrow("try again in 2s");
-  });
-
-  it("requires another explicit interaction after in-memory credentials expire", async () => {
+describe("AuthClient token refresh", () => {
+  it("refreshes a credential within a minute of expiry", async () => {
     let now = 0;
-    const dependencies = advancingDependencies(
-      [
-        { body: deviceAuthorization },
-        { body: { ...tokens, expiresInSeconds: 2 } },
-      ],
-      now,
+    const idToken = jwt({ sub: "owner" });
+    const refreshed = jwt({ sub: "owner" });
+    sessionStorage.setItem(
+      "cybershuttle.oauth.v1",
+      JSON.stringify({
+        idToken,
+        refreshToken: "refresh-old",
+        expiresAt: 30_000,
+      }),
+    );
+    const dependencies: IAuthClientDependencies = {
+      fetch: fetchSequence([
+        {
+          body: {
+            idToken: refreshed,
+            refreshToken: "refresh-new",
+            expiresInSeconds: 900,
+          },
+        },
+      ]),
+      now: () => now,
+    };
+    const auth = new AuthClient(controlApiUrl, dependencies);
+
+    await expect(auth.acquireToken()).resolves.toEqual({ idToken: refreshed });
+    const [url, init] = vi.mocked(dependencies.fetch!).mock.calls[0];
+    expect(String(url)).toBe(`${controlApiUrl}/oauth/refresh`);
+    expect(JSON.parse(String(init?.body))).toEqual({
+      refreshToken: "refresh-old",
+    });
+    expect(
+      JSON.parse(sessionStorage.getItem("cybershuttle.oauth.v1")!),
+    ).toMatchObject({ idToken: refreshed, refreshToken: "refresh-new" });
+  });
+
+  it("keeps serving the still-valid token when a refresh attempt fails", async () => {
+    const idToken = jwt({ sub: "owner" });
+    sessionStorage.setItem(
+      "cybershuttle.oauth.v1",
+      JSON.stringify({
+        idToken,
+        refreshToken: "refresh-old",
+        expiresAt: 30_000,
+      }),
     );
     const auth = new AuthClient(controlApiUrl, {
-      ...dependencies,
-      now: () => now,
-      sleep: async (milliseconds) => {
-        now += milliseconds;
-      },
+      fetch: fetchSequence([new TypeError("network unavailable")]),
+      now: () => 0,
     });
-    await auth.interactiveLogin();
-    now += 2000;
+
+    await expect(auth.acquireToken()).resolves.toEqual({ idToken });
+  });
+
+  it("requires interaction once an unrefreshable credential fully expires", async () => {
+    const idToken = jwt({ sub: "owner" });
+    sessionStorage.setItem(
+      "cybershuttle.oauth.v1",
+      JSON.stringify({ idToken, expiresAt: 1_000 }),
+    );
+    const auth = new AuthClient(controlApiUrl, {
+      fetch: fetchSequence([]),
+      now: () => 2_000,
+    });
+
     await expect(auth.acquireToken()).rejects.toBeInstanceOf(
       AuthInteractionRequiredError,
     );
-    expect(vi.mocked(dependencies.fetch)).toHaveBeenCalledTimes(2);
+    expect(sessionStorage.getItem("cybershuttle.oauth.v1")).toBeNull();
   });
+});
 
-  it("shows the unchanged accessible modal and cancels broker polling", async () => {
-    let observedSignal: AbortSignal | undefined;
-    const clipboard = vi.fn(async () => undefined);
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: { writeText: clipboard },
-    });
+describe("AuthClient account claim", () => {
+  it.each([
+    [
+      { email: "person@example.edu", name: "Person", sub: "abc" },
+      "person@example.edu",
+    ],
+    [{ name: "Person", sub: "abc" }, "Person"],
+    [{ sub: "abc" }, "abc"],
+    [{}, undefined],
+  ] as const)("prefers email, then name, then sub: %j", (claims, expected) => {
+    sessionStorage.setItem(
+      "cybershuttle.oauth.v1",
+      JSON.stringify({ idToken: jwt(claims), expiresAt: 3_600_000 }),
+    );
     const auth = new AuthClient(controlApiUrl, {
-      fetch: fetchSequence([{ body: deviceAuthorization }]),
-      sleep: (_milliseconds, signal) =>
-        new Promise((_resolve, reject) => {
-          observedSignal = signal;
-          signal.addEventListener(
-            "abort",
-            () => reject(new DOMException("Aborted", "AbortError")),
-            { once: true },
-          );
-        }),
+      fetch: fetchSequence([]),
+      now: () => 0,
     });
-
-    const login = auth.interactiveLogin();
-    await vi.waitFor(() =>
-      expect(document.querySelector("dialog")).not.toBeNull(),
-    );
-    const dialog = document.querySelector("dialog")!;
-    expect(dialog.open).toBe(true);
-    expect(dialog.getAttribute("aria-labelledby")).toBeTruthy();
-    expect(dialog.getAttribute("aria-describedby")).toBeTruthy();
-    expect(dialog.textContent).toContain("ABCD-EFGH");
-    const open = dialog.querySelector("a") as HTMLAnchorElement;
-    expect(open.href).toBe("https://microsoft.com/devicelogin");
-    expect(open.target).toBe("_blank");
-    expect(open.rel).toContain("noopener");
-    expect(document.activeElement).toBe(open);
-
-    open.click();
-    expect(open.textContent).toContain("Waiting");
-    expect(open.querySelector(".csSpinner")).not.toBeNull();
-
-    const copy = dialog.querySelector<HTMLButtonElement>(".csDeviceCodeCopy")!;
-    expect(copy.getAttribute("aria-label")).toBe("Copy code");
-    copy.click();
-    await vi.waitFor(() => expect(clipboard).toHaveBeenCalledWith("ABCD-EFGH"));
-    await vi.waitFor(() =>
-      expect(copy.getAttribute("aria-label")).toBe("Code copied"),
-    );
-    expect(copy.classList.contains("csDeviceCodeCopied")).toBe(true);
-
-    const close = dialog.querySelector<HTMLButtonElement>(".csDialogClose")!;
-    expect(close.getAttribute("aria-label")).toBe("Close");
-    close.click();
-    await expect(login).rejects.toThrow("Microsoft sign-in was cancelled.");
-    expect(observedSignal?.aborted).toBe(true);
-    expect(document.querySelector("dialog")).toBeNull();
-  });
-
-  it.each([
-    {
-      name: "denial",
-      replies: [
-        { body: deviceAuthorization },
-        {
-          status: 403,
-          body: {
-            error: {
-              code: "authorization_denied",
-              message: "authorization was denied",
-            },
-          },
-        },
-      ] as MockReply[],
-      message: "denied",
-    },
-    {
-      name: "network failure",
-      replies: [
-        { body: deviceAuthorization },
-        new TypeError("network unavailable"),
-      ] as Array<MockReply | Error>,
-      message: "network unavailable",
-    },
-  ])("reports $name and removes the modal", async ({ replies, message }) => {
-    const dependencies = advancingDependencies(replies);
-    await expect(
-      new AuthClient(controlApiUrl, dependencies).interactiveLogin(),
-    ).rejects.toThrow(message);
-    expect(document.querySelector("dialog")).toBeNull();
-  });
-
-  it("gives up when the broker keeps answering pending past the code's life", async () => {
-    let calls = 0;
-    let now = 1_000;
-    const fetch = vi.fn(async () => {
-      if (++calls > 20) throw new Error("polled past the device code's life");
-      const start = calls === 1;
-      return new Response(
-        JSON.stringify(
-          start
-            ? {
-                ...deviceAuthorization,
-                expiresInSeconds: 10,
-                intervalSeconds: 5,
-              }
-            : { status: "pending", intervalSeconds: 5 },
-        ),
-        {
-          status: start ? 200 : 202,
-          headers: { "content-type": "application/json" },
-        },
-      );
-    }) as unknown as typeof globalThis.fetch;
-
-    await expect(
-      new AuthClient(controlApiUrl, {
-        fetch,
-        now: () => now,
-        sleep: async (milliseconds) => void (now += milliseconds),
-      }).interactiveLogin(),
-    ).rejects.toThrow("expired");
-    expect(calls).toBe(3);
-    expect(document.querySelector("dialog")).toBeNull();
-  });
-
-  it("stops reading a broker body at the cap instead of buffering it whole", async () => {
-    let produced = 0;
-    const fetch = vi.fn(
-      async () =>
-        new Response(
-          new ReadableStream({
-            pull(controller) {
-              produced += 64 * 1024;
-              controller.enqueue(new Uint8Array(64 * 1024));
-              if (produced >= 4_000_000) controller.close();
-            },
-          }),
-          { headers: { "content-type": "application/json" } },
-        ),
-    ) as unknown as typeof globalThis.fetch;
-
-    await expect(
-      new AuthClient(controlApiUrl, { fetch }).interactiveLogin(),
-    ).rejects.toThrow("oversized");
-    expect(produced).toBeLessThan(1_000_000);
-  });
-
-  it("leaves no abort listener behind for the intervals it sleeps", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(0);
-    const added = vi.spyOn(AbortSignal.prototype, "addEventListener");
-    const removed = vi.spyOn(AbortSignal.prototype, "removeEventListener");
-    const abortListeners = (spy: typeof added): number =>
-      spy.mock.calls.filter((call) => call[0] === "abort").length;
-    try {
-      const login = new AuthClient(controlApiUrl, {
-        fetch: fetchSequence([
-          { body: deviceAuthorization },
-          { status: 202, body: { status: "pending", intervalSeconds: 1 } },
-          { status: 202, body: { status: "pending", intervalSeconds: 1 } },
-          { body: tokens },
-        ]),
-      }).interactiveLogin();
-      await vi.advanceTimersByTimeAsync(5_000);
-      await login;
-      expect(abortListeners(added)).toBe(3);
-      expect(abortListeners(removed)).toBe(3);
-    } finally {
-      added.mockRestore();
-      removed.mockRestore();
-      vi.useRealTimers();
-    }
-  });
-
-  it("times out a start request without reporting explicit cancellation", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(0);
-    try {
-      let requestSignal: AbortSignal | undefined;
-      const fetch = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
-        requestSignal = init?.signal as AbortSignal;
-        return abortableRequest(requestSignal);
-      }) as unknown as typeof globalThis.fetch;
-      const login = new AuthClient(controlApiUrl, { fetch }).interactiveLogin();
-      const rejection = expect(login).rejects.toThrow(
-        "device authorization request timed out",
-      );
-
-      await vi.advanceTimersByTimeAsync(15_000);
-
-      await rejection;
-      expect(requestSignal?.aborted).toBe(true);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("aborts a never-resolving poll at the per-request bound", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(0);
-    try {
-      let pollSignal: AbortSignal | undefined;
-      const fetch = vi
-        .fn()
-        .mockResolvedValueOnce(
-          new Response(JSON.stringify(deviceAuthorization), {
-            headers: { "content-type": "application/json" },
-          }),
-        )
-        .mockImplementationOnce(
-          (_input: RequestInfo | URL, init?: RequestInit) => {
-            pollSignal = init?.signal as AbortSignal;
-            return abortableRequest(pollSignal);
-          },
-        ) as unknown as typeof globalThis.fetch;
-      const login = new AuthClient(controlApiUrl, { fetch }).interactiveLogin();
-      const rejection = expect(login).rejects.toThrow("poll request timed out");
-
-      await vi.advanceTimersByTimeAsync(1_000);
-      expect(fetch).toHaveBeenCalledTimes(2);
-      await vi.advanceTimersByTimeAsync(15_000);
-
-      await rejection;
-      expect(pollSignal?.aborted).toBe(true);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it.each(["application/json", " Application/JSON ; charset=UTF-8"])(
-    "accepts the exact JSON media type with parameters: %s",
-    async (contentType) => {
-      const dependencies = advancingDependencies([
-        { body: deviceAuthorization, contentType },
-        { body: tokens, contentType },
-      ]);
-
-      await expect(
-        new AuthClient(controlApiUrl, dependencies).interactiveLogin(),
-      ).resolves.toEqual(resolvedCredentials);
-    },
-  );
-
-  it.each(["application/jsonp", "application/json-patch+json", "text/json"])(
-    "rejects non-JSON media type %s",
-    async (contentType) => {
-      await expect(
-        new AuthClient(controlApiUrl, {
-          fetch: fetchSequence([{ body: deviceAuthorization, contentType }]),
-        }).interactiveLogin(),
-      ).rejects.toThrow("invalid device response");
-    },
-  );
-
-  it.each([
-    ["zero expiry", { expiresInSeconds: 0 }],
-    ["fractional expiry", { expiresInSeconds: 1.5 }],
-    ["expiry above maximum", { expiresInSeconds: 3601 }],
-    ["zero interval", { intervalSeconds: 0 }],
-    ["fractional interval", { intervalSeconds: 1.5 }],
-    ["interval above maximum", { intervalSeconds: 61 }],
-  ])("rejects a start response with %s", async (_name, replacement) => {
-    await expect(
-      new AuthClient(controlApiUrl, {
-        fetch: fetchSequence([
-          { body: { ...deviceAuthorization, ...replacement } },
-        ]),
-      }).interactiveLogin(),
-    ).rejects.toThrow("invalid device authorization");
-  });
-
-  it.each([0, 1.5, 86401])(
-    "rejects success expiry %s",
-    async (expiresInSeconds) => {
-      const dependencies = advancingDependencies([
-        { body: deviceAuthorization },
-        { body: { ...tokens, expiresInSeconds } },
-      ]);
-      await expect(
-        new AuthClient(controlApiUrl, dependencies).interactiveLogin(),
-      ).rejects.toThrow("token response was invalid");
-    },
-  );
-
-  it.each([0, 1.5, 61])(
-    "rejects pending interval %s",
-    async (intervalSeconds) => {
-      const dependencies = advancingDependencies([
-        { body: deviceAuthorization },
-        { status: 202, body: { status: "pending", intervalSeconds } },
-      ]);
-      await expect(
-        new AuthClient(controlApiUrl, dependencies).interactiveLogin(),
-      ).rejects.toThrow("invalid pending response");
-    },
-  );
-
-  it("accepts maximum start, interval, and success expiry values", async () => {
-    const dependencies = advancingDependencies([
-      {
-        body: {
-          ...deviceAuthorization,
-          expiresInSeconds: 3600,
-          intervalSeconds: 60,
-        },
-      },
-      { body: { ...tokens, expiresInSeconds: 86400 } },
-    ]);
-
-    await expect(
-      new AuthClient(controlApiUrl, dependencies).interactiveLogin(),
-    ).resolves.toEqual(resolvedCredentials);
-    expect(dependencies.sleep).toHaveBeenCalledWith(
-      60_000,
-      expect.any(AbortSignal),
-    );
-  });
-
-  it("strictly rejects redirects, non-JSON, extra fields, and unsafe control URLs", async () => {
-    expect(
-      () => new AuthClient("https://secret@control.example/api/v1"),
-    ).toThrow("invalid");
-    expect(() => new AuthClient("http://control.example/api/v1")).toThrow(
-      "invalid",
-    );
-
-    for (const reply of [
-      { body: deviceAuthorization, redirected: true },
-      { body: deviceAuthorization, contentType: "text/plain" },
-      { body: { ...deviceAuthorization, deviceCode: "must-not-be-exposed" } },
-    ]) {
-      await expect(
-        new AuthClient(controlApiUrl, {
-          fetch: fetchSequence([reply]),
-        }).interactiveLogin(),
-      ).rejects.toThrow("invalid");
-    }
-  });
-
-  it("keeps OAuth credentials out of local storage, URLs, and logs", async () => {
-    const originalUrl = window.location.href;
-    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const error = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
-    const dependencies = advancingDependencies([
-      { body: deviceAuthorization },
-      { body: tokens },
-    ]);
-
-    const result = await new AuthClient(
-      controlApiUrl,
-      dependencies,
-    ).interactiveLogin();
-
-    expect(result).toEqual(resolvedCredentials);
-    expect(localStorage.length).toBe(0);
-    expect(sessionStorage.getItem("cybershuttle.oauth.v1")).toContain(
-      "access-token",
-    );
-    expect(window.location.href).toBe(originalUrl);
-    expect(
-      vi
-        .mocked(dependencies.fetch)
-        .mock.calls.map(([url]) => String(url))
-        .join(" "),
-    ).not.toMatch(/access-token|id-token/);
-    expect(log).not.toHaveBeenCalled();
-    expect(warn).not.toHaveBeenCalled();
-    expect(error).not.toHaveBeenCalled();
-    log.mockRestore();
-    warn.mockRestore();
-    error.mockRestore();
+    expect(auth.account).toBe(expected);
   });
 });
 
 describe("AuthClient credential persistence", () => {
   it.each([
-    {
-      name: "no id token",
-      record: { scheme: "Bearer", accessToken: "a", expiresAt: 3_600_000 },
-    },
+    { name: "no id token", record: { expiresAt: 3_600_000 } },
     {
       name: "a non-string id token",
-      record: {
-        scheme: "Bearer",
-        accessToken: "a",
-        idToken: 12345,
-        expiresAt: 3_600_000,
-      },
+      record: { idToken: 12345, expiresAt: 3_600_000 },
     },
-    {
-      name: "no access token",
-      record: { token: "legacy", expiresAt: 3_600_000 },
-    },
+    { name: "an expired record", record: { idToken: "x", expiresAt: 0 } },
   ])("refuses a stored record with $name", async ({ record }) => {
     sessionStorage.setItem("cybershuttle.oauth.v1", JSON.stringify(record));
-    const client = new AuthClient(controlApiUrl, {
+    const auth = new AuthClient(controlApiUrl, {
       fetch: fetchSequence([]),
       now: () => 1_000,
     });
-    expect(client.account).toBeUndefined();
-    await expect(client.acquireToken()).rejects.toBeInstanceOf(
+    expect(auth.account).toBeUndefined();
+    await expect(auth.acquireToken()).rejects.toBeInstanceOf(
       AuthInteractionRequiredError,
     );
-    expect(sessionStorage.getItem("cybershuttle.oauth.v1")).toBeNull();
   });
 
-  it("restores an unexpired credential into a fresh client and drops it on expiry", async () => {
-    const dependencies = advancingDependencies([
-      { body: deviceAuthorization },
-      { body: tokens },
-    ]);
-    const signedIn = new AuthClient(controlApiUrl, dependencies);
-    await signedIn.interactiveLogin();
-
-    const reloaded = new AuthClient(controlApiUrl, {
+  it("restores an unexpired credential into a fresh client", async () => {
+    const idToken = jwt({ email: "person@example.edu" });
+    sessionStorage.setItem(
+      "cybershuttle.oauth.v1",
+      JSON.stringify({ idToken, expiresAt: 3_600_000 }),
+    );
+    const auth = new AuthClient(controlApiUrl, {
       fetch: fetchSequence([]),
-      now: dependencies.now,
+      now: () => 1_000,
     });
-    await expect(reloaded.acquireToken()).resolves.toEqual(resolvedCredentials);
+    await expect(auth.acquireToken()).resolves.toEqual({ idToken });
+    expect(auth.account).toBe("person@example.edu");
+  });
 
-    const expired = new AuthClient(controlApiUrl, {
+  it("invalidates the credential and clears session storage", async () => {
+    sessionStorage.setItem(
+      "cybershuttle.oauth.v1",
+      JSON.stringify({ idToken: jwt({ sub: "x" }), expiresAt: 3_600_000 }),
+    );
+    const auth = new AuthClient(controlApiUrl, {
       fetch: fetchSequence([]),
-      now: () => dependencies.now() + 60_000,
+      now: () => 0,
     });
-    await expect(expired.acquireToken()).rejects.toBeInstanceOf(
+    auth.invalidateToken();
+    expect(sessionStorage.getItem("cybershuttle.oauth.v1")).toBeNull();
+    await expect(auth.acquireToken()).rejects.toBeInstanceOf(
       AuthInteractionRequiredError,
+    );
+  });
+});
+
+describe("AuthClient response validation", () => {
+  it("rejects a redirected, non-JSON, or malformed exchange response", async () => {
+    sessionStorage.setItem(
+      "cybershuttle.oauth.pkce.v1",
+      JSON.stringify({
+        state: "s",
+        verifier: "v",
+        redirectUri: "http://localhost:3000/lite/lab/",
+      }),
+    );
+    setUrl("/lite/lab/?code=c&state=s");
+    for (const reply of [
+      { body: { idToken: "x", expiresInSeconds: 900 }, redirected: true },
+      {
+        body: { idToken: "x", expiresInSeconds: 900 },
+        contentType: "text/plain",
+      },
+      { body: { expiresInSeconds: 900 } },
+      { body: { idToken: "x", expiresInSeconds: 0 } },
+    ]) {
+      sessionStorage.setItem(
+        "cybershuttle.oauth.pkce.v1",
+        JSON.stringify({
+          state: "s",
+          verifier: "v",
+          redirectUri: "http://localhost:3000/lite/lab/",
+        }),
+      );
+      setUrl("/lite/lab/?code=c&state=s");
+      const auth = new AuthClient(controlApiUrl, {
+        fetch: fetchSequence([reply]),
+      });
+      await expect(auth.acquireToken()).rejects.toThrow(/invalid/i);
+    }
+  });
+
+  it("rejects unsafe control URLs", () => {
+    expect(
+      () => new AuthClient("https://secret@control.example/api/v1"),
+    ).toThrow("invalid");
+    expect(() => new AuthClient("http://control.example/api/v1")).toThrow(
+      "invalid",
     );
   });
 });

@@ -9,8 +9,8 @@ own machine before they can sign in.
 - Somewhere to serve static files over HTTPS. Any path works; the build uses relative URLs
   (`base_url` is empty in `jupyter_lite_config.json`).
 - Each user runs [cs-control](https://github.com/cyber-shuttle/cs-control) (`csctl serve`) on their own
-  machine; it listens on loopback only. They pass this site's origin as `--allowed-origin`, and the Microsoft
-  Entra authority is configured there rather than here.
+  machine; it listens on loopback only. They pass this site's origin as `--allowed-origin`; the CILogon client and
+  the Custos URL are configured there rather than here.
 - cs-control must be able to hand out `*.devtunnels.ms` Jupyter origins for the sessions it creates. This
   client rejects anything else, and the rule is not configurable.
 
@@ -51,14 +51,15 @@ one entry and rejects `*`. Without a matching entry the browser blocks sign-in a
 command they run:
 
 ```bash
-csctl serve \
-  --oauth-authority https://login.microsoftonline.com/<tenant>/ \
+CSCTL_OIDC_CLIENT_SECRET=... csctl serve \
+  --oidc-client-id cilogon:/client_id/<id> \
+  --custos-url https://custos.example.edu \
   --allowed-origin https://jupyter.example.edu
 ```
 
 ## 4. Verify
 
-With `csctl serve` running, open the site. The title row shows **Sign in**; completing device-code sign-in
+With `csctl serve` running, open the site. The title row shows **Sign in**; completing CILogon sign-in
 lists the sessions cs-control holds for that account. Until a `READY` session
 is selected the file browser, kernels and terminals stay empty by design — see
 [ARCHITECTURE.md](ARCHITECTURE.md).

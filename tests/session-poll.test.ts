@@ -440,7 +440,7 @@ describe("conditional polling across sessions", () => {
 });
 
 describe("session resume", () => {
-  it("treats a restored credential as signed in without a device-code round trip", async () => {
+  it("treats a restored credential as signed in without repeating sign-in", async () => {
     const api = controlFake({
       resumeSignIn: vi.fn(async () => undefined),
     });

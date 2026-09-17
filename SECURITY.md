@@ -17,7 +17,7 @@ published.
 ## Scope
 
 This repository is the browser client. It authenticates nothing itself: cs-control validates every request,
-brokers Microsoft device-code sign-in and decides who may reach a session, so a finding about those
+finishes CILogon sign-in and decides who may reach a session, so a finding about those
 decisions belongs to that project rather than here.
 
 The invariants this client is responsible for; the mechanisms behind them are in

@@ -148,15 +148,10 @@ export function sessionListFixture(
   return { sessions, logs };
 }
 
-export function fakeAuth(accessToken = "delegated-token") {
-  const credentials = async () => ({
-    scheme: "Bearer" as const,
-    accessToken,
-    idToken: "identity-token",
-  });
+export function fakeAuth(idToken = "delegated-token") {
   return {
-    acquireToken: vi.fn(credentials),
-    interactiveLogin: vi.fn(credentials),
+    acquireToken: vi.fn(async () => ({ idToken })),
+    interactiveLogin: vi.fn(async () => undefined),
   } satisfies IControlAuth;
 }
 

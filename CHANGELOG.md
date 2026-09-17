@@ -7,10 +7,6 @@ All notable changes to CyberShuttle Jupyter are recorded here. The format follow
 
 ### Added
 
-- GitHub sign-in. Sign in opens a menu of Microsoft and GitHub, each with an icon. A GitHub sign-in runs
-  GitHub's device flow through cs-control, sends its one token under the `github` scheme, and names the
-  account by the GitHub login.
-
 - Login keys: SSH Keys, under the account menu, uploads a private key file under a name, lists the stored
   keys with type and fingerprint, and deletes one. The SSH Hosts form picks a stored key as a host's login
   key when adding or editing the host, and a host assigned a key signs in with it. The account menu items
@@ -67,11 +63,19 @@ All notable changes to CyberShuttle Jupyter are recorded here. The format follow
   contract.
 - **Breaking:** a session's and a run's `generation` field is now `seq`, a positive integer starting at 1 and
   incrementing on every start under the same session id, in place of the `g-<16 hex>` string. Session-access
-  and the JupyterLite page's own query carry `seq` the same way. The session detail dialog's "Generation" row
+  carries `seq` the same way. The session detail dialog's "Generation" row
   is now "Seq", showing `#<seq>`.
 - Every cs-control response shape is now validated with the same `Validator` vocabulary: a shared `vObject`
   rejects any key not in its field list, so an unrecognized field now fails the same way a missing or
   mistyped one already did, instead of passing through silently.
+- **Breaking:** sign-in is now CILogon's authorization-code flow with PKCE, finished by cs-control's
+  `/oauth/config`, `/oauth/exchange` and `/oauth/refresh` routes, in place of the Microsoft and GitHub
+  device-code brokers. Sign in is a single button; there is no provider choice. Every other request carries
+  only `Authorization: Bearer <ID token>` and the SSH auth WebSocket offers only `cybershuttle.v1` and
+  `bearer.<id token>`; the `X-CyberShuttle-Identity` header and the WebSocket's `identity.`/`github.`
+  subprotocols are gone. Sessions run over a Microsoft or GitHub Dev Tunnels account linked once through a
+  new **Dev Tunnels** dialog under the account menu, above SSH Keys; cs-control's `409 tunnel_link_required`
+  on session create or run-again reopens that dialog and retries the action once linked.
 
 ### Fixed
 

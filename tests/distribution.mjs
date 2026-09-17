@@ -21,16 +21,6 @@ assert.equal(
   "",
   "control endpoint must be deployment-configured",
 );
-for (const key of [
-  "cybershuttleClientId",
-  "cybershuttleAuthority",
-  "cybershuttleDevTunnelsScope",
-]) {
-  assert.ok(
-    !(key in config),
-    `OAuth client configuration must not be present: ${key}`,
-  );
-}
 assert.ok(
   !config.disabledExtensions.includes(
     "@jupyterlab/services-extension:server-settings",
@@ -41,6 +31,7 @@ for (const plugin of [
   "@jupyterlab/services-extension:service-manager",
   "@jupyterlab/services-extension:contents-manager",
   "@jupyterlab/terminal-extension:open-folder-in-terminal",
+  "@jupyterlite/services-extension:workspace-manager",
 ]) {
   assert.ok(
     config.disabledExtensions.includes(plugin),

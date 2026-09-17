@@ -1,9 +1,10 @@
 // A session's identity, on-screen state, and cached Jupyter access. Identity
-// in the URL is the sessionId and seq pair, or nothing, and displayState is
-// the one place that overlays a relaunching terminal session with SUBMITTING
-// for display. Jupyter access is cached per seq in sessionStorage, so a
-// restart's new seq cannot read a stale grant, and a valid Jupyter URI is a
-// Dev Tunnel forwarding root only, with no path, port or query.
+// in the URL is the sessionId or nothing; the attempt seq stays server-side
+// and arrives with the session record. displayState is the one place that
+// overlays a relaunching terminal session with SUBMITTING for display. Cached
+// Jupyter access carries the seq it was granted for, so a caller that knows
+// the live seq can refuse a stale grant, and a valid Jupyter URI is a Dev
+// Tunnel forwarding root only, with no path, port or query.
 import type { IMetricSample, IRun, ISession, SessionState } from "./Common";
 import {
   SESSION_ID,
@@ -18,26 +19,21 @@ import type { ISessionLogTail } from "./ControlClient";
 
 export function selectedSession(
   search = window.location.search,
-): { sessionId: string; seq: number } | undefined {
-  const query = new URLSearchParams(search);
-  const sessionId = query.get("session")?.trim() ?? "";
-  const seq = Number(query.get("seq"));
-  return SESSION_ID.test(sessionId) && isPositiveInteger(seq)
-    ? { sessionId, seq }
-    : undefined;
+): { sessionId: string } | undefined {
+  const sessionId = new URLSearchParams(search).get("session")?.trim() ?? "";
+  return SESSION_ID.test(sessionId) ? { sessionId } : undefined;
 }
 
 export function sessionLiteUrl(
   sessionId: string,
-  seq: number,
   documentPath?: string,
   location: Pick<Location, "href"> = window.location,
 ): string {
   const id = validSessionId(sessionId);
-  if (!isPositiveInteger(seq)) throw new Error("Invalid session seq.");
   const url = new URL(location.href);
   url.searchParams.set("session", id);
-  url.searchParams.set("seq", String(seq));
+  url.searchParams.delete("seq");
+  url.searchParams.set("workspace", id);
   documentPath
     ? url.searchParams.set("path", documentPath)
     : url.searchParams.delete("path");
@@ -153,15 +149,17 @@ export function cacheSessionAccess(access: ISessionAccess): void {
 
 export function loadSessionAccess(
   sessionId: string,
-  seq: number,
+  seq?: number,
 ): ISessionAccess | undefined {
-  if (!isPositiveInteger(seq)) return undefined;
   const key = accessCacheKey(sessionId);
   const raw = sessionStorage.getItem(key);
   if (!raw) return undefined;
   try {
     const access = validateSessionAccess(JSON.parse(raw));
-    if (access.sessionId !== sessionId || access.seq !== seq) {
+    if (
+      access.sessionId !== sessionId ||
+      (seq !== undefined && access.seq !== seq)
+    ) {
       sessionStorage.removeItem(key);
       return undefined;
     }

@@ -9,14 +9,9 @@ import {
   clearSessionAccess,
   getActiveSessionId,
   loadSessionAccess,
-  selectedSession,
 } from "./session";
 
-type SessionDestination = (
-  sessionId: string,
-  seq: number,
-  documentPath?: string,
-) => string;
+type SessionDestination = (sessionId: string, documentPath?: string) => string;
 
 interface IDocumentContextLike {
   path?: string;
@@ -45,11 +40,7 @@ export class SessionController {
     if (session.state !== "READY") {
       throw new Error("Session must be READY.");
     }
-    if (
-      session.id === getActiveSessionId() &&
-      session.seq === selectedSession()?.seq
-    )
-      return;
+    if (session.id === getActiveSessionId()) return;
     if (!loadSessionAccess(session.id, session.seq)) {
       throw new Error("Jupyter access is not available for selection.");
     }
@@ -81,7 +72,7 @@ export class SessionController {
     if (previous && previous !== session.id) {
       clearSessionAccess(previous);
     }
-    this._navigate(this._destination(session.id, session.seq, documentPath));
+    this._navigate(this._destination(session.id, documentPath));
   }
 
   private _activeDocumentContext(): IDocumentContextLike | undefined {
