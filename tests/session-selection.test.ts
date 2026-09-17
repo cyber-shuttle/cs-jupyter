@@ -228,11 +228,7 @@ describe("serialized session selection", () => {
   it.each(["target access", "target select", "save-all"] as const)(
     "retains the active session when %s fails",
     async (failure) => {
-      window.history.replaceState(
-        {},
-        "",
-        `/lite/lab/?session=${active.id}&seq=${active.seq}`,
-      );
+      window.history.replaceState({}, "", `/lite/lab/?session=${active.id}`);
       const { panel, api, navigate, execute } = harness(
         [first, second],
         async (id) => (id === first.id ? first : second),
@@ -282,11 +278,7 @@ describe("serialized session selection", () => {
   it.each(["terminal snapshot", "seq change", "session stop"] as const)(
     "cancels deferred save-all selection at the %s boundary",
     async (boundary) => {
-      window.history.replaceState(
-        {},
-        "",
-        `/lite/lab/?session=${active.id}&seq=${active.seq}`,
-      );
+      window.history.replaceState({}, "", `/lite/lab/?session=${active.id}`);
       const save = Promise.withResolvers<void>();
       const { panel, navigate, execute } = harness(
         [active, first],
@@ -320,11 +312,7 @@ describe("serialized session selection", () => {
   );
 
   it("rechecks live seq after deferred save before navigating", async () => {
-    window.history.replaceState(
-      {},
-      "",
-      `/lite/lab/?session=${active.id}&seq=${active.seq}`,
-    );
+    window.history.replaceState({}, "", `/lite/lab/?session=${active.id}`);
     const live = Promise.withResolvers<ISession>();
     let calls = 0;
     const { panel, api, navigate } = harness(
@@ -350,11 +338,7 @@ describe("serialized session selection", () => {
   });
 
   it("allows only the newest rapid selection to save and navigate", async () => {
-    window.history.replaceState(
-      {},
-      "",
-      "/lite/lab/?session=s-333333333333&seq=1",
-    );
+    window.history.replaceState({}, "", "/lite/lab/?session=s-333333333333");
     const requests = new Map([
       [first.id, Promise.withResolvers<ISession>()],
       [second.id, Promise.withResolvers<ISession>()],
@@ -440,12 +424,23 @@ describe("session card contract", () => {
     expect(card.textContent).not.toContain(gpu.rootFolder);
     expect(card.textContent).not.toContain("Jupyter:");
     expect(card.querySelector(".csSessionCardIcon svg")).not.toBeNull();
+    expect(card.querySelector(".csSessionCardIconGpu")).not.toBeNull();
+    const cpuList = new SessionList();
+    cpuList.setState({
+      ...uiState({
+        sessions: [{ ...gpu, resources: { ...gpu.resources, gpuCount: 0 } }],
+      }),
+      signedIn: true,
+    });
+    expect(cpuList.node.querySelector(".csSessionCardIcon svg")).not.toBeNull();
+    expect(cpuList.node.querySelector(".csSessionCardIconGpu")).toBeNull();
+    cpuList.dispose();
     expect(list.node.querySelector(".csSessionSectionRack")).not.toBeNull();
   });
 });
 
 describe("identity control", () => {
-  it("offers sign in when signed out and hides the session cards behind a reason", () => {
+  it("offers a single sign-in button when signed out and hides the session cards behind a reason", () => {
     const list = new SessionList();
     const header = new CyberShuttleHeader();
     const signIn = vi.fn();
@@ -459,23 +454,21 @@ describe("identity control", () => {
     expect(list.node.querySelector(".csSessionAddCard")).toBeNull();
     expect(list.node.querySelector(".csSessionCard")).toBeNull();
     expect(header.node.querySelector(".csAccountButton")).toBeNull();
-    header.node.querySelector<HTMLButtonElement>(".csSignInButton")!.click();
-    const items = [
-      ...header.node.querySelectorAll<HTMLButtonElement>(".csAccountMenuItem"),
-    ];
-    expect(items.map((each) => each.textContent)).toEqual([
-      "Microsoft",
-      "GitHub",
-    ]);
-    expect(items.every((each) => each.querySelector("svg"))).toBe(true);
-    items[1].click();
-    expect(signIn).toHaveBeenCalledWith(header, "github");
+    expect(header.node.querySelector(".csAccountMenu")).toBeNull();
+    const trigger =
+      header.node.querySelector<HTMLButtonElement>(".csSignInButton")!;
+    expect(trigger.textContent).toBe("Sign in");
+    expect(trigger.hasAttribute("aria-haspopup")).toBe(false);
+    trigger.click();
+    expect(signIn).toHaveBeenCalledWith(header, undefined);
   });
 
-  it("names the account and keeps sign out behind its menu", () => {
+  it("names the account and keeps Dev Tunnels, SSH Keys, and sign out behind its menu", () => {
     const header = new CyberShuttleHeader();
     const signOut = vi.fn();
+    const tunnelLink = vi.fn();
     header.signOutRequested.connect(signOut);
+    header.tunnelLinkRequested.connect(tunnelLink);
     header.setState({
       ...uiState({ sessions: [first] }),
       signedIn: true,
@@ -492,17 +485,22 @@ describe("identity control", () => {
       ...header.node.querySelectorAll<HTMLButtonElement>(".csAccountMenuItem"),
     ];
     expect(items.map((each) => each.textContent)).toEqual([
+      "Dev Tunnels",
       "SSH Keys",
       "Sign out",
     ]);
     expect(items.every((each) => each.querySelector("svg"))).toBe(true);
-    const item = items[1];
     expect(
       header.node
         .querySelector(".csAccountButton")
         ?.getAttribute("aria-expanded"),
     ).toBe("true");
-    item.click();
+    items[0].click();
+    expect(tunnelLink).toHaveBeenCalledTimes(1);
+    trigger.click();
+    header.node
+      .querySelectorAll<HTMLButtonElement>(".csAccountMenuItem")[2]
+      .click();
     expect(signOut).toHaveBeenCalledTimes(1);
   });
 });

@@ -304,24 +304,21 @@ describe("native Lite session routing", () => {
   const id = "s-012345abcdef";
   const seq = 1;
 
-  it("selects only on a valid session and seq pair", () => {
-    expect(
-      selectedSession(`?session=not-a-session&seq=${seq}`),
-    ).toBeUndefined();
-    expect(selectedSession(`?session=${id}`)).toBeUndefined();
+  it("selects on a valid session id alone", () => {
+    expect(selectedSession("?session=not-a-session")).toBeUndefined();
+    expect(selectedSession(`?session=${id}`)).toEqual({ sessionId: id });
     expect(selectedSession(`?session=${id}&seq=${seq}`)).toEqual({
       sessionId: id,
-      seq,
     });
   });
 
   it("keeps session selection within the current Lite application URL", () => {
     expect(
-      sessionLiteUrl(id, seq, "folder/example.ipynb", {
-        href: "http://localhost/lite/lab/index.html?old=value",
+      sessionLiteUrl(id, "folder/example.ipynb", {
+        href: "http://localhost/lite/lab/index.html?old=value&seq=1",
       }),
     ).toBe(
-      "http://localhost/lite/lab/index.html?old=value&session=s-012345abcdef&seq=1&path=folder%2Fexample.ipynb",
+      "http://localhost/lite/lab/index.html?old=value&session=s-012345abcdef&workspace=s-012345abcdef&path=folder%2Fexample.ipynb",
     );
   });
 });

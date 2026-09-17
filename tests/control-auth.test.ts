@@ -1,7 +1,8 @@
 // Cross-origin auth headers and conditional ETag-based polling for
 // ControlClient's session list. A 304 response carries no ETag of its own. The
 // client must retain the previous ETag across an unchanged answer to send it
-// again.
+// again. Every request carries only a bearer ID token; there is no separate
+// identity header.
 import { fakeAuth } from "./fakes";
 import { assert, describe, expect, it, vi } from "vitest";
 import {
@@ -13,7 +14,7 @@ import {
 const auth = { ...fakeAuth(), invalidateToken: vi.fn() };
 
 describe("OAuth cross-origin control client", () => {
-  it("sends bearer with omitted credentials to only the configured control origin", async () => {
+  it("sends only a bearer ID token to the configured control origin", async () => {
     const browserFetch = vi.fn<typeof globalThis.fetch>(
       async () =>
         new Response(JSON.stringify({ hosts: [] }), {
@@ -29,39 +30,12 @@ describe("OAuth cross-origin control client", () => {
     const [input, init] = browserFetch.mock.calls[0];
     assert.isDefined(init);
     expect(String(input)).toBe("https://control.example.edu/api/v1/ssh");
-    expect(new Headers(init.headers).get("Authorization")).toBe(
-      "Bearer delegated-token",
-    );
-    expect(new Headers(init.headers).get("X-CyberShuttle-Identity")).toBe(
-      "identity-token",
-    );
+    const headers = new Headers(init.headers);
+    expect(headers.get("Authorization")).toBe("Bearer delegated-token");
+    expect(headers.has("X-CyberShuttle-Identity")).toBe(false);
     expect(init.cache).toBe("no-store");
     expect(init.credentials).toBe("omit");
     expect(init.redirect).toBe("error");
-  });
-
-  it("sends a GitHub token under its own scheme with no identity header", async () => {
-    const browserFetch = vi.fn<typeof globalThis.fetch>(
-      async () =>
-        new Response(JSON.stringify({ hosts: [] }), {
-          headers: { "content-type": "application/json" },
-        }),
-    );
-    const client = new ControlClient(
-      "https://control.example.edu/api/v1",
-      {
-        ...auth,
-        acquireToken: vi.fn(async () => ({
-          scheme: "github" as const,
-          accessToken: "gho_token",
-        })),
-      },
-      browserFetch,
-    );
-    await expect(client.listSshHosts()).resolves.toEqual([]);
-    const headers = new Headers(browserFetch.mock.calls[0][1]?.headers);
-    expect(headers.get("Authorization")).toBe("github gho_token");
-    expect(headers.get("X-CyberShuttle-Identity")).toBeNull();
   });
 
   it.each([401, 403])(

@@ -11,7 +11,6 @@ import {
   ISession,
   ISshHost,
   isTerminal,
-  type SignInProvider,
 } from "./Common";
 import { AuthInteractionRequiredError } from "./AuthClient";
 import { ControlClient, ISessionLogTail, UNCHANGED } from "./ControlClient";
@@ -19,6 +18,7 @@ import { RebuildingWidget } from "./RebuildingWidget";
 import { SessionController } from "./SessionController";
 import {
   clearSessionAccess,
+  loadSessionAccess,
   emptyState,
   getActiveSessionId,
   type ISessionUiState,
@@ -31,9 +31,10 @@ import { button, element } from "./dom";
 const SESSION_POLL_INTERVAL_MS = 1000;
 
 export class CyberShuttleHeader extends RebuildingWidget {
-  readonly signInRequested = new Signal<this, SignInProvider>(this);
+  readonly signInRequested = new Signal<this, void>(this);
   readonly signOutRequested = new Signal<this, void>(this);
   readonly sshKeysRequested = new Signal<this, void>(this);
+  readonly tunnelLinkRequested = new Signal<this, void>(this);
 
   private _state = emptyState();
   private _accountMenuOpen = false;
@@ -85,36 +86,29 @@ export class CyberShuttleHeader extends RebuildingWidget {
     );
     trigger.dataset.sessionAction = signedIn ? "account" : "sign-in";
     trigger.disabled = signingIn;
-    trigger.setAttribute("aria-haspopup", "menu");
-    trigger.setAttribute("aria-expanded", String(this._accountMenuOpen));
-    trigger.onclick = () => {
-      this._accountMenuOpen = !this._accountMenuOpen;
-      this._render();
-    };
+    if (signedIn) {
+      trigger.setAttribute("aria-haspopup", "menu");
+      trigger.setAttribute("aria-expanded", String(this._accountMenuOpen));
+      trigger.onclick = () => {
+        this._accountMenuOpen = !this._accountMenuOpen;
+        this._render();
+      };
+    } else {
+      trigger.onclick = () => this.signInRequested.emit(undefined);
+    }
     holder.appendChild(trigger);
-    if (this._accountMenuOpen) {
+    if (signedIn && this._accountMenuOpen) {
       const menu = element("div", "", "csAccountMenu", { role: "menu" });
       menu.append(
-        ...(signedIn
-          ? [
-              this._menuItem("SSH Keys", "ssh-keys", KEY_GLYPH, () =>
-                this.sshKeysRequested.emit(undefined),
-              ),
-              this._menuItem("Sign out", "sign-out", SIGN_OUT_GLYPH, () =>
-                this.signOutRequested.emit(undefined),
-              ),
-            ]
-          : [
-              this._menuItem(
-                "Microsoft",
-                "sign-in-microsoft",
-                MICROSOFT_GLYPH,
-                () => this.signInRequested.emit("microsoft"),
-              ),
-              this._menuItem("GitHub", "sign-in-github", GITHUB_GLYPH, () =>
-                this.signInRequested.emit("github"),
-              ),
-            ]),
+        this._menuItem("Dev Tunnels", "tunnel-link", TUNNEL_GLYPH, () =>
+          this.tunnelLinkRequested.emit(undefined),
+        ),
+        this._menuItem("SSH Keys", "ssh-keys", KEY_GLYPH, () =>
+          this.sshKeysRequested.emit(undefined),
+        ),
+        this._menuItem("Sign out", "sign-out", SIGN_OUT_GLYPH, () =>
+          this.signOutRequested.emit(undefined),
+        ),
       );
       holder.appendChild(menu);
     }
@@ -140,10 +134,8 @@ export class CyberShuttleHeader extends RebuildingWidget {
   }
 }
 
-const MICROSOFT_GLYPH = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><g fill="currentColor"><rect x="2.5" y="2.5" width="6.8" height="6.8" /><rect x="10.7" y="2.5" width="6.8" height="6.8" /><rect x="2.5" y="10.7" width="6.8" height="6.8" /><rect x="10.7" y="10.7" width="6.8" height="6.8" /></g></svg>`;
-const GITHUB_GLYPH = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z" /></svg>`;
-
 const KEY_GLYPH = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="10" r="3.6" /><path d="M10.6 10h7.2M15.2 10v2.6M17.8 10v2" /></g></svg>`;
+const TUNNEL_GLYPH = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><path d="M7 13 13 7" /><path d="M8.5 4.5h3A3.5 3.5 0 0 1 15 8v0" /><path d="M11.5 15.5h-3A3.5 3.5 0 0 1 5 12v0" /></g></svg>`;
 const SIGN_OUT_GLYPH = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.5H4.5v13H8M12.5 6.5 16 10l-3.5 3.5M16 10H7.5" /></g></svg>`;
 
 function userGlyph(): SVGSVGElement {
@@ -183,12 +175,12 @@ class SignInController {
     return this._signedIn ? this._api.account : undefined;
   }
 
-  signIn(provider?: SignInProvider): Promise<void> {
+  signIn(): Promise<void> {
     if (!this._signInPromise) {
       this._signingIn = true;
       this._hooks.onError("");
       this._hooks.emitState();
-      this._signInPromise = this._signIn(provider).finally(() => {
+      this._signInPromise = this._signIn().finally(() => {
         this._signingIn = false;
         this._signInPromise = undefined;
         if (!this._hooks.isDisposed()) this._hooks.emitState();
@@ -197,9 +189,9 @@ class SignInController {
     return this._signInPromise;
   }
 
-  private async _signIn(provider?: SignInProvider): Promise<void> {
+  private async _signIn(): Promise<void> {
     try {
-      await this._api.signIn(provider);
+      await this._api.signIn();
       if (this._hooks.isDisposed()) return;
       await this._activate();
     } catch (error) {
@@ -288,6 +280,12 @@ export class CyberShuttlePanel extends StackedPanel {
         this._controller.select(sessionId, current),
       loginDock: () => this._modals.loginDock,
       rejectDetail: () => this._modals.rejectDetail(),
+      linkTunnel: async () => {
+        this._modals.rejectDetail();
+        if (!(await this._modals.openTunnelLink())) {
+          throw new Error("Dev Tunnels is not linked.");
+        }
+      },
     });
     this._modals = new SessionModals(this, _api);
     this._list = new SessionList();
@@ -300,11 +298,12 @@ export class CyberShuttlePanel extends StackedPanel {
     this._list.runHistoryRequested.connect(
       () => void this._modals.openRunHistory(),
     );
-    this.header.signInRequested.connect(
-      (_sender, provider) => void this.signIn(provider),
-    );
+    this.header.signInRequested.connect(() => void this.signIn());
     this.header.signOutRequested.connect(() => this.signOut());
     this.header.sshKeysRequested.connect(() => void this._modals.openSshKeys());
+    this.header.tunnelLinkRequested.connect(
+      () => void this._modals.openTunnelLink(),
+    );
     this._emitState();
     void this.resume();
   }
@@ -351,6 +350,15 @@ export class CyberShuttlePanel extends StackedPanel {
       if (isTerminal(session.state)) {
         this._actions.releaseSession(session.id);
       }
+    }
+    const active = getActiveSessionId();
+    const live = active ? next.get(active) : undefined;
+    if (
+      live?.state === "READY" &&
+      live.seq !== loadSessionAccess(active!)?.seq
+    ) {
+      clearSessionAccess(active!);
+      window.location.reload();
     }
     this._sessions = sessions;
     this._emitState();
@@ -476,8 +484,8 @@ export class CyberShuttlePanel extends StackedPanel {
     } catch {}
   }
 
-  signIn(provider?: SignInProvider): Promise<void> {
-    return this._auth.signIn(provider);
+  signIn(): Promise<void> {
+    return this._auth.signIn();
   }
 
   signOut(): void {

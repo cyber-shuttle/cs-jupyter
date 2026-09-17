@@ -210,7 +210,7 @@ export class SlurmDiscovery {
           operation.start(this._api.sshAuthWebSocket(alias), {
             ready: () => {
               if (current()) {
-                operationTitle.textContent = `SSH login ready — ${alias}`;
+                operation.complete(`Signed in to ${alias}.`);
                 startDiscovery(true);
               }
             },

@@ -780,6 +780,9 @@
   border-radius: 8px;
   background: var(--jp-layout-color1);
 }
+.csSshAddForm:has(> .csIdentityButton) {
+  flex-direction: row;
+}
 .csSshKeyRow {
   display: flex;
   flex-wrap: wrap;
@@ -812,6 +815,9 @@
 }
 .csSshHostSummary .csSshHostTarget {
   margin-left: auto;
+}
+.csSshHostSummary .csDangerButton {
+  flex: none;
 }
 .csSshHostSummary:hover {
   background: var(--jp-layout-color2);

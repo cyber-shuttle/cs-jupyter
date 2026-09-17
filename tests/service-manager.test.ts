@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { PageConfig } from "@jupyterlab/coreutils";
 import { PluginRegistry } from "@lumino/coreutils";
+import { RemoteWorkspaces } from "../src/workspaces";
 import {
   ContentsManager,
   IContentsManager,
@@ -20,7 +21,6 @@ import {
   ISettingManager,
   ITerminalManager,
   IUserManager,
-  IWorkspaceManager,
   KernelManager,
   KernelSpecManager,
   ServerConnection,
@@ -42,7 +42,6 @@ const supportManagers = {
   nbconvert: {},
   settings: {},
   user: {},
-  workspaces: {},
 };
 
 function registryFor(path: string): PluginRegistry<null> {
@@ -83,12 +82,6 @@ function registryFor(path: string): PluginRegistry<null> {
       provides: IUserManager,
       activate: () => supportManagers.user,
     },
-    {
-      id: "test:workspace-manager",
-      autoStart: true,
-      provides: IWorkspaceManager,
-      activate: () => supportManagers.workspaces,
-    },
   ] as never);
   registry.registerPlugins(remoteServicePlugins);
   return registry;
@@ -124,7 +117,11 @@ describe("remote service manager registry", () => {
     expect(manager.nbconvert).toBe(supportManagers.nbconvert);
     expect(manager.settings).toBe(supportManagers.settings);
     expect(manager.user).toBe(supportManagers.user);
-    expect(manager.workspaces).toBe(supportManagers.workspaces);
+    expect(manager.workspaces).toBeInstanceOf(RemoteWorkspaces);
+    await expect(manager.workspaces.fetch("s-1")).resolves.toEqual({
+      data: {},
+      metadata: { id: "s-1" },
+    });
     manager.dispose();
   });
 
@@ -138,7 +135,7 @@ describe("remote service manager registry", () => {
           }),
       ),
     );
-    const registry = registryFor(`/lite/lab/index.html?session=${id}&seq=1`);
+    const registry = registryFor(`/lite/lab/index.html?session=${id}`);
     const manager = await registry.resolveRequiredService(IServiceManager);
     await manager.ready;
     expect(manager.serverSettings.baseUrl).toBe(PageConfig.getBaseUrl());
@@ -179,7 +176,7 @@ describe("remote service manager registry", () => {
       `cybershuttle.session-access.v1.${id}`,
       JSON.stringify(accessFixture(id, 1)),
     );
-    const registry = registryFor(`/lite/lab/index.html?session=${id}&seq=1`);
+    const registry = registryFor(`/lite/lab/index.html?session=${id}`);
 
     const manager = await registry.resolveRequiredService(IServiceManager);
     const contents = await registry.resolveRequiredService(IContentsManager);
@@ -264,10 +261,10 @@ describe("remote-only native workspace distribution", () => {
     "@jupyterlite/services-extension:nbconvert-manager",
     "@jupyterlite/services-extension:settings",
     "@jupyterlite/services-extension:user-manager",
-    "@jupyterlite/services-extension:workspace-manager",
   ];
 
   const disabledUpstreamServices = [
+    "@jupyterlite/services-extension:workspace-manager",
     "@jupyterlab/services-extension:default-drive",
     "@jupyterlab/services-extension:contents-manager",
     "@jupyterlab/services-extension:kernel-manager",

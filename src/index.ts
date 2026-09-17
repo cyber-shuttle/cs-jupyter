@@ -11,6 +11,7 @@ import type {
   ServiceManager as ServiceManagerType,
   ServiceManagerPlugin,
   Session,
+  Workspace,
 } from "@jupyterlab/services";
 import {
   ContentsManager,
@@ -46,6 +47,7 @@ import {
   setActiveSessionId,
 } from "./session.js";
 import { sessionUiPlugin } from "./session-ui.js";
+import { RemoteWorkspaces } from "./workspaces.js";
 import { walltimeStatusPlugin } from "./metrics.js";
 
 const IRemoteServerSettings = new Token<ServerConnection.ISettings>(
@@ -112,12 +114,10 @@ const remoteServerSettingsPlugin: ServiceManagerPlugin<
       if (!selected) {
         throw new Error("No session selected.");
       }
-      const { sessionId, seq } = selected;
-      let access = loadSessionAccess(sessionId, seq);
+      const { sessionId } = selected;
+      let access = loadSessionAccess(sessionId);
       if (!access) {
         access = await new ControlClient().getSessionAccess(sessionId);
-        if (access.seq !== seq)
-          throw new Error("Selected session access seq changed.");
         cacheSessionAccess(access);
       }
       PageConfig.setOption("terminalsAvailable", "true");
@@ -205,6 +205,16 @@ const remoteTerminalUiPlugin: JupyterFrontEndPlugin<void> = {
   },
 };
 
+const workspaceManagerPlugin: ServiceManagerPlugin<Workspace.IManager> = {
+  id: "@cybershuttle/jupyter:workspace-manager",
+  description: "Keep each session's layout in the session's own home.",
+  autoStart: true,
+  provides: IWorkspaceManager,
+  requires: [IRemoteServerSettings],
+  activate: (_app, serverSettings) =>
+    new RemoteWorkspaces(serverSettings, selectedSession() !== undefined),
+};
+
 const serviceManagerPlugin: ServiceManagerPlugin<ServiceManagerType.IManager> =
   {
     id: "@cybershuttle/jupyter:service-manager",
@@ -263,6 +273,7 @@ export const remoteServicePlugins = [
   kernelSpecManagerPlugin,
   sessionManagerPlugin,
   terminalManagerPlugin,
+  workspaceManagerPlugin,
   serviceManagerPlugin,
 ];
 

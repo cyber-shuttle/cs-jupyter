@@ -1,9 +1,16 @@
 // The panel's session-lifecycle verbs: connect, run again, stop, delete, and
 // Jupyter access once a session is READY. Stop and delete both cancel the
-// session's Slurm job and confirm first; an SSH login challenge retries once.
+// session's Slurm job and confirm first; an SSH login challenge retries once,
+// and starting a session without a linked Dev Tunnels account retries once
+// the account menu's link dialog reports success.
 import { Dialog, showDialog } from "@jupyterlab/apputils";
 import { errorMessage, ISession, isTerminal } from "./Common";
-import { ControlClient, ControlError, needsSshLogin } from "./ControlClient";
+import {
+  ControlClient,
+  ControlError,
+  needsSshLogin,
+  needsTunnelLink,
+} from "./ControlClient";
 import type { SshLoginDock } from "./ssh";
 import {
   cacheSessionAccess,
@@ -21,6 +28,7 @@ interface ISessionActionsHooks {
   select: (sessionId: string, current: () => boolean) => Promise<void>;
   loginDock: () => SshLoginDock;
   rejectDetail: () => void;
+  linkTunnel: () => Promise<void>;
 }
 
 interface IJupyterOperation {
@@ -156,6 +164,18 @@ export class SessionActions {
     }
   }
 
+  async withTunnelLink<T>(action: () => Promise<T>): Promise<T> {
+    try {
+      return await action();
+    } catch (error) {
+      if (!needsTunnelLink(error)) {
+        throw error;
+      }
+      await this._hooks.linkTunnel();
+      return action();
+    }
+  }
+
   async refreshJupyter(sessionId: string): Promise<void> {
     const session = this._session(sessionId);
     if (!session || session.state !== "READY") {
@@ -273,6 +293,7 @@ export class SessionActions {
     }
     await this._act(sessionId, (id) => this._api.startSession(id), {
       kind: "relaunch",
+      allowTunnelLink: true,
     });
   }
 
@@ -305,6 +326,7 @@ export class SessionActions {
       apply?: (acted: ISession) => ISession[];
       report?: (error: unknown) => boolean;
       allowLogin?: boolean;
+      allowTunnelLink?: boolean;
       known?: ISession;
       clearError?: boolean;
       kind?: "relaunch" | "action";
@@ -317,6 +339,7 @@ export class SessionActions {
           .map((each) => (each.id === acted.id ? acted : each)),
       report = () => true,
       allowLogin = true,
+      allowTunnelLink = false,
       known,
       clearError = true,
       kind = "action",
@@ -339,7 +362,10 @@ export class SessionActions {
     try {
       const acted = await this._overSsh(
         session.sshHost,
-        () => act(session.id),
+        () =>
+          allowTunnelLink
+            ? this.withTunnelLink(() => act(session.id))
+            : act(session.id),
         allowLogin,
       );
       if (current()) {

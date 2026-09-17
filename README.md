@@ -23,9 +23,11 @@ can change without notice. [CHANGELOG.md](CHANGELOG.md) records what has landed 
 
 - **cs-control running on your own machine.** It owns every API this client calls and listens on loopback
   only, so each user runs their own.
-- **Microsoft Entra sign-in.** Device-code sign-in, brokered by cs-control, is the only authentication path;
-  this client has no other login and never calls Microsoft directly.
-- **[Microsoft Dev Tunnels](https://learn.microsoft.com/en-us/azure/developer/dev-tunnels/).** A session's
+- **CILogon sign-in.** An authorization-code flow with PKCE, finished by cs-control, is the only
+  authentication path; this client has no other login.
+- **A linked Dev Tunnels account.** Sessions run over your own [Microsoft or GitHub Dev
+  Tunnels](https://learn.microsoft.com/en-us/azure/developer/dev-tunnels/) account, linked once from the
+  account menu's **Dev Tunnels** dialog. A session's
   Jupyter origin must be a `devtunnels.ms` host with at least two labels ahead of it, as a tunnel port's
   is. A session reached through any other tunnel or ingress is rejected.
 - A current browser; the application ships no polyfills.
@@ -33,7 +35,7 @@ can change without notice. [CHANGELOG.md](CHANGELOG.md) records what has landed 
 ## Using it
 
 Start `csctl serve` on your machine, then open the site. **Sign in** is on the CyberShuttle title row and
-shows a Microsoft device code to enter. The Launcher's **Sessions** section offers **Add Session**, which
+sends you to CILogon. The Launcher's **Sessions** section offers **Add Session**, which
 submits a Slurm job and creates a session, and its card tracks the job's state: host, account, state, resources, and a remaining
 walltime countdown. Open that card and choose **Connect** once it reads `READY`; notebooks and terminals then
 run inside the job. What the session is using and its status log are in the detail dialog. Once a session ends

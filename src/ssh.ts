@@ -1,10 +1,10 @@
 // SSH interactive auth end to end: the token-bearing WebSocket connector, the
 // terminal that renders an operation's transcript, and the dock that hosts it
 // during sign-in. A WebSocket cannot carry an Authorization header, so the
-// bearer and identity tokens travel as subprotocols, refreshed on each open.
-// The console is credential-blind, passing prompts and replies straight
-// through to SSH, and the dock attaches to document.body rather than the
-// session detail dialog so closing that dialog cannot destroy it.
+// ID token travels as a subprotocol, refreshed on each open. The console is
+// credential-blind, passing prompts and replies straight through to SSH, and
+// the dock attaches to document.body rather than the session detail dialog so
+// closing that dialog cannot destroy it.
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { Widget } from "@lumino/widgets";
@@ -12,13 +12,12 @@ import {
   assertSecureOrLoopback,
   parseUrl,
   type ITokenProvider,
+  base64UrlEncode,
 } from "./Common";
 import { element } from "./dom";
 
 const CYBERSHUTTLE_WEBSOCKET_PROTOCOL = "cybershuttle.v1";
 const CYBERSHUTTLE_BEARER_PROTOCOL_PREFIX = "bearer.";
-const CYBERSHUTTLE_IDENTITY_PROTOCOL_PREFIX = "identity.";
-const CYBERSHUTTLE_GITHUB_PROTOCOL_PREFIX = "github.";
 const MAX_ACCESS_TOKEN_BYTES = 16 * 1024;
 const TOKEN_CONTROL_OR_WHITESPACE = /[\s\u0000-\u001f\u007f-\u009f]/u;
 
@@ -52,15 +51,9 @@ export class OAuthWebSocketFactory {
       );
     }
     const credentials = await this._auth.acquireToken();
-    const encodedAccess = encodeAccessToken(credentials.accessToken);
     return new this._WebSocket(url, [
       CYBERSHUTTLE_WEBSOCKET_PROTOCOL,
-      ...(credentials.scheme === "github"
-        ? [`${CYBERSHUTTLE_GITHUB_PROTOCOL_PREFIX}${encodedAccess}`]
-        : [
-            `${CYBERSHUTTLE_BEARER_PROTOCOL_PREFIX}${encodedAccess}`,
-            `${CYBERSHUTTLE_IDENTITY_PROTOCOL_PREFIX}${encodeAccessToken(credentials.idToken ?? "")}`,
-          ]),
+      `${CYBERSHUTTLE_BEARER_PROTOCOL_PREFIX}${encodeAccessToken(credentials.idToken)}`,
     ]);
   }
 }
@@ -75,12 +68,7 @@ function encodeAccessToken(token: string): string {
   if (bytes.byteLength > MAX_ACCESS_TOKEN_BYTES) {
     throw new Error("CyberShuttle delegated token is too large.");
   }
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
+  return base64UrlEncode(bytes);
 }
 
 function validateWebSocketUrl(raw: string): string {

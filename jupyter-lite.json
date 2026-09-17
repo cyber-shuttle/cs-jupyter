@@ -4,6 +4,7 @@
     "cybershuttleControlApiUrl": "",
     "deferredExtensions": ["@jupyterlab/terminal-extension:plugin"],
     "disabledExtensions": [
+      "@jupyterlite/services-extension:workspace-manager",
       "@jupyterlab/services-extension:default-drive",
       "@jupyterlab/services-extension:contents-manager",
       "@jupyterlab/services-extension:kernel-manager",

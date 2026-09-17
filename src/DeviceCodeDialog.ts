@@ -32,9 +32,7 @@ export function showDeviceCodeDialog(
   const code = element("code", authorization.userCode, "csDeviceCode");
   code.setAttribute("aria-label", `Device code ${authorization.userCode}`);
 
-  const copy = document.createElement("button");
-  copy.type = "button";
-  copy.className = "csDeviceCodeCopy";
+  const copy = button("", "csDeviceCodeCopy");
   copy.innerHTML = COPY_GLYPH;
   const describeCopy = (text: string): void => {
     copy.title = text;

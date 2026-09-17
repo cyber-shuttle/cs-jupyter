@@ -206,9 +206,18 @@ export class SshHosts extends RemoteListWidget {
   }
 
   private _hostEntry(host: ISshHost): HTMLElement {
+    const remove = button("Delete", "csDangerButton");
+    remove.dataset.sessionAction = `delete-${host.name}`;
+    remove.disabled = !host.managed;
+    remove.onclick = (event) => {
+      event.preventDefault();
+      this._confirming = host.name;
+      this._render();
+    };
     const { entry, body } = disclosure(host.name, this._open, [
       element("span", host.name, "csCardTitle"),
       element("span", hostTarget(host), "csMeta csSshHostTarget"),
+      ...(this._confirming === host.name ? [] : [remove]),
     ]);
     for (const [key, value] of hostArguments(host)) {
       const row = element("div", "", "csSshArgRow");
@@ -266,19 +275,13 @@ export class SshHosts extends RemoteListWidget {
       ),
     );
     edit.dataset.sessionAction = `edit-${host.name}`;
-    const remove = button("Delete", "csDangerButton", () => {
-      this._confirming = host.name;
-      this._render();
-    });
-    remove.dataset.sessionAction = `delete-${host.name}`;
     edit.disabled = !host.managed;
-    remove.disabled = !host.managed;
     if (!host.managed) {
       const own = "This host comes from your own SSH configuration.";
       edit.title = own;
       remove.title = own;
     }
-    actions.append(testButton, edit, remove);
+    actions.append(edit, testButton);
     body.appendChild(actions);
     if (this._form && editing) {
       body.appendChild(this._pasteForm(this._form));

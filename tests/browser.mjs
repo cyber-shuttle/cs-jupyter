@@ -1,8 +1,11 @@
-// Playwright end-to-end run against dist, driving real Chromium against fake
-// cs-control and Jupyter servers. It exercises sign-in, session lifecycle and
-// SSH login through the real built extension. Two console messages are expected
-// noise: the on-purpose 409 auth handshake and an xterm teardown race.
+// Playwright end-to-end run against dist, driving real Chromium against a
+// fake cs-control, a fake OAuth issuer, and a fake Jupyter server. It exercises
+// PKCE sign-in, the Dev Tunnels device-link flow gating session create, and
+// the session lifecycle through the real built extension. Two console
+// messages are expected noise: the on-purpose 409 tunnel-link handshake and
+// an xterm teardown race.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { extname, join, normalize, resolve } from "node:path";
@@ -19,14 +22,18 @@ const createdId = "s-333333333333";
 const seq = 1;
 const directOrigin = "https://31002.use.devtunnels.ms";
 const directBase = "/";
-const accessToken = "browser-access-token";
 const account = "user@example.edu";
 const jupyterToken = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-let identityToken = "";
+const tunnelHandle = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+const issuerOrigin = "https://issuer.example.test";
+let idToken = "";
+let verifierUsed = "";
+let capturedAuthorize;
 let staticOrigin = "";
 let controlOrigin = "";
 let popupCount = 0;
-let tokenPollCount = 0;
+let tunnelLinked = false;
+let tunnelPollCount = 0;
 let discoveryCount = 0;
 const controlRequests = [];
 const directRequests = [];
@@ -82,69 +89,81 @@ const controlServer = createServer((request, response) => {
     cors(response);
     response.writeHead(204, {
       "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
-      "access-control-allow-headers":
-        "Authorization, Content-Type, X-CyberShuttle-Identity",
+      "access-control-allow-headers": "Authorization, Content-Type",
     });
     return response.end();
   }
   controlRequests.push(`${request.method} ${url.pathname}`);
   cors(response);
-  if (
-    url.pathname === "/api/v1/oauth/device/start" &&
-    request.method === "POST"
-  ) {
+  if (url.pathname === "/api/v1/oauth/config" && request.method === "GET") {
     assert.equal(request.headers.origin, staticOrigin);
     assert.equal(request.headers.authorization, undefined);
     assert.equal(request.headers.cookie, undefined);
     return json(response, {
-      handle: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-      userCode: "ABCD-EFGH",
-      verificationUri: "https://verification.example.test/device",
-      expiresInSeconds: 900,
-      intervalSeconds: 1,
+      issuer: issuerOrigin,
+      authorizationEndpoint: `${issuerOrigin}/authorize`,
+      clientId: "cybershuttle-jupyter",
+      scope: "openid email profile",
     });
   }
-  if (
-    url.pathname ===
-      "/api/v1/oauth/device/poll/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" &&
-    request.method === "POST"
-  ) {
+  if (url.pathname === "/api/v1/oauth/exchange" && request.method === "POST") {
     assert.equal(request.headers.origin, staticOrigin);
     assert.equal(request.headers.authorization, undefined);
     assert.equal(request.headers.cookie, undefined);
-    tokenPollCount++;
-    if (tokenPollCount === 1)
-      return json(response, { status: "pending", intervalSeconds: 1 }, 202);
-    const now = Math.floor(Date.now() / 1000);
-    identityToken = jwt({
-      aud: "native-client",
-      iss: "https://login.microsoftonline.com/tenant/v2.0",
-      iat: now,
-      nbf: now,
-      exp: now + 3600,
-      oid: "owner",
-      tid: "tenant",
-      sub: "owner",
-      preferred_username: "user@example.edu",
-      name: "Test User",
-      ver: "2.0",
-    });
-    return json(response, {
-      status: "complete",
-      expiresInSeconds: 3600,
-      accessToken,
-      idToken: identityToken,
+    return readRequestJSON(request).then((body) => {
+      assert.equal(body.code, "browser-code");
+      assert.equal(typeof body.codeVerifier, "string");
+      assert.equal(
+        createHash("sha256").update(body.codeVerifier).digest("base64url"),
+        capturedAuthorize?.codeChallenge,
+        "the code verifier must hash to the challenge the authorize request carried",
+      );
+      assert.ok(
+        body.redirectUri.startsWith(staticOrigin),
+        "the redirect URI must stay on the extension's own origin",
+      );
+      verifierUsed = body.codeVerifier;
+      const now = Math.floor(Date.now() / 1000);
+      idToken = jwt({
+        iss: issuerOrigin,
+        aud: "cybershuttle-jupyter",
+        sub: "owner",
+        email: account,
+        iat: now,
+        exp: now + 3600,
+      });
+      return json(response, { idToken, expiresInSeconds: 900 });
     });
   }
-  if (
-    request.headers.authorization !== `Bearer ${accessToken}` ||
-    request.headers["x-cybershuttle-identity"] !== identityToken
-  )
+  if (request.headers.authorization !== `Bearer ${idToken}`)
     return json(
       response,
       { error: { code: "unauthorized", message: "unauthorized" } },
       401,
     );
+  if (url.pathname === "/api/v1/tunnel/link" && request.method === "GET")
+    return json(response, tunnelLinkStatus());
+  if (url.pathname === "/api/v1/tunnel/link/start" && request.method === "POST")
+    return readRequestJSON(request).then((body) => {
+      assert.equal(body.provider, "github");
+      return json(response, {
+        handle: tunnelHandle,
+        userCode: "ABCD-EFGH",
+        verificationUri: "https://verification.example.test/device",
+        expiresInSeconds: 900,
+        intervalSeconds: 1,
+      });
+    });
+  if (
+    url.pathname === `/api/v1/tunnel/link/poll/${tunnelHandle}` &&
+    request.method === "POST"
+  ) {
+    tunnelPollCount++;
+    if (tunnelPollCount === 1)
+      return json(response, { status: "pending", intervalSeconds: 1 });
+    tunnelLinked = true;
+    return json(response, tunnelLinkStatus());
+  }
   if (url.pathname === "/api/v1/ssh" && request.method === "GET")
     return json(response, {
       hosts: [
@@ -196,6 +215,17 @@ const controlServer = createServer((request, response) => {
     });
   }
   if (url.pathname === "/api/v1/sessions" && request.method === "POST") {
+    if (!tunnelLinked)
+      return json(
+        response,
+        {
+          error: {
+            code: "tunnel_link_required",
+            message: "Link your Dev Tunnels account to create a session.",
+          },
+        },
+        409,
+      );
     return readRequestJSON(request).then((body) => {
       assert.equal(body.rootFolder, "projects/browser-created");
       let item = sessions.find(({ id }) => id === createdId);
@@ -261,21 +291,14 @@ const webSockets = new WebSocketServer({
   noServer: true,
   handleProtocols(protocols) {
     const offered = [...protocols];
+    assert.equal(offered.length, 2);
     assert.equal(offered[0], "cybershuttle.v1");
-    assert.equal(offered.length, 3);
     assert.ok(offered[1].startsWith("bearer."));
     assert.equal(
       Buffer.from(offered[1].slice("bearer.".length), "base64url").toString(
         "utf8",
       ),
-      accessToken,
-    );
-    assert.ok(offered[2].startsWith("identity."));
-    assert.equal(
-      Buffer.from(offered[2].slice("identity.".length), "base64url").toString(
-        "utf8",
-      ),
-      identityToken,
+      idToken,
     );
     return "cybershuttle.v1";
   },
@@ -307,6 +330,7 @@ try {
     if (page && popup !== page) popupCount++;
   });
   await installVerificationRoute(context);
+  await installIssuerRoute(context);
   page = await context.newPage();
   const browserErrors = [];
   const browserMessages = [];
@@ -402,31 +426,22 @@ try {
   assert.equal(await page.getByRole("button", { name: "Sign in" }).count(), 1);
 
   await page.getByRole("button", { name: "Sign in" }).click();
-  const deviceDialog = page.getByRole("dialog", {
-    name: "Sign in to Microsoft",
-  });
-  await deviceDialog.waitFor();
-  assert.equal(
-    popupCount,
-    0,
-    "device authorization must not open automatically",
-  );
-  assert.notEqual(await deviceDialog.getAttribute("open"), null);
-  await deviceDialog.getByText("ABCD-EFGH", { exact: true }).waitFor();
-  const openSignIn = deviceDialog.getByRole("link", {
-    name: "Open sign-in page",
-  });
-  assert.equal(
-    await openSignIn.getAttribute("href"),
-    "https://verification.example.test/device",
-  );
-  const verificationPage = context.waitForEvent("page");
-  await openSignIn.click();
-  await verificationPage;
-  assert.equal(popupCount, 1, "only the explicit open action may open a page");
   await page
     .getByRole("button", { name: account })
     .waitFor({ timeout: 20_000 });
+  assert.equal(
+    popupCount,
+    0,
+    "sign-in navigates the top window to the issuer and back; it must not open a popup",
+  );
+  const afterSignInUrl = new URL(page.url());
+  assert.equal(
+    afterSignInUrl.searchParams.has("code"),
+    false,
+    "the callback query must be gone once the exchange completes",
+  );
+  assert.equal(afterSignInUrl.searchParams.has("state"), false);
+
   await page.locator(`[data-session-action="${sessionId}"]`).waitFor();
   assert.equal(
     await page
@@ -439,14 +454,20 @@ try {
     localStorage: { ...window.localStorage },
     sessionStorage: { ...window.sessionStorage },
   }));
-  assert.doesNotMatch(
-    JSON.stringify({
-      href: browserState.href,
-      localStorage: browserState.localStorage,
-      browserMessages,
-    }),
-    /browser-access-token/,
-    "the access token must not enter the URL, localStorage, or logs",
+  const leakSurface = JSON.stringify({
+    href: browserState.href,
+    localStorage: browserState.localStorage,
+    browserMessages,
+  });
+  assert.equal(
+    leakSurface.includes(idToken),
+    false,
+    "the ID token must not enter the URL, localStorage, or logs",
+  );
+  assert.equal(
+    leakSurface.includes(verifierUsed),
+    false,
+    "the PKCE code verifier must not enter the URL, localStorage, or logs",
   );
   assert.deepEqual(
     Object.keys(browserState.sessionStorage)
@@ -581,6 +602,33 @@ try {
   await page.getByRole("heading", { name: "Review Slurm job" }).waitFor();
   await page.getByText("Validation passed.", { exact: false }).waitFor();
   await page.getByRole("button", { name: "Submit", exact: true }).click();
+
+  // Session create is refused until Dev Tunnels is linked; the Add Session
+  // dialog hosts the link widget and retries once linking succeeds.
+  const linkGitHub = page.getByRole("button", { name: "Link GitHub" });
+  await linkGitHub.waitFor();
+  await linkGitHub.click();
+  const deviceDialog = page.getByRole("dialog", { name: "Sign in to GitHub" });
+  await deviceDialog.waitFor();
+  assert.equal(
+    popupCount,
+    0,
+    "device authorization must not open automatically",
+  );
+  assert.notEqual(await deviceDialog.getAttribute("open"), null);
+  await deviceDialog.getByText("ABCD-EFGH", { exact: true }).waitFor();
+  const openSignIn = deviceDialog.getByRole("link", {
+    name: "Open sign-in page",
+  });
+  assert.equal(
+    await openSignIn.getAttribute("href"),
+    "https://verification.example.test/device",
+  );
+  const verificationPage = context.waitForEvent("page");
+  await openSignIn.click();
+  await verificationPage;
+  assert.equal(popupCount, 1, "only the explicit open action may open a page");
+
   const createdDetail = page.locator(
     ".jp-Dialog-content:has(.csSessionDetail)",
   );
@@ -589,9 +637,13 @@ try {
   });
   const controlBeforeCachedRestore = controlRequests.length;
   await createdDetail.getByRole("button", { name: "Connect" }).click();
-  await page.waitForURL(new RegExp(`session=${createdId}.*seq=${seq}`), {
-    timeout: 20_000,
-  });
+  await page.waitForURL(
+    (url) =>
+      url.searchParams.get("session") === createdId &&
+      url.searchParams.get("workspace") === createdId &&
+      !url.searchParams.has("seq"),
+    { timeout: 20_000 },
+  );
   await page.waitForFunction(() => {
     const categories = [
       ...document.querySelectorAll(".jp-Launcher-sectionTitle"),
@@ -730,7 +782,7 @@ try {
     [],
   );
   console.log(
-    `validated device OAuth, validate/create/poll, cs-control session access, the direct Jupyter managers behind it, reload restore, and SSH controls (${controlRequests.length} control requests)`,
+    `validated PKCE sign-in, the Dev Tunnels device-link gate on session create, cs-control session access, the direct Jupyter managers behind it, and reload restore (${controlRequests.length} control requests)`,
   );
   await context.close();
 } finally {
@@ -776,10 +828,43 @@ async function installVerificationRoute(context) {
       return route.fulfill({
         status: 200,
         contentType: "text/html",
-        body: "<!doctype html><title>Microsoft device sign in</title>",
+        body: "<!doctype html><title>GitHub device sign in</title>",
       });
     },
   );
+}
+
+async function installIssuerRoute(context) {
+  await context.route(`${issuerOrigin}/authorize**`, async (route) => {
+    const request = route.request();
+    assert.equal(request.method(), "GET");
+    const url = new URL(request.url());
+    assert.equal(url.searchParams.get("response_type"), "code");
+    assert.equal(url.searchParams.get("code_challenge_method"), "S256");
+    capturedAuthorize = {
+      state: url.searchParams.get("state"),
+      codeChallenge: url.searchParams.get("code_challenge"),
+      redirectUri: url.searchParams.get("redirect_uri"),
+    };
+    const location = new URL(capturedAuthorize.redirectUri);
+    location.searchParams.set("code", "browser-code");
+    location.searchParams.set("state", capturedAuthorize.state);
+    return route.fulfill({
+      status: 302,
+      headers: { location: location.toString() },
+    });
+  });
+}
+
+function tunnelLinkStatus() {
+  return tunnelLinked
+    ? {
+        linked: true,
+        provider: "github",
+        account: "octocat",
+        linkedAt: "2026-01-01T00:00:00Z",
+      }
+    : { linked: false };
 }
 
 function directoryModel() {

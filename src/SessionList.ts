@@ -152,7 +152,7 @@ export class SessionList extends RebuildingWidget {
       sessionResourceRow(session),
       ...(countsDown(session) ? [countdown(session)] : []),
     );
-    card.append(serverRackIcon(), label);
+    card.append(sessionIcon(session), label);
     return card;
   }
 }
@@ -207,6 +207,22 @@ function sessionResourceRow(session: ISession): HTMLElement {
     row.appendChild(measure(glyph, value, title));
   });
   return row;
+}
+
+const CARD_GLYPHS = {
+  cpu: `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><rect x="5.5" y="5.5" width="13" height="13" rx="1.8" /><path d="M9 2.6v2.9M12 2.6v2.9M15 2.6v2.9M9 18.5v2.9M12 18.5v2.9M15 18.5v2.9M2.6 9h2.9M2.6 12h2.9M2.6 15h2.9M18.5 9h2.9M18.5 12h2.9M18.5 15h2.9" /></g><text x="12" y="13.7" text-anchor="middle" font-family="system-ui, sans-serif" font-size="4.6" font-weight="700" fill="currentColor">CPU</text></svg>`,
+  gpu: `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="1.8" y="5.5" width="20.4" height="13" rx="1.8" /><circle cx="6" cy="12" r="2.2" /><circle cx="6" cy="12" r="0.6" /><path d="M6 18.5v2.9M9 18.5v2.9M12 18.5v2.9M15 18.5v2.9M18 18.5v2.9" /></g><text x="14.6" y="13.7" text-anchor="middle" font-family="system-ui, sans-serif" font-size="4.6" font-weight="700" fill="currentColor">GPU</text></svg>`,
+};
+
+function sessionIcon(session: ISession): HTMLElement {
+  const gpu = (session.resources.gpuCount ?? 0) > 0;
+  const icon = element(
+    "div",
+    "",
+    `jp-LauncherCard-icon csSessionCardIcon${gpu ? " csSessionCardIconGpu" : ""}`,
+  );
+  icon.innerHTML = gpu ? CARD_GLYPHS.gpu : CARD_GLYPHS.cpu;
+  return icon;
 }
 
 function serverRackIcon(

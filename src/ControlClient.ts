@@ -7,7 +7,6 @@
 import { PageConfig, URLExt } from "@jupyterlab/coreutils";
 import { ServerConnection } from "@jupyterlab/services";
 import { AuthClient } from "./AuthClient";
-import type { OAuthCredentials } from "./Common";
 import { OAuthWebSocketFactory, type OAuthWebSocketConnector } from "./ssh";
 import {
   clearSessionAccess,
@@ -33,6 +32,7 @@ import {
   ITokenProvider,
   SESSION_ID,
   SESSION_STATES,
+  TOKEN_43,
   VALIDATION_STATUSES,
   expect,
   isPlainObject,
@@ -40,6 +40,7 @@ import {
   requestUrl,
   vArray,
   vBoolean,
+  vBoundedInt,
   vNumber,
   vObject,
   vOneOf,
@@ -48,7 +49,7 @@ import {
   vString,
   validControlApiUrl,
   validSessionId,
-  type SignInProvider,
+  type TunnelProvider,
 } from "./Common";
 
 const SESSION_LOG_CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
@@ -66,7 +67,7 @@ export interface ISessionList {
 }
 
 export interface IControlAuth extends ITokenProvider {
-  interactiveLogin(provider?: SignInProvider): Promise<OAuthCredentials>;
+  interactiveLogin(): Promise<void>;
   readonly account?: string | undefined;
 }
 
@@ -81,6 +82,9 @@ export class ControlError extends Error {
 
 export const needsSshLogin = (error: unknown): boolean =>
   error instanceof ControlError && error.code === "ssh_authentication_required";
+
+export const needsTunnelLink = (error: unknown): boolean =>
+  error instanceof ControlError && error.code === "tunnel_link_required";
 
 export function safeControlFetch(
   controlApiUrl: string,
@@ -99,13 +103,7 @@ export function safeControlFetch(
       init.headers ?? (input instanceof Request ? input.headers : undefined),
     );
     const credentials = await auth.acquireToken();
-    headers.set(
-      "Authorization",
-      `${credentials.scheme} ${credentials.accessToken}`,
-    );
-    if (credentials.idToken) {
-      headers.set("X-CyberShuttle-Identity", credentials.idToken);
-    }
+    headers.set("Authorization", `Bearer ${credentials.idToken}`);
     const response = await fetch(input, {
       ...init,
       headers,
@@ -140,9 +138,9 @@ export class ControlClient {
       webSockets ?? new OAuthWebSocketFactory(auth, new URL(this._base).origin);
   }
 
-  async signIn(provider?: SignInProvider): Promise<void> {
+  async signIn(): Promise<void> {
     this._sessionsTag = undefined;
-    await this._auth.interactiveLogin(provider);
+    await this._auth.interactiveLogin();
   }
 
   async resumeSignIn(): Promise<void> {
@@ -252,6 +250,34 @@ export class ControlClient {
 
   sshAuthWebSocket(alias: string): OAuthWebSocketConnector {
     return this._webSocketConnector(`ssh/${encodeURIComponent(alias)}/auth`);
+  }
+
+  async getTunnelLink(): Promise<ITunnelLinkStatus> {
+    return validateTunnelLinkStatus(await this._request("tunnel/link"));
+  }
+
+  async startTunnelLink(provider: TunnelProvider): Promise<ITunnelLinkStart> {
+    return validateTunnelLinkStart(
+      await this._request("tunnel/link/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider }),
+      }),
+    );
+  }
+
+  async pollTunnelLink(handle: string): Promise<ITunnelLinkPoll> {
+    return validateTunnelLinkPoll(
+      await this._request(`tunnel/link/poll/${encodeURIComponent(handle)}`, {
+        method: "POST",
+      }),
+    );
+  }
+
+  async removeTunnelLink(): Promise<ITunnelLinkStatus> {
+    return validateTunnelLinkStatus(
+      await this._request("tunnel/link", { method: "DELETE" }),
+    );
   }
 
   async listSessions(): Promise<ISessionList | typeof UNCHANGED> {
@@ -629,6 +655,69 @@ const slurmShape = vObject<ISlurmInfo>({
 });
 
 export const validateSlurmResource = expect(slurmShape, "Slurm discovery");
+
+export type ITunnelLinkStatus =
+  | {
+      linked: true;
+      provider: TunnelProvider;
+      account?: string;
+      linkedAt: string;
+    }
+  | { linked: false };
+
+export interface ITunnelLinkStart {
+  handle: string;
+  userCode: string;
+  verificationUri: string;
+  expiresInSeconds: number;
+  intervalSeconds: number;
+}
+
+export type ITunnelLinkPoll =
+  | { status: "pending"; intervalSeconds: number }
+  | ITunnelLinkStatus;
+
+const tunnelLinkedShape = vObject<Extract<ITunnelLinkStatus, { linked: true }>>(
+  {
+    linked: (v): v is true => v === true,
+    provider: vOneOf(["microsoft", "github"] as const),
+    account: vOptional(vString()),
+    linkedAt: vString(),
+  },
+);
+const tunnelUnlinkedShape = vObject<
+  Extract<ITunnelLinkStatus, { linked: false }>
+>({ linked: (v): v is false => v === false });
+function isTunnelLinkStatus(value: unknown): value is ITunnelLinkStatus {
+  return tunnelLinkedShape(value) || tunnelUnlinkedShape(value);
+}
+const validateTunnelLinkStatus = expect(isTunnelLinkStatus, "Dev Tunnels link");
+
+const tunnelLinkStartShape = vObject<ITunnelLinkStart>({
+  handle: vString(TOKEN_43),
+  userCode: vString(),
+  verificationUri: vString(),
+  expiresInSeconds: vBoundedInt(1, 3600),
+  intervalSeconds: vBoundedInt(1, 60),
+});
+const validateTunnelLinkStart = expect(
+  tunnelLinkStartShape,
+  "Dev Tunnels link start",
+);
+
+const tunnelLinkPendingShape = vObject<
+  Extract<ITunnelLinkPoll, { status: "pending" }>
+>({
+  status: vOneOf(["pending"] as const),
+  intervalSeconds: vBoundedInt(1, 60),
+});
+function isTunnelLinkPoll(value: unknown): value is ITunnelLinkPoll {
+  return tunnelLinkPendingShape(value) || isTunnelLinkStatus(value);
+}
+const validateTunnelLinkPoll = expect(
+  isTunnelLinkPoll,
+  "Dev Tunnels link poll",
+);
 
 const sessionListShape = vObject<{
   sessions: ISession[];

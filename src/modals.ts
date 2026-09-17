@@ -10,14 +10,16 @@ import {
   type ISessionCreateRequest,
   type ISshHost,
 } from "./Common";
-import type { ControlClient } from "./ControlClient";
+import { needsTunnelLink, type ControlClient } from "./ControlClient";
 import type { CyberShuttlePanel } from "./CyberShuttlePanel";
 import { CreateSessionForm } from "./CreateSessionForm";
+import type { RemoteListWidget } from "./RebuildingWidget";
 import { RunHistory } from "./RunHistory";
 import { SessionDetail } from "./SessionDetail";
 import { SshHosts } from "./SshHosts";
 import { SshKeys } from "./SshKeys";
 import { SshLoginDock } from "./ssh";
+import { TunnelLink } from "./TunnelLink";
 import { mount } from "./dom";
 
 function openDialog(title: string, widget: Widget): Dialog<unknown> {
@@ -33,6 +35,7 @@ export class SessionModals {
     new CreateSessionForm(this._api);
   private _sshHostsWidget: () => SshHosts = () => new SshHosts(this._api);
   private _loginDockWidget: () => SshLoginDock = () => new SshLoginDock();
+  private _tunnelLinkWidget: () => TunnelLink = () => new TunnelLink(this._api);
 
   constructor(
     private _panel: CyberShuttlePanel,
@@ -111,9 +114,17 @@ export class SessionModals {
     await this._openRefreshing("SSH Keys", new SshKeys(this._api));
   }
 
+  async openTunnelLink(): Promise<boolean> {
+    const widget = this._tunnelLinkWidget();
+    let linked = false;
+    widget.onLinked = () => (linked = true);
+    await this._openRefreshing("Dev Tunnels", widget);
+    return linked;
+  }
+
   private async _openRefreshing(
     title: string,
-    widget: SshHosts | SshKeys,
+    widget: RemoteListWidget,
   ): Promise<void> {
     void widget.refresh();
     await openDialog(title, widget)
@@ -136,7 +147,14 @@ export class SessionModals {
     form.setError("");
     form.setBusy(true);
     try {
-      const session = await this._api.createSession(request);
+      const session = await this._api
+        .createSession(request)
+        .catch(async (error) => {
+          if (!needsTunnelLink(error)) throw error;
+          await this._linkInDialog(body, show);
+          show(form);
+          return this._api.createSession(request);
+        });
       if (body.isDisposed || form.isDisposed) {
         return;
       }
@@ -152,5 +170,24 @@ export class SessionModals {
         form.setBusy(false);
       }
     }
+  }
+
+  private _linkInDialog(
+    body: Panel,
+    show: (widget: Widget) => void,
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const link = this._tunnelLinkWidget();
+      link.onLinked = () => {
+        link.dispose();
+        resolve();
+      };
+      body.disposed.connect(() =>
+        reject(new Error("Dev Tunnels is not linked.")),
+      );
+      body.addWidget(link);
+      show(link);
+      void link.refresh();
+    });
   }
 }

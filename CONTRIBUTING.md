@@ -72,8 +72,10 @@ formatted and green; `lefthook install` wires it once per clone.
 cs-jupyter
 ├── src/
 │   ├── index.ts               # extension entry: service-manager plugins, fail-closed server settings
-│   ├── AuthClient.ts          # device-code broker client, sessionStorage credentials
-│   ├── DeviceCodeDialog.ts    # the accessible device-code sign-in modal
+│   ├── AuthClient.ts          # CILogon sign-in with PKCE through cs-control's relay, sessionStorage credentials
+│   ├── DeviceCodeDialog.ts    # the accessible device-code modal the Dev Tunnels link uses
+│   ├── TunnelLink.ts          # the Dev Tunnels link: status, unlink, and the Microsoft or GitHub device flow
+│   ├── workspaces.ts          # per-session JupyterLab layout kept in the session's own home
 │   ├── ControlClient.ts       # typed cs-control REST/WebSocket client and response validation
 │   ├── ssh.ts                 # OAuth WebSocket subprotocols, the SSH terminal console and its login dock
 │   ├── session.ts             # session identity/selection, the UI state shape, and the seq-bound access cache

@@ -1,6 +1,6 @@
 // Covers OAuthWebSocketFactory: URL construction, subprotocol encoding, and
-// rejection of malformed tokens or URLs. The multibyte access token tests that
-// subprotocols carry base64url of UTF-8 bytes, not the raw string.
+// rejection of malformed tokens or URLs. The multibyte token test checks that
+// the subprotocol carries base64url of UTF-8 bytes, not the raw string.
 import { fakeAuth } from "./fakes";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ControlClient } from "../src/ControlClient";
@@ -63,19 +63,11 @@ describe("OAuth WebSocket factory", () => {
     ]);
   });
 
-  it("acquires fresh credentials and sends only the three exact subprotocols", async () => {
+  it("acquires fresh credentials and sends only the two exact subprotocols", async () => {
     const acquireToken = vi
       .fn()
-      .mockResolvedValueOnce({
-        scheme: "Bearer",
-        accessToken: "token-✓",
-        idToken: "first-id",
-      })
-      .mockResolvedValueOnce({
-        scheme: "Bearer",
-        accessToken: "second-token",
-        idToken: "second-id",
-      });
+      .mockResolvedValueOnce({ idToken: "token-✓" })
+      .mockResolvedValueOnce({ idToken: "second-token" });
     const factory = new OAuthWebSocketFactory(
       { acquireToken },
       "https://control.example.edu",
@@ -93,8 +85,8 @@ describe("OAuth WebSocket factory", () => {
 
     expect(acquireToken).toHaveBeenCalledTimes(2);
     expect(sockets.slice(-2).map(({ protocols }) => protocols)).toEqual([
-      ["cybershuttle.v1", "bearer.dG9rZW4t4pyT", "identity.Zmlyc3QtaWQ"],
-      ["cybershuttle.v1", "bearer.c2Vjb25kLXRva2Vu", "identity.c2Vjb25kLWlk"],
+      ["cybershuttle.v1", "bearer.dG9rZW4t4pyT"],
+      ["cybershuttle.v1", "bearer.c2Vjb25kLXRva2Vu"],
     ]);
     expect(sockets.at(-2)?.url).toBe(
       "wss://control.example.edu/api/v1/ssh/delta/auth",
@@ -112,26 +104,17 @@ describe("OAuth WebSocket factory", () => {
   });
 
   it.each([
-    ["accessToken", ""],
-    ["accessToken", "contains space"],
-    ["accessToken", "line\nbreak"],
-    ["accessToken", "control\u007fvalue"],
-    ["accessToken", "x".repeat(16 * 1024 + 1)],
-    ["idToken", "identity with space"],
-    ["idToken", "x".repeat(16 * 1024 + 1)],
-  ] as const)(
-    "rejects a malformed or oversized %s before opening a socket",
-    async (field, token) => {
+    "",
+    "contains space",
+    "line\nbreak",
+    "controlvalue",
+    "x".repeat(16 * 1024 + 1),
+  ])(
+    "rejects a malformed or oversized ID token before opening a socket: %s",
+    async (idToken) => {
       const before = sockets.length;
       const factory = new OAuthWebSocketFactory(
-        {
-          acquireToken: vi.fn(async () => ({
-            scheme: "Bearer" as const,
-            accessToken: "valid-access",
-            idToken: "identity-token",
-            [field]: token,
-          })),
-        },
+        { acquireToken: vi.fn(async () => ({ idToken })) },
         "https://control.example.edu",
         Socket,
       );
@@ -156,23 +139,5 @@ describe("OAuth WebSocket factory", () => {
       factory.open("wss://hostile.example/api/v1/ssh/delta/auth"),
     ).rejects.toThrow("outside the configured control origin");
     expect(acquireToken).not.toHaveBeenCalled();
-  });
-
-  it("sends a GitHub token as the single github subprotocol", async () => {
-    const factory = new OAuthWebSocketFactory(
-      {
-        acquireToken: vi.fn(async () => ({
-          scheme: "github" as const,
-          accessToken: "gho_token",
-        })),
-      },
-      "https://control.example.edu",
-      Socket,
-    );
-    await factory.open("wss://control.example.edu/api/v1/ssh/delta/auth");
-    expect(sockets.at(-1)?.protocols).toEqual([
-      "cybershuttle.v1",
-      "github.Z2hvX3Rva2Vu",
-    ]);
   });
 });

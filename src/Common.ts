@@ -5,12 +5,10 @@
 // can import freely. Optional fields mean not observed or not yet, never a
 // stand-in for false or zero.
 
-export type SignInProvider = "microsoft" | "github";
+export type TunnelProvider = "microsoft" | "github";
 
 export interface OAuthCredentials {
-  scheme: "Bearer" | "github";
-  accessToken: string;
-  idToken?: string;
+  idToken: string;
 }
 
 export const SESSION_ID = /^s-[a-f0-9]{12}$/;
@@ -254,11 +252,20 @@ export function exactKeys(
   );
 }
 
+export function base64UrlEncode(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-type Validator<T> = (value: unknown) => value is T;
+export type Validator<T> = (value: unknown) => value is T;
 
 export function vString(pattern?: RegExp): Validator<string> {
   return (v): v is string =>
@@ -272,6 +279,17 @@ export const vNumber: Validator<number> = (v): v is number =>
   typeof v === "number";
 
 export const vPositiveInt: Validator<number> = isPositiveInteger;
+
+export function vBoundedInt(
+  minimum: number,
+  maximum: number,
+): Validator<number> {
+  return (v): v is number =>
+    typeof v === "number" &&
+    Number.isSafeInteger(v) &&
+    v >= minimum &&
+    v <= maximum;
+}
 
 export function vOptional<T>(field: Validator<T>): Validator<T | undefined> {
   return (v): v is T | undefined => v === undefined || field(v);
