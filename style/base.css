@@ -5,6 +5,16 @@
 :root {
   --cs-on-brand: #fff;
 }
+.csSignInPrompt {
+  width: 360px;
+  text-align: center;
+}
+.csSignInLogo {
+  width: 196px;
+  height: 196px;
+  margin: auto;
+  background: center / contain no-repeat url("./images/csbridge.png");
+}
 .csShell,
 .csSessionPanel {
   width: 100%;

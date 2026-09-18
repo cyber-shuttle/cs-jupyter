@@ -20,8 +20,21 @@ import type { ISessionLogTail } from "./ControlClient";
 export function selectedSession(
   search = window.location.search,
 ): { sessionId: string } | undefined {
-  const sessionId = new URLSearchParams(search).get("session")?.trim() ?? "";
-  return SESSION_ID.test(sessionId) ? { sessionId } : undefined;
+  const query = new URLSearchParams(search);
+  const sessionId = query.get("session") ?? "";
+  const workspace = query.get("workspace") ?? "";
+  return SESSION_ID.test(sessionId) && workspace === sessionId
+    ? { sessionId }
+    : undefined;
+}
+
+export function sessionHomeUrl(
+  location: Pick<Location, "href"> = window.location,
+): string {
+  const url = new URL("index.html", location.href);
+  url.search = "";
+  url.hash = "";
+  return url.toString();
 }
 
 export function sessionLiteUrl(
@@ -31,8 +44,8 @@ export function sessionLiteUrl(
 ): string {
   const id = validSessionId(sessionId);
   const url = new URL(location.href);
+  url.search = "";
   url.searchParams.set("session", id);
-  url.searchParams.delete("seq");
   url.searchParams.set("workspace", id);
   documentPath
     ? url.searchParams.set("path", documentPath)
@@ -172,6 +185,13 @@ export function loadSessionAccess(
 
 export function clearSessionAccess(sessionId: string): void {
   sessionStorage.removeItem(accessCacheKey(sessionId));
+}
+
+export function clearAllSessionAccess(): void {
+  for (let index = sessionStorage.length - 1; index >= 0; index--) {
+    const key = sessionStorage.key(index);
+    if (key?.startsWith(ACCESS_CACHE_PREFIX)) sessionStorage.removeItem(key);
+  }
 }
 
 function accessCacheKey(sessionId: string): string {

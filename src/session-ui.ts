@@ -3,7 +3,7 @@
 // a React re-render can drop the foreign node, so a mutation observer re-mounts
 // it and release tolerates a node already gone from the document.
 import type { JupyterFrontEndPlugin } from "@jupyterlab/application";
-import { ICommandPalette } from "@jupyterlab/apputils";
+import { Dialog, ICommandPalette, showDialog } from "@jupyterlab/apputils";
 import type { ReactWidget } from "@jupyterlab/ui-components";
 import { BoxPanel, Widget } from "@lumino/widgets";
 import { ControlClient } from "./ControlClient.js";
@@ -20,6 +20,19 @@ const SELECT_SESSION_COMMAND = "@cybershuttle/jupyter:select-session";
 type MainWidget = Widget & { content: Widget; contentHeader: BoxPanel };
 
 const launcherHeaderHeight = 46;
+
+async function offerSignIn(panel: CyberShuttlePanel): Promise<void> {
+  const body = new Widget();
+  body.addClass("csSignInPrompt");
+  body.node.innerHTML = `<div class="csSignInLogo" role="img" aria-label="CyberShuttle"></div>
+    <p>CyberShuttle Jupyter connects JupyterLab to remote HPC sessions. Sign in to continue.</p>`;
+  const result = await showDialog({
+    title: "Welcome to CyberShuttle Jupyter",
+    body,
+    buttons: [Dialog.okButton({ label: "Sign in" })],
+  });
+  if (result.button.accept) await panel.signIn();
+}
 
 export const sessionUiPlugin: JupyterFrontEndPlugin<void> = {
   id: "@cybershuttle/jupyter:session-ui",
@@ -56,6 +69,12 @@ export const sessionUiPlugin: JupyterFrontEndPlugin<void> = {
     const attachLauncher = (launcher: MainWidget): void => {
       if (!panel || panel.isDisposed) {
         panel = new CyberShuttlePanel(api, controller);
+        const candidate = panel;
+        void candidate.restored.then(() => {
+          if (!candidate.state.signedIn && !location.search) {
+            void offerSignIn(candidate);
+          }
+        });
       }
       if (panel.header.parent !== launcher.contentHeader) {
         launcher.contentHeader.addWidget(panel.header);

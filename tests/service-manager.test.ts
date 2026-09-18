@@ -31,11 +31,9 @@ import { afterEach, assert, describe, expect, it, vi } from "vitest";
 
 import { remoteServicePlugins } from "../src/index.js";
 import { getActiveSessionId } from "../src/session.js";
-import { accessFixture, sessionFixture } from "./fakes";
+import { accessFixture } from "./fakes";
 
 const id = "s-012345abcdef";
-const session = (state = "READY") =>
-  sessionFixture({ id, state: state as never, account: "project-a" });
 
 const supportManagers = {
   events: { dispose: vi.fn() },
@@ -125,21 +123,26 @@ describe("remote service manager registry", () => {
     manager.dispose();
   });
 
-  it("uses fail-closed services for a non-READY session", async () => {
+  it("does not trust cached session access without current authorization", async () => {
+    window.sessionStorage.setItem(
+      `cybershuttle.session-access.v1.${id}`,
+      JSON.stringify(accessFixture(id, 1)),
+    );
     vi.stubGlobal(
       "fetch",
-      vi.fn(
-        async () =>
-          new Response(JSON.stringify(session("STARTING")), {
-            headers: { "content-type": "application/json" },
-          }),
-      ),
+      vi.fn(async () => new Response(null, { status: 401 })),
     );
-    const registry = registryFor(`/lite/lab/index.html?session=${id}`);
+    const registry = registryFor(
+      `/lite/lab/index.html?session=${id}&workspace=${id}`,
+    );
+
     const manager = await registry.resolveRequiredService(IServiceManager);
     await manager.ready;
-    expect(manager.serverSettings.baseUrl).toBe(PageConfig.getBaseUrl());
+
     expect(getActiveSessionId()).toBeUndefined();
+    expect(manager.contents.serverSettings.baseUrl).toBe(
+      PageConfig.getBaseUrl(),
+    );
     manager.dispose();
   });
 
@@ -149,8 +152,8 @@ describe("remote service manager registry", () => {
         typeof input === "string" || input instanceof URL ? input : input.url,
       );
       let body: unknown = [];
-      if (url.pathname.endsWith(`/sessions/${id}`)) {
-        body = session();
+      if (url.pathname.endsWith(`/sessions/${id}/access`)) {
+        body = accessFixture(id, 1);
       } else if (url.pathname.endsWith("/api/kernelspecs")) {
         body = {
           default: "python",
@@ -172,11 +175,13 @@ describe("remote service manager registry", () => {
       });
     });
     vi.stubGlobal("fetch", browserFetch);
-    window.sessionStorage.setItem(
-      `cybershuttle.session-access.v1.${id}`,
-      JSON.stringify(accessFixture(id, 1)),
+    sessionStorage.setItem(
+      "cybershuttle.oauth.v1",
+      JSON.stringify({ idToken: "test", expiresAt: Date.now() + 60_000 }),
     );
-    const registry = registryFor(`/lite/lab/index.html?session=${id}`);
+    const registry = registryFor(
+      `/lite/lab/index.html?session=${id}&workspace=${id}`,
+    );
 
     const manager = await registry.resolveRequiredService(IServiceManager);
     const contents = await registry.resolveRequiredService(IContentsManager);
@@ -225,6 +230,7 @@ describe("remote service manager registry", () => {
     );
     expect(paths).toEqual(
       expect.arrayContaining([
+        `/api/v1/sessions/${id}/access`,
         "/lab/api/settings",
         "/api/kernels",
         "/api/kernelspecs",

@@ -10,6 +10,7 @@ import { ServerConnection } from "@jupyterlab/services";
 import { AuthClient } from "./AuthClient";
 import { OAuthWebSocketFactory, type OAuthWebSocketConnector } from "./ssh";
 import {
+  clearAllSessionAccess,
   clearSessionAccess,
   type ISessionAccess,
   validateSessionAccess,
@@ -159,6 +160,7 @@ export class ControlClient {
   signOut(): void {
     this._sessionsTag = undefined;
     this._auth.invalidateToken?.();
+    clearAllSessionAccess();
   }
 
   async listSshHosts(): Promise<ISshHost[]> {
