@@ -16,8 +16,9 @@ import {
   element,
   formatRemaining,
   remainingBadge,
+  remainingMs,
 } from "./dom";
-import { selectedSession } from "./session";
+import { RUN_REPORT_KEY, selectedSession, sessionHomeUrl } from "./session";
 
 export function cpuCoreSeries(samples: readonly IMetricSample[]): number[] {
   return samples.flatMap((sample, index) => {
@@ -225,6 +226,7 @@ export class WalltimeStatus extends Widget {
   constructor(
     private _api: ControlClient,
     private _sessionId: string,
+    private _leave = () => window.location.replace(sessionHomeUrl()),
   ) {
     super();
     this.addClass("csWalltimeStatus");
@@ -248,10 +250,17 @@ export class WalltimeStatus extends Widget {
   private async _reload(): Promise<void> {
     try {
       const session = await this._api.getSession(this._sessionId);
-      if (!this.isDisposed) {
-        this._session = session;
-        this._render();
+      if (this.isDisposed) return;
+      if (
+        session.state === "STOPPED" &&
+        remainingMs(session, Date.now()) === 0
+      ) {
+        sessionStorage.setItem(RUN_REPORT_KEY, `${session.id}/${session.seq}`);
+        this._leave();
+        return;
       }
+      this._session = session;
+      this._render();
     } catch {}
   }
 

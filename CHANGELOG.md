@@ -37,6 +37,7 @@ All notable changes to CyberShuttle Jupyter are recorded here. The format follow
 
 ### Changed
 
+- The status-bar countdown is a dark badge that warns under ten minutes and opens Run history at timeout.
 - Active session pages show a back chevron beside Sessions.
 - A session card's CPU or GPU icon takes the colour of its state pill.
 - The Dev Tunnels dialog keeps a box per provider: the linked one becomes a ticked card naming the account

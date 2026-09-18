@@ -107,6 +107,7 @@ export function displayState(
 }
 
 const ACCESS_CACHE_PREFIX = "cybershuttle.session-access.v1.";
+export const RUN_REPORT_KEY = "cybershuttle.run-report.v1";
 
 export interface ISessionAccess {
   sessionId: string;

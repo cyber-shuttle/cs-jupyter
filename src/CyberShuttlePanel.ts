@@ -21,6 +21,7 @@ import {
   loadSessionAccess,
   emptyState,
   getActiveSessionId,
+  RUN_REPORT_KEY,
   sessionHomeUrl,
   type ISessionUiState,
 } from "./session";
@@ -518,6 +519,9 @@ export class CyberShuttlePanel extends StackedPanel {
     this._loading = true;
     this._emitState();
     await Promise.all([this._poll(), this._refreshHosts()]);
+    const run = sessionStorage.getItem(RUN_REPORT_KEY);
+    sessionStorage.removeItem(RUN_REPORT_KEY);
+    if (run && this._auth.signedIn) void this._modals.openRunHistory(run);
     this._loading = false;
     this._emitState();
   }

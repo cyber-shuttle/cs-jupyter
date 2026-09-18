@@ -1,6 +1,7 @@
 // Renders the launcher's session cards and header actions. A card's host and job
 // spec sit together as one identity, apart from the rest of the layout. The
 // countdown is the one figure that changes on its own, driven by a shared clock.
+import { caretLeftIcon } from "@jupyterlab/ui-components";
 import { Signal } from "@lumino/signaling";
 import { RebuildingWidget } from "./RebuildingWidget";
 import type { SessionState, ISession } from "./Common";
@@ -74,12 +75,14 @@ export class SessionList extends RebuildingWidget {
     history.dataset.sessionAction = "run-history";
     history.disabled = !this._state.signedIn;
     history.onclick = () => this.runHistoryRequested.emit(undefined);
+    const back = element("a", "", "jp-Launcher-sectionIcon csSessionBack", {
+      href: sessionHomeUrl(),
+      "aria-label": "Back to sessions",
+    });
+    caretLeftIcon.element({ container: back, elementSize: "normal" });
     sectionHeader.append(
       getActiveSessionId()
-        ? element("a", "<", "jp-Launcher-sectionIcon csSessionBack", {
-            href: sessionHomeUrl(),
-            "aria-label": "Back to sessions",
-          })
+        ? back
         : serverRackIcon("jp-Launcher-sectionIcon csSessionSectionRack"),
       sectionTitle,
       history,

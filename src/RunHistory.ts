@@ -36,8 +36,9 @@ interface IHistoryEntry {
 export class RunHistory extends PanelBoundWidget {
   private _open = new Set<string>();
 
-  constructor(panel: CyberShuttlePanel) {
+  constructor(panel: CyberShuttlePanel, open?: string) {
     super(panel);
+    if (open) this._open.add(open);
     this.id = "cybershuttle-run-history";
     this.addClass("csSessionPanel");
     this._render();
