@@ -79,7 +79,7 @@ export class SessionList extends RebuildingWidget {
       href: sessionHomeUrl(),
       "aria-label": "Back to sessions",
     });
-    caretLeftIcon.element({ container: back, elementSize: "normal" });
+    caretLeftIcon.element({ container: back, elementSize: "xlarge" });
     sectionHeader.append(
       getActiveSessionId()
         ? back
