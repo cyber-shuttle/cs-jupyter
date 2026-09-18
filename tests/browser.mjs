@@ -771,6 +771,10 @@ try {
     1,
     "a session reload must reauthorize access",
   );
+  assert.equal(
+    await page.locator(".csSessionBack").getAttribute("href"),
+    `${staticOrigin}/lite/lab/index.html`,
+  );
 
   const signedOut = page.waitForNavigation({ waitUntil: "domcontentloaded" });
   await page.getByRole("button", { name: account, exact: true }).click();

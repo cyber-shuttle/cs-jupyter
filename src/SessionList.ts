@@ -8,6 +8,7 @@ import {
   displayState,
   emptyState,
   getActiveSessionId,
+  sessionHomeUrl,
   type ISessionUiState,
 } from "./session";
 import {
@@ -74,7 +75,12 @@ export class SessionList extends RebuildingWidget {
     history.disabled = !this._state.signedIn;
     history.onclick = () => this.runHistoryRequested.emit(undefined);
     sectionHeader.append(
-      serverRackIcon("jp-Launcher-sectionIcon csSessionSectionRack"),
+      getActiveSessionId()
+        ? element("a", "<", "jp-Launcher-sectionIcon csSessionBack", {
+            href: sessionHomeUrl(),
+            "aria-label": "Back to sessions",
+          })
+        : serverRackIcon("jp-Launcher-sectionIcon csSessionSectionRack"),
       sectionTitle,
       history,
       sshHosts,
