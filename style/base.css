@@ -441,18 +441,15 @@
 }
 .csSessionState-ready {
   background: var(--jp-success-color3);
-  color: var(--jp-success-color1);
 }
 .csSessionState-failed {
   background: var(--jp-error-color3);
-  color: var(--jp-error-color1);
 }
 .csSessionState-submitting,
 .csSessionState-queued,
 .csSessionState-starting,
 .csSessionState-stopping {
   background: var(--jp-warn-color3);
-  color: var(--jp-warn-color1);
 }
 
 .csCurrentPill {
@@ -480,6 +477,24 @@
 }
 .csSessionCardIcon {
   color: var(--jp-ui-font-color3);
+}
+.csSessionState-ready,
+.csSessionCardIcon-ready {
+  color: var(--jp-success-color1);
+}
+.csSessionState-failed,
+.csSessionCardIcon-failed {
+  color: var(--jp-error-color1);
+}
+.csSessionState-submitting,
+.csSessionState-queued,
+.csSessionState-starting,
+.csSessionState-stopping,
+.csSessionCardIcon-submitting,
+.csSessionCardIcon-queued,
+.csSessionCardIcon-starting,
+.csSessionCardIcon-stopping {
+  color: var(--jp-warn-color1);
 }
 .csSessionCardIcon svg {
   width: 100%;
