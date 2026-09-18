@@ -37,6 +37,10 @@ All notable changes to CyberShuttle Jupyter are recorded here. The format follow
 
 ### Changed
 
+- The Dev Tunnels dialog keeps a box per provider: the linked one becomes a ticked card naming the account
+  with Unlink inside it, and the other provider stays offered.
+- Add Session starts with `$HOME` as the workspace folder, and its Submit button carries the spinner beside
+  "Submitting…" while the request is in flight.
 - A stopping session's dialog shows a spinner with "Session <host> is stopping..." in place of the
   access refusal cs-control answers while the job winds down.
 - The terminology follows cs-bridge: what you launch is a **session**, described by a job spec. Wire fields

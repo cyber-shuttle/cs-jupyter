@@ -73,7 +73,18 @@ describe("TunnelLink dialog", () => {
     } as unknown as ControlClient;
     const widget = new TunnelLink(api);
     await widget.refresh();
-    expect(widget.node.textContent).toContain("octocat");
+    const card = widget.node.querySelector(".csLinkCard")!;
+    expect(card.textContent).toContain("\u2713 GitHub");
+    expect(card.textContent).toContain("octocat");
+    expect(
+      card.querySelector('[data-session-action="unlink-tunnel"]'),
+    ).not.toBeNull();
+    expect(
+      widget.node.querySelector('[data-session-action="link-microsoft"]'),
+    ).not.toBeNull();
+    expect(
+      widget.node.querySelector('[data-session-action="link-github"]'),
+    ).toBeNull();
 
     widget.node
       .querySelector<HTMLButtonElement>(

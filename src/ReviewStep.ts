@@ -118,7 +118,10 @@ export class ReviewStep {
   sync(busy: boolean, formError: string): void {
     this._busy = busy;
     if (this._submit) {
-      this._submit.textContent = busy ? "Submitting…" : "Submit";
+      this._submit.replaceChildren(
+        ...(busy ? [element("span", "", "csSpinner")] : []),
+        document.createTextNode(busy ? "Submitting…" : "Submit"),
+      );
       this._submit.disabled = busy || this._validating || !this._passed;
     }
     if (this._status) {

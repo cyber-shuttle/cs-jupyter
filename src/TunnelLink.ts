@@ -1,6 +1,6 @@
-// Dev Tunnels link dialog: shows the linked provider and account, offers to
-// unlink, or, when unlinked, starts and polls the device flow for Microsoft or
-// GitHub through cs-control. Session create and run-again reopen this same
+// Dev Tunnels link dialog: one box per provider, the linked one a ticked card
+// naming the account with Unlink inside it, the other a button that starts and
+// polls the device flow through cs-control. Session create and run-again reopen this same
 // widget when cs-control refuses for want of a link, and `onLinked` tells the
 // caller to retry once linking succeeds. Polling paces itself by the server's
 // intervalSeconds alone; server-side backoff is the upgrade if 429s appear.
@@ -15,8 +15,10 @@ const PROVIDER_LABEL: Record<TunnelProvider, string> = {
   github: "GitHub",
 };
 
-const MICROSOFT_GLYPH = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><g fill="currentColor"><rect x="2.5" y="2.5" width="6.8" height="6.8" /><rect x="10.7" y="2.5" width="6.8" height="6.8" /><rect x="2.5" y="10.7" width="6.8" height="6.8" /><rect x="10.7" y="10.7" width="6.8" height="6.8" /></g></svg>`;
-const GITHUB_GLYPH = `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z" /></svg>`;
+const PROVIDER_GLYPH: Record<TunnelProvider, string> = {
+  microsoft: `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><g fill="currentColor"><rect x="2.5" y="2.5" width="6.8" height="6.8" /><rect x="10.7" y="2.5" width="6.8" height="6.8" /><rect x="2.5" y="10.7" width="6.8" height="6.8" /><rect x="10.7" y="10.7" width="6.8" height="6.8" /></g></svg>`,
+  github: `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z" /></svg>`,
+};
 
 const sleep = (milliseconds: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -94,23 +96,42 @@ export class TunnelLink extends RemoteListWidget {
       "Sessions run over your own Dev Tunnels account, linked once and kept by cs-control.",
       this._error,
     );
-    if (this._status?.linked) {
-      card.appendChild(this._linkedEntry(this._status));
-    } else if (!this._busy) {
-      card.appendChild(this._linkButtons());
+    if (!this._busy) {
+      card.appendChild(this._providers());
     }
     scroll.appendChild(card);
     this.node.appendChild(root);
   }
 
-  private _linkedEntry(
+  private _providers(): HTMLElement {
+    const holder = element("div", "", "csSshAddForm csLinkProviders");
+    for (const provider of ["microsoft", "github"] as const) {
+      const linked =
+        this._status?.linked && this._status.provider === provider
+          ? this._status
+          : undefined;
+      holder.appendChild(
+        linked ? this._linkedCard(linked) : this._linkButton(provider),
+      );
+    }
+    return holder;
+  }
+
+  private _linkedCard(
     status: Extract<ITunnelLinkStatus, { linked: true }>,
   ): HTMLElement {
-    const row = element("div", "", "csSshKeyRow");
-    row.append(
-      element("span", PROVIDER_LABEL[status.provider], "csCardTitle"),
+    const row = element("div", "", "csLinkCard");
+    row.innerHTML = PROVIDER_GLYPH[status.provider];
+    const account = element("span", "", "csLinkAccount");
+    account.append(
+      element(
+        "span",
+        `\u2713 ${PROVIDER_LABEL[status.provider]}`,
+        "csCardTitle",
+      ),
       element("span", status.account ?? "", "csMeta"),
     );
+    row.appendChild(account);
     if (this._confirming === "unlink") {
       row.append(
         ...confirmDelete(
@@ -137,21 +158,16 @@ export class TunnelLink extends RemoteListWidget {
     return row;
   }
 
-  private _linkButtons(): HTMLElement {
-    const holder = element("div", "", "csSshAddForm");
-    for (const provider of ["microsoft", "github"] as const) {
-      const item = button(
-        "",
-        "csSecondaryButton csIdentityButton",
-        () => void this._link(provider),
-      );
-      item.disabled = this._linking !== undefined;
-      item.innerHTML =
-        provider === "microsoft" ? MICROSOFT_GLYPH : GITHUB_GLYPH;
-      item.append(element("span", `Link ${PROVIDER_LABEL[provider]}`));
-      item.dataset.sessionAction = `link-${provider}`;
-      holder.appendChild(item);
-    }
-    return holder;
+  private _linkButton(provider: TunnelProvider): HTMLElement {
+    const item = button(
+      "",
+      "csSecondaryButton csIdentityButton",
+      () => void this._link(provider),
+    );
+    item.disabled = this._linking !== undefined;
+    item.innerHTML = PROVIDER_GLYPH[provider];
+    item.append(element("span", `Link ${PROVIDER_LABEL[provider]}`));
+    item.dataset.sessionAction = `link-${provider}`;
+    return item;
   }
 }
