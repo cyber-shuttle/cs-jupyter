@@ -123,18 +123,18 @@ describe("walltime status bar item", () => {
     expect(low.hasClass("csWalltimeStatusLow")).toBe(true);
     low.dispose();
 
-    const over = hourJobItem({ state: "STOPPED" });
+    const over = hourJobItem({ state: "STOPPED" }, vi.fn());
     await settled();
     expect(over.isHidden).toBe(true);
     expect(over.node.textContent).toBe("");
     over.dispose();
   });
 
-  it("queues the finished run and leaves after walltime expires", async () => {
+  it("queues the run and leaves at zero before the backend reports it stopped", async () => {
     sessionStorage.clear();
     vi.setSystemTime(Date.parse("2030-01-01T01:00:00Z"));
     const leave = vi.fn();
-    const over = hourJobItem({ state: "STOPPED" }, leave);
+    const over = hourJobItem({ state: "READY" }, leave);
     await settled();
     expect(sessionStorage.getItem("cybershuttle.run-report.v1")).toBe(
       "s-012345abcdef/1",

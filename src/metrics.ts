@@ -8,6 +8,7 @@ import type { JupyterFrontEndPlugin } from "@jupyterlab/application";
 import { IStatusBar } from "@jupyterlab/statusbar";
 import { Widget } from "@lumino/widgets";
 import type { IMetricSample, IRun, IRunStats, ISession } from "./Common";
+import { isTerminal } from "./Common";
 import { ControlClient } from "./ControlClient";
 import {
   Clock,
@@ -251,10 +252,7 @@ export class WalltimeStatus extends Widget {
     try {
       const session = await this._api.getSession(this._sessionId);
       if (this.isDisposed) return;
-      if (
-        session.state === "STOPPED" &&
-        remainingMs(session, Date.now()) === 0
-      ) {
+      if (isTerminal(session.state) || remainingMs(session, Date.now()) === 0) {
         sessionStorage.setItem(RUN_REPORT_KEY, `${session.id}/${session.seq}`);
         this._leave();
         return;
