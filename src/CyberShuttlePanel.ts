@@ -21,6 +21,7 @@ import {
   loadSessionAccess,
   emptyState,
   getActiveSessionId,
+  sessionHomeUrl,
   type ISessionUiState,
 } from "./session";
 import { SessionActions } from "./session-actions";
@@ -235,6 +236,7 @@ class SignInController {
 
 export class CyberShuttlePanel extends StackedPanel {
   readonly stateChanged = new Signal<this, ISessionUiState>(this);
+  readonly restored: Promise<void>;
 
   readonly header = new CyberShuttleHeader();
   private _list: SessionList;
@@ -305,7 +307,7 @@ export class CyberShuttlePanel extends StackedPanel {
       () => void this._modals.openTunnelLink(),
     );
     this._emitState();
-    void this.resume();
+    this.restored = this.resume();
   }
 
   get state(): ISessionUiState {
@@ -490,9 +492,6 @@ export class CyberShuttlePanel extends StackedPanel {
 
   signOut(): void {
     this._signedInEpoch++;
-    for (const session of this._sessions) {
-      clearSessionAccess(session.id);
-    }
     this._auth.signOut();
     this._actions.dispose();
     this._sessions = [];
@@ -503,6 +502,7 @@ export class CyberShuttlePanel extends StackedPanel {
     this._updatesStatus = "";
     this._error = "";
     this._emitState();
+    if (getActiveSessionId()) window.location.replace(sessionHomeUrl());
   }
 
   private async _activateSignIn(): Promise<void> {

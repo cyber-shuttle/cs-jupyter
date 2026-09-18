@@ -400,7 +400,9 @@ try {
     socket.send(JSON.stringify(["setup"]));
   });
 
-  await page.goto(`${staticOrigin}/lite/lab/`);
+  await page.goto(
+    `${staticOrigin}/lite/lab/index.html?session=${sessionId}&workspace=${sessionId}`,
+  );
   const panel = page.locator("#cybershuttle-session-panel");
   await panel.getByRole("heading", { name: "Sessions", exact: true }).waitFor();
   assert.deepEqual(
@@ -416,16 +418,21 @@ try {
     "the product heading must appear once, in the launcher content header",
   );
   await page.getByRole("tab", { name: "Launcher", exact: true }).waitFor();
-  await page.waitForTimeout(300);
+  const signInPrompt = page
+    .locator(".jp-Dialog")
+    .filter({ hasText: "Welcome to CyberShuttle Jupyter" });
+  await signInPrompt.waitFor();
+  assert.equal(page.url(), `${staticOrigin}/lite/lab/index.html`);
+  assert.equal(await signInPrompt.locator(".csSignInLogo").count(), 1);
+  assert.ok((await signInPrompt.textContent()).includes("remote HPC sessions"));
   assert.equal(popupCount, 0, "fresh load must not open an OAuth page");
   assert.deepEqual(
     controlRequests,
     [],
     "fresh load must not initialize HTTP or polling",
   );
-  assert.equal(await page.getByRole("button", { name: "Sign in" }).count(), 1);
 
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await signInPrompt.getByRole("button", { name: "Sign in" }).click();
   await page
     .getByRole("button", { name: account })
     .waitFor({ timeout: 20_000 });
@@ -670,8 +677,8 @@ try {
     afterConnect.filter(
       (entry) => entry.includes("/access") || entry.includes("/oauth/"),
     ),
-    [],
-    "a cached restore must not re-issue access or bootstrap OAuth again",
+    [`GET /api/v1/sessions/${createdId}/access`],
+    "a session landing must reauthorize access without repeating OAuth",
   );
   const launcher = page.locator(".jp-Launcher");
   const contentsStart = directRequests.length;
@@ -761,8 +768,27 @@ try {
     controlRequests
       .slice(controlBeforeReload)
       .filter((entry) => entry.endsWith("/access")).length,
-    0,
-    "a reload in the same tab restores from cached access rather than re-issuing it",
+    1,
+    "a session reload must reauthorize access",
+  );
+
+  const signedOut = page.waitForNavigation({ waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: account, exact: true }).click();
+  await page.locator('[data-session-action="sign-out"]').click();
+  await signedOut;
+  await signInPrompt.waitFor();
+  assert.equal(page.url(), `${staticOrigin}/lite/lab/index.html`);
+  const signedOutDirectRequests = directRequests.length;
+  await page.waitForTimeout(500);
+  assert.deepEqual(
+    await page.evaluate(() => Object.keys(sessionStorage)),
+    [],
+    "sign-out must remove OAuth and every cached session access",
+  );
+  assert.equal(
+    directRequests.length,
+    signedOutDirectRequests,
+    "the signed-out page must not reconnect to the remote Jupyter server",
   );
 
   assert.equal(
@@ -780,7 +806,7 @@ try {
     [],
   );
   console.log(
-    `validated PKCE sign-in, the Dev Tunnels device-link gate on session create, cs-control session access, the direct Jupyter managers behind it, and reload restore (${controlRequests.length} control requests)`,
+    `validated sign-in, guarded session access, remote Jupyter managers, and sign-out (${controlRequests.length} control requests)`,
   );
   await context.close();
 } finally {

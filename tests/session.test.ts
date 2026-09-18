@@ -124,6 +124,17 @@ describe("shared cs-control client", () => {
     );
   });
 
+  it("clears every cached session access on sign-out", () => {
+    cacheSessionAccess(access);
+    cacheSessionAccess(accessFixture("s-111111111111", 1));
+    sessionStorage.setItem("unrelated", "keep");
+
+    makeClient(vi.fn()).signOut();
+
+    expect(sessionStorage.length).toBe(1);
+    expect(sessionStorage.getItem("unrelated")).toBe("keep");
+  });
+
   it("clears session access only after a successful Stop API", async () => {
     const client = makeClient(vi.fn(async () => response(session)) as any);
     const key = `cybershuttle.session-access.v1.${session.id}`;
@@ -300,23 +311,23 @@ describe("kernel spec logos", () => {
 
 describe("native Lite session routing", () => {
   const id = "s-012345abcdef";
-  const seq = 1;
 
-  it("selects on a valid session id alone", () => {
-    expect(selectedSession("?session=not-a-session")).toBeUndefined();
-    expect(selectedSession(`?session=${id}`)).toEqual({ sessionId: id });
-    expect(selectedSession(`?session=${id}&seq=${seq}`)).toEqual({
+  it("selects only a matching session and workspace", () => {
+    expect(selectedSession(`?session=${id}&workspace=${id}`)).toEqual({
       sessionId: id,
     });
+    expect(
+      selectedSession(`?session=${id}&workspace=s-111111111111`),
+    ).toBeUndefined();
   });
 
   it("keeps session selection within the current Lite application URL", () => {
     expect(
       sessionLiteUrl(id, "folder/example.ipynb", {
-        href: "http://localhost/lite/lab/index.html?old=value&seq=1",
+        href: "http://localhost/lite/lab/index.html?old=value",
       }),
     ).toBe(
-      "http://localhost/lite/lab/index.html?old=value&session=s-012345abcdef&workspace=s-012345abcdef&path=folder%2Fexample.ipynb",
+      "http://localhost/lite/lab/index.html?session=s-012345abcdef&workspace=s-012345abcdef&path=folder%2Fexample.ipynb",
     );
   });
 });

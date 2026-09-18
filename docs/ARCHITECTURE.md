@@ -103,10 +103,8 @@ a run read back out of the history, because they are the same record.
 
 ## Session access
 
-Session access intentionally keeps the token across same-tab reloads so an active session remains
-usable while cs-control is unavailable. It is never written to localStorage, the page URL, logs, errors, or
-session cards. An entry for another session or seq, or one whose expiry has passed, is discarded on
-read, and the Dev Tunnel URI it names must be a bare `*.devtunnels.ms` origin.
+Each session landing requests fresh access from cs-control. Grants live only in sessionStorage, and sign-out
+clears them before returning to the homepage.
 
 ## Fail-closed compute
 

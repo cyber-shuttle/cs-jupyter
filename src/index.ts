@@ -41,9 +41,10 @@ import { ControlClient, createSessionServerSettings } from "./ControlClient.js";
 import { jsonResponse, requestUrl } from "./Common.js";
 import {
   cacheSessionAccess,
+  clearAllSessionAccess,
   getActiveSessionId,
-  loadSessionAccess,
   selectedSession,
+  sessionHomeUrl,
   setActiveSessionId,
 } from "./session.js";
 import { sessionUiPlugin } from "./session-ui.js";
@@ -114,18 +115,21 @@ const remoteServerSettingsPlugin: ServiceManagerPlugin<
       if (!selected) {
         throw new Error("No session selected.");
       }
-      const { sessionId } = selected;
-      let access = loadSessionAccess(sessionId);
-      if (!access) {
-        access = await new ControlClient().getSessionAccess(sessionId);
-        cacheSessionAccess(access);
-      }
+      const access = await new ControlClient().getSessionAccess(
+        selected.sessionId,
+      );
+      cacheSessionAccess(access);
       PageConfig.setOption("terminalsAvailable", "true");
-      setActiveSessionId(sessionId);
+      setActiveSessionId(selected.sessionId);
       return createSessionServerSettings(access);
     } catch {
       PageConfig.setOption("terminalsAvailable", "false");
       setActiveSessionId(undefined);
+      const query = new URLSearchParams(window.location.search);
+      if (["session", "workspace", "path"].some((key) => query.has(key))) {
+        clearAllSessionAccess();
+        window.history.replaceState(window.history.state, "", sessionHomeUrl());
+      }
       return failClosedServerSettings();
     }
   },
