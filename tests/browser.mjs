@@ -771,9 +771,16 @@ try {
     1,
     "a session reload must reauthorize access",
   );
+  const back = page.locator(".csSessionBack");
   assert.equal(
-    await page.locator(".csSessionBack").getAttribute("href"),
+    await back.getAttribute("href"),
     `${staticOrigin}/lite/lab/index.html`,
+  );
+  assert.equal(
+    await back
+      .locator("svg")
+      .evaluate((node) => node.getBoundingClientRect().height),
+    24,
   );
 
   const signedOut = page.waitForNavigation({ waitUntil: "domcontentloaded" });
