@@ -3,7 +3,7 @@
 // countdown is the one figure that changes on its own, driven by a shared clock.
 import { Signal } from "@lumino/signaling";
 import { RebuildingWidget } from "./RebuildingWidget";
-import type { ISession } from "./Common";
+import type { SessionState, ISession } from "./Common";
 import {
   displayState,
   emptyState,
@@ -152,7 +152,7 @@ export class SessionList extends RebuildingWidget {
       sessionResourceRow(session),
       ...(countsDown(session) ? [countdown(session)] : []),
     );
-    card.append(sessionIcon(session), label);
+    card.append(sessionIcon(session, state), label);
     return card;
   }
 }
@@ -214,12 +214,12 @@ const CARD_GLYPHS = {
   gpu: `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="1.8" y="5.5" width="20.4" height="13" rx="1.8" /><circle cx="6" cy="12" r="2.2" /><circle cx="6" cy="12" r="0.6" /><path d="M6 18.5v2.9M9 18.5v2.9M12 18.5v2.9M15 18.5v2.9M18 18.5v2.9" /></g><text x="14.6" y="13.7" text-anchor="middle" font-family="system-ui, sans-serif" font-size="4.6" font-weight="700" fill="currentColor">GPU</text></svg>`,
 };
 
-function sessionIcon(session: ISession): HTMLElement {
+function sessionIcon(session: ISession, state: SessionState): HTMLElement {
   const gpu = (session.resources.gpuCount ?? 0) > 0;
   const icon = element(
     "div",
     "",
-    `jp-LauncherCard-icon csSessionCardIcon${gpu ? " csSessionCardIconGpu" : ""}`,
+    `jp-LauncherCard-icon csSessionCardIcon csSessionCardIcon-${state.toLowerCase()}${gpu ? " csSessionCardIconGpu" : ""}`,
   );
   icon.innerHTML = gpu ? CARD_GLYPHS.gpu : CARD_GLYPHS.cpu;
   return icon;

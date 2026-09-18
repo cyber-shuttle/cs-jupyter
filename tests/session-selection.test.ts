@@ -440,6 +440,7 @@ describe("session card contract", () => {
     expect(card.textContent).not.toContain("Jupyter:");
     expect(card.querySelector(".csSessionCardIcon svg")).not.toBeNull();
     expect(card.querySelector(".csSessionCardIconGpu")).not.toBeNull();
+    expect(card.querySelector(".csSessionCardIcon-ready")).not.toBeNull();
     const cpuList = new SessionList();
     cpuList.setState({
       ...uiState({
