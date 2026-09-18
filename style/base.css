@@ -277,13 +277,20 @@
   text-align: center;
 }
 
-.csSessionSectionRack {
+.csSessionSectionRack,
+.csSessionBack {
   flex: 0 0 auto;
   box-sizing: border-box;
   width: 32px;
   height: 32px;
   margin-right: 12px;
   color: var(--jp-ui-font-color1);
+}
+.csSessionBack {
+  display: grid;
+  place-items: center;
+  font-size: 28px;
+  text-decoration: none;
 }
 .csSessionSectionRack svg {
   width: 100%;

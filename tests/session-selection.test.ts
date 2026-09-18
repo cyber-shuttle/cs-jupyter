@@ -392,6 +392,11 @@ describe("current session pill", () => {
     const cards = [
       ...list.node.querySelectorAll<HTMLElement>(".csSessionCard"),
     ];
+    const back = list.node.querySelector<HTMLAnchorElement>(".csSessionBack")!;
+    expect([back.textContent, back.ariaLabel]).toEqual([
+      "<",
+      "Back to sessions",
+    ]);
     expect(cards[0].querySelector(".csCurrentPill")?.textContent).toBe(
       "Current",
     );
