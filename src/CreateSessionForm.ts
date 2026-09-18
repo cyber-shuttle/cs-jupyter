@@ -101,7 +101,7 @@ interface ISessionDraft {
 function freshDraft(): ISessionDraft {
   return {
     resourceType: "",
-    rootFolder: "",
+    rootFolder: "$HOME",
     wallMinutes: 60,
     partitionKey: "",
     cores: MIN_CORES,
