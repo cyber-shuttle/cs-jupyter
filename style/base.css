@@ -629,20 +629,30 @@
 .csTextButton,
 .csPrimaryButton,
 .csSecondaryButton,
-.csDangerButton {
+.csDangerButton,
+.csTextButton.jp-mod-styled,
+.csPrimaryButton.jp-mod-styled,
+.csSecondaryButton.jp-mod-styled,
+.csDangerButton.jp-mod-styled {
+  height: auto;
   padding: 7px 11px;
   border-radius: 4px;
   font: inherit;
   font-weight: 600;
+  line-height: normal;
+  letter-spacing: normal;
+  appearance: auto;
   cursor: pointer;
 }
-.csTextButton {
+.csTextButton,
+.csTextButton.jp-mod-styled {
   border: 0;
   background: transparent;
   color: var(--jp-brand-color1);
 }
 
-.csPrimaryButton {
+.csPrimaryButton,
+.csPrimaryButton.jp-mod-styled {
   border: 1px solid var(--jp-brand-color1);
   background: var(--jp-brand-color1);
   color: var(--cs-on-brand);
@@ -656,12 +666,14 @@
   border-color: rgb(255 255 255 / 45%);
   border-top-color: #fff;
 }
-.csSecondaryButton {
+.csSecondaryButton,
+.csSecondaryButton.jp-mod-styled {
   border: 1px solid var(--jp-border-color2);
   background: var(--jp-layout-color1);
   color: var(--jp-ui-font-color1);
 }
-.csDangerButton {
+.csDangerButton,
+.csDangerButton.jp-mod-styled {
   border: 1px solid var(--jp-error-color1);
   background: var(--jp-layout-color1);
   color: var(--jp-error-color1);
@@ -917,15 +929,27 @@
   font-size: var(--jp-ui-font-size0);
 }
 .csInput,
-.csSelect {
+.csSelect,
+.csRoot input.csInput.jp-mod-styled,
+.csRoot select.csSelect.jp-mod-styled {
   box-sizing: border-box;
   width: 100%;
+  height: auto;
   padding: 9px 10px;
   border: 1px solid var(--jp-border-color2);
   border-radius: 4px;
   background: var(--jp-input-background);
   color: var(--jp-ui-font-color1);
   font: inherit;
+  line-height: normal;
+  letter-spacing: normal;
+  appearance: auto;
+}
+.jp-select-wrapper:has(> .csSelect) {
+  display: contents;
+}
+.jp-select-wrapper:has(> .csSelect) > :not(.csSelect) {
+  display: none;
 }
 .csSshAuth {
   margin-top: 12px;
