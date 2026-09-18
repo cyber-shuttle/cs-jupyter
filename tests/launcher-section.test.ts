@@ -5,6 +5,7 @@ import { Signal } from "@lumino/signaling";
 import { Widget } from "@lumino/widgets";
 import { describe, expect, it, vi } from "vitest";
 import { sessionUiPlugin } from "../src/session-ui";
+import { fakeApp } from "./fakes";
 
 class LauncherContent extends Widget {
   constructor() {
@@ -36,20 +37,7 @@ describe("sessions section across launchers", () => {
   it("follows the launcher JupyterLab disposes when something is launched", async () => {
     const first = launcher("launcher-1");
     const currentChanged = new Signal<unknown, { newValue: Widget | null }>({});
-    const app = {
-      commands: {
-        addCommand: vi.fn(),
-        execute: vi.fn(),
-        hasCommand: () => true,
-      },
-      shell: {
-        currentWidget: first as Widget,
-        widgets: () => [first as Widget].values(),
-        activateById: vi.fn(),
-        currentChanged,
-      },
-      restored: Promise.resolve(),
-    };
+    const app = fakeApp(first, currentChanged);
 
     await sessionUiPlugin.activate(app as never, null);
     await settle();
@@ -71,20 +59,7 @@ describe("sessions section across launchers", () => {
   it("re-mounts the section after the launcher re-renders its content without it", async () => {
     const first = launcher("launcher-3");
     const currentChanged = new Signal<unknown, { newValue: Widget | null }>({});
-    const app = {
-      commands: {
-        addCommand: vi.fn(),
-        execute: vi.fn(),
-        hasCommand: () => true,
-      },
-      shell: {
-        currentWidget: first as Widget,
-        widgets: () => [first as Widget].values(),
-        activateById: vi.fn(),
-        currentChanged,
-      },
-      restored: Promise.resolve(),
-    };
+    const app = fakeApp(first, currentChanged);
 
     await sessionUiPlugin.activate(app as never, null);
     await settle();
@@ -101,20 +76,7 @@ describe("sessions section across launchers", () => {
     const first = launcher("launcher-4");
     const second = launcher("launcher-5");
     const currentChanged = new Signal<unknown, { newValue: Widget | null }>({});
-    const app = {
-      commands: {
-        addCommand: vi.fn(),
-        execute: vi.fn(),
-        hasCommand: () => true,
-      },
-      shell: {
-        currentWidget: first as Widget,
-        widgets: () => [first as Widget].values(),
-        activateById: vi.fn(),
-        currentChanged,
-      },
-      restored: Promise.resolve(),
-    };
+    const app = fakeApp(first, currentChanged);
     const firstConnectSpy = vi.spyOn(first.title.changed, "connect");
     const secondConnectSpy = vi.spyOn(second.title.changed, "connect");
 

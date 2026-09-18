@@ -483,7 +483,7 @@ export class CreateSessionForm extends Widget {
 function workspaceHelpText(homeDir: string | undefined): string {
   return homeDir
     ? `Relative to ${homeDir} unless it starts with /, ~ or $.`
-    : "Examples: . \u00b7 ~/cybershuttle \u00b7 $HOME/work \u00b7 /scratch/user/work";
+    : "Examples: . · ~/cybershuttle · $HOME/work · /scratch/user/work";
 }
 
 function input(name: string, type: string): HTMLInputElement {

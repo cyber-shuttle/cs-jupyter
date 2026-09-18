@@ -3,7 +3,8 @@
 // response may carry, per docs/API.md in cs-control, rejecting any other key;
 // expect() turns a shape into a throwing parser for one call site. UNCHANGED
 // marks a 304 Not Modified response, meaning the caller's cached copy is still
-// current.
+// current. accessUnavailable marks the 409 a session answers while leaving
+// READY, which the next poll shows and no caller surfaces.
 import { PageConfig, URLExt } from "@jupyterlab/coreutils";
 import { ServerConnection } from "@jupyterlab/services";
 import { AuthClient } from "./AuthClient";
@@ -37,6 +38,7 @@ import {
   expect,
   isPlainObject,
   jsonResponse,
+  isPositiveInteger,
   requestUrl,
   vArray,
   vBoolean,
@@ -45,7 +47,6 @@ import {
   vObject,
   vOneOf,
   vOptional,
-  vPositiveInt,
   vString,
   validControlApiUrl,
   validSessionId,
@@ -86,7 +87,6 @@ export const needsSshLogin = (error: unknown): boolean =>
 export const needsTunnelLink = (error: unknown): boolean =>
   error instanceof ControlError && error.code === "tunnel_link_required";
 
-// A 409 while the session leaves READY is state the next poll shows, not an error to surface.
 export const accessUnavailable = (error: unknown): boolean =>
   error instanceof ControlError && error.code === "session_access_unavailable";
 
@@ -548,7 +548,7 @@ const resourcesShape = vObject<ISession["resources"]>({
 });
 
 const seqAndJobSpecFields = {
-  seq: vPositiveInt,
+  seq: isPositiveInteger,
   sshHost: vString(),
   account: vOptional(vString()),
   partition: vString(),

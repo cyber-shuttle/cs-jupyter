@@ -2,7 +2,9 @@
 // any interactive login needed. It owns the host and account select elements;
 // the caller places them and reacts to its callbacks. The console area holds
 // only an interactive login transcript, staying open on failure and closing
-// once discovery succeeds.
+// once discovery succeeds. Operation-area state (title, status text and the
+// spinner/cancel/retry visibility) is rendered from one phase record instead
+// of being poked at from every call site.
 import { errorMessage, ISlurmInfo, ISshHost } from "./Common";
 import { ControlClient, needsSshLogin } from "./ControlClient";
 import {
@@ -104,20 +106,24 @@ export class SlurmDiscovery {
     const spinner = element("span", "", "csSpinner");
     const operationTitle = element("strong", "Slurm discovery");
     const cancelOperation = button("Cancel", "csTextButton csDiscoveryCancel");
-    cancelOperation.hidden = true;
     operationHeader.append(spinner, operationTitle, cancelOperation);
     const operationStatus = element("div", "", "csSshAuthStatus", {
       role: "status",
     });
     const consoleHost = element("div");
     const retry = button("Retry", "csSecondaryButton");
-    retry.hidden = true;
     operationArea.append(operationHeader, operationStatus, consoleHost, retry);
     container.appendChild(operationArea);
 
-    const running = (on: boolean): void => {
-      retry.hidden = on;
-      cancelOperation.hidden = spinner.hidden = !on;
+    const renderPhase = (
+      title: string | undefined,
+      status: string | undefined,
+      running: boolean,
+    ): void => {
+      if (title !== undefined) operationTitle.textContent = title;
+      if (status !== undefined) operationStatus.textContent = status;
+      retry.hidden = running;
+      cancelOperation.hidden = spinner.hidden = !running;
     };
     const ensureConsole = (): ISshOperationConsole => {
       if (!this._operation) {
@@ -131,23 +137,13 @@ export class SlurmDiscovery {
       this._slurm = undefined;
       hooks.onCleared();
     };
-    const endOperation = (
-      message: string,
-      options: { title?: string; collapse?: boolean } = {},
-    ): void => {
-      if (options.title) {
-        operationTitle.textContent = options.title;
-      }
-      running(false);
+    const endOperation = (message: string, title?: string): void => {
+      renderPhase(title, message, false);
       clearDependentState();
-      operationStatus.textContent = message;
-      this._operation?.complete(message, options.collapse ?? true);
+      this._operation?.complete(message, !title);
     };
     const showFailure = (message: string): void => {
-      endOperation(message, {
-        title: `Slurm discovery failed — ${this._sshHost}`,
-        collapse: false,
-      });
+      endOperation(message, `Slurm discovery failed — ${this._sshHost}`);
       if (!this._operation) {
         hooks.onError(message);
       }
@@ -175,9 +171,7 @@ export class SlurmDiscovery {
     const startDiscovery = (afterAuthentication = false): void => {
       const alias = this._sshHost;
       clearDependentState();
-      operationTitle.textContent = "Querying Slurm…";
-      operationStatus.textContent = `Connecting to ${alias}.`;
-      running(true);
+      renderPhase("Querying Slurm…", `Connecting to ${alias}.`, true);
       this._discoveryAbort?.abort();
       const abort = new AbortController();
       this._discoveryAbort = abort;
@@ -204,8 +198,7 @@ export class SlurmDiscovery {
             );
             return;
           }
-          operationTitle.textContent = `Interactive SSH login — ${alias}`;
-          cancelOperation.hidden = false;
+          renderPhase(`Interactive SSH login — ${alias}`, undefined, true);
           const operation = ensureConsole();
           operation.start(this._api.sshAuthWebSocket(alias), {
             ready: () => {

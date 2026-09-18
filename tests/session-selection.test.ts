@@ -3,7 +3,6 @@
 // launcher's own section markup, sharing its scrollable container. The card
 // contract covers only host, resources and state; other facts are asserted
 // elsewhere.
-import type { ReadonlyPartialJSONObject } from "@lumino/coreutils";
 import { describe, expect, it, vi } from "vitest";
 import { CyberShuttlePanel } from "../src/CyberShuttlePanel";
 import type { ISessionUiState } from "../src/session";
@@ -22,6 +21,7 @@ import {
   accessFixture,
   acceptDialog,
   controlFake,
+  fakeCommandApp,
   pollPanel,
   sessionFixture,
   sessionListFixture,
@@ -82,13 +82,7 @@ function harness(
 ) {
   setActiveSessionId(currentSessionId);
   const navigate = vi.fn();
-  const execute = vi.fn<
-    (command: string, args?: ReadonlyPartialJSONObject) => Promise<void>
-  >(async () => undefined);
-  const app = {
-    commands: { execute, hasCommand: vi.fn(() => true) },
-    shell: { currentWidget: null },
-  };
+  const { execute, app } = fakeCommandApp();
   const api = controlFake({
     listSessions: vi.fn(async () => sessionListFixture(sessions)),
     getSession: vi.fn(getSession),
@@ -114,6 +108,27 @@ async function ready(panel: CyberShuttlePanel): Promise<void> {
   await vi.waitFor(() =>
     expect(panel.node.querySelectorAll(".csSessionCard")).toHaveLength(2),
   );
+}
+
+function expectDeferredSaveWon(
+  navigate: ReturnType<typeof vi.fn>,
+  panel: CyberShuttlePanel,
+): void {
+  expect(navigate).not.toHaveBeenCalled();
+  expect(loadSessionAccess(active.id, active.seq)).toBeDefined();
+  panel.dispose();
+}
+
+async function connectingToFirst() {
+  window.history.replaceState({}, "", "/gateway/lab");
+  const pending = Promise.withResolvers<ISession>();
+  const { panel, navigate } = harness([first, second], () => pending.promise);
+  await ready(panel);
+
+  void panel.actions.connect(first.id);
+  expect(panel.state.connectingSessionId).toBe(first.id);
+  expect(panel.state.busySessionIds.size).toBeGreaterThan(0);
+  return { panel, navigate, pending };
 }
 
 describe("serialized session selection", () => {
@@ -189,13 +204,7 @@ describe("serialized session selection", () => {
   });
 
   it("does not navigate when the panel closes before selection resolves", async () => {
-    window.history.replaceState({}, "", "/gateway/lab");
-    const pending = Promise.withResolvers<ISession>();
-    const { panel, navigate } = harness([first, second], () => pending.promise);
-    await ready(panel);
-
-    void panel.actions.connect(first.id);
-    expect(panel.state.connectingSessionId).toBe(first.id);
+    const { panel, navigate, pending } = await connectingToFirst();
 
     panel.dispose();
     pending.resolve(first);
@@ -205,14 +214,7 @@ describe("serialized session selection", () => {
   });
 
   it("does not resume an in-flight connect after signing out", async () => {
-    window.history.replaceState({}, "", "/gateway/lab");
-    const pending = Promise.withResolvers<ISession>();
-    const { panel, navigate } = harness([first, second], () => pending.promise);
-    await ready(panel);
-
-    void panel.actions.connect(first.id);
-    expect(panel.state.connectingSessionId).toBe(first.id);
-    expect(panel.state.busySessionIds.size).toBeGreaterThan(0);
+    const { panel, navigate, pending } = await connectingToFirst();
 
     panel.signOut();
     expect(panel.state.connectingSessionId).toBeUndefined();
@@ -322,9 +324,7 @@ describe("serialized session selection", () => {
       save.resolve();
       await selecting;
 
-      expect(navigate).not.toHaveBeenCalled();
-      expect(loadSessionAccess(active.id, active.seq)).toBeDefined();
-      panel.dispose();
+      expectDeferredSaveWon(navigate, panel);
     },
   );
 
@@ -349,9 +349,7 @@ describe("serialized session selection", () => {
     live.resolve(first);
     await selecting;
 
-    expect(navigate).not.toHaveBeenCalled();
-    expect(loadSessionAccess(active.id, active.seq)).toBeDefined();
-    panel.dispose();
+    expectDeferredSaveWon(navigate, panel);
   });
 
   it("allows only the newest rapid selection to save and navigate", async () => {

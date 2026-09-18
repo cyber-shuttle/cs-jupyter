@@ -278,8 +278,6 @@ export const vBoolean: Validator<boolean> = (v): v is boolean =>
 export const vNumber: Validator<number> = (v): v is number =>
   typeof v === "number";
 
-export const vPositiveInt: Validator<number> = isPositiveInteger;
-
 export function vBoundedInt(
   minimum: number,
   maximum: number,

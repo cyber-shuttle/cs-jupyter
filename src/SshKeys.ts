@@ -2,7 +2,7 @@
 // assigned. Removal confirms inline, since JupyterLab would otherwise queue a
 // second dialog behind the one open.
 import { RemoteListWidget } from "./RebuildingWidget";
-import { errorMessage, ISshKey } from "./Common";
+import { ISshKey } from "./Common";
 import { ControlClient } from "./ControlClient";
 import {
   addSection,
@@ -18,8 +18,6 @@ export class SshKeys extends RemoteListWidget {
   private _api: ControlClient;
   private _keys: ISshKey[] = [];
   private _form: { name: string; file: File | undefined } | undefined;
-  private _formError = "";
-  private _saving = false;
 
   constructor(api: ControlClient) {
     super();
@@ -36,22 +34,10 @@ export class SshKeys extends RemoteListWidget {
   }
 
   private async _upload(name: string, file: File): Promise<void> {
-    this._saving = true;
-    this._formError = "";
-    this._sync();
-    try {
+    await this._submitForm(async () => {
       await this._api.addSshKey(name.trim(), await readText(file));
-      if (this.isDisposed) {
-        return;
-      }
       this._form = undefined;
-      this._saving = false;
-      await this.refresh();
-    } catch (error) {
-      this._formError = errorMessage(error);
-      this._saving = false;
-      this._sync();
-    }
+    });
   }
 
   private async _remove(key: ISshKey): Promise<void> {

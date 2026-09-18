@@ -2,7 +2,7 @@
 // usage figures and status log. A finished session's job cannot resume, so Run
 // again submits a fresh one. The status log stays visible, not behind a
 // disclosure, since it shows when a session last said anything.
-import { RebuildingWidget } from "./RebuildingWidget";
+import { PanelBoundWidget } from "./RebuildingWidget";
 import { isTerminal, type ISession } from "./Common";
 import type { CyberShuttlePanel } from "./CyberShuttlePanel";
 import type { ISessionLogTail } from "./ControlClient";
@@ -28,32 +28,21 @@ interface ISessionLogView {
   atBottom: boolean;
 }
 
-export class SessionDetail extends RebuildingWidget {
-  private _state: ISessionUiState;
+export class SessionDetail extends PanelBoundWidget {
   private _session: ISession | undefined;
   private _logView: ISessionLogView | undefined;
 
   constructor(
-    private _panel: CyberShuttlePanel,
+    panel: CyberShuttlePanel,
     private _sessionId: string,
   ) {
-    super();
+    super(panel);
     this.addClass("csSessionDetail");
-    this._state = _panel.state;
-    this._panel.stateChanged.connect(this._onStateChanged, this);
     this._render();
   }
 
-  dispose(): void {
-    if (this.isDisposed) {
-      return;
-    }
-    this._panel.stateChanged.disconnect(this._onStateChanged, this);
-    super.dispose();
-  }
-
-  private _onStateChanged(
-    _sender: CyberShuttlePanel,
+  protected _onStateChanged(
+    sender: CyberShuttlePanel,
     state: ISessionUiState,
   ): void {
     if (
@@ -62,8 +51,7 @@ export class SessionDetail extends RebuildingWidget {
     ) {
       this._logView = undefined;
     }
-    this._state = state;
-    this._render();
+    super._onStateChanged(sender, state);
   }
 
   protected _counting(): boolean {

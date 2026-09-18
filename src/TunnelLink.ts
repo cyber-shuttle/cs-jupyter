@@ -2,7 +2,8 @@
 // unlink, or, when unlinked, starts and polls the device flow for Microsoft or
 // GitHub through cs-control. Session create and run-again reopen this same
 // widget when cs-control refuses for want of a link, and `onLinked` tells the
-// caller to retry once linking succeeds.
+// caller to retry once linking succeeds. Polling paces itself by the server's
+// intervalSeconds alone; server-side backoff is the upgrade if 429s appear.
 import { RemoteListWidget } from "./RebuildingWidget";
 import { errorMessage, type TunnelProvider } from "./Common";
 import { ControlClient, type ITunnelLinkStatus } from "./ControlClient";
@@ -58,8 +59,6 @@ export class TunnelLink extends RemoteListWidget {
       );
       let interval = start.intervalSeconds * 1000;
       const deadline = Date.now() + start.expiresInSeconds * 1000;
-      // ponytail: polls at the server's intervalSeconds only; add server-side
-      // backoff if 429s show up.
       while (this._linking === provider) {
         if (Date.now() >= deadline) {
           throw new Error(

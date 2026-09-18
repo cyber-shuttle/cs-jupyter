@@ -93,17 +93,21 @@ describe("walltime status bar item", () => {
     for (let i = 0; i < 20; i++) await Promise.resolve();
   };
 
-  it("shows the remaining time for the session this page is attached to", async () => {
-    vi.setSystemTime(Date.parse("2030-01-01T00:30:00Z"));
-    const item = new WalltimeStatus(
+  const hourJobItem = (overrides: Partial<ISession> = {}) =>
+    new WalltimeStatus(
       client(
         session({
           startedAt: "2030-01-01T00:00:00Z",
           resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 },
+          ...overrides,
         }),
       ),
       "s-012345abcdef",
     );
+
+  it("shows the remaining time for the session this page is attached to", async () => {
+    vi.setSystemTime(Date.parse("2030-01-01T00:30:00Z"));
+    const item = hourJobItem();
     await settled();
     expect(item.node.textContent).toContain("30m 0s");
     expect(item.isHidden).toBe(false);
@@ -113,15 +117,7 @@ describe("walltime status bar item", () => {
 
   it("warns under ten minutes and says nothing at all once the session is over", async () => {
     vi.setSystemTime(Date.parse("2030-01-01T00:55:00Z"));
-    const low = new WalltimeStatus(
-      client(
-        session({
-          startedAt: "2030-01-01T00:00:00Z",
-          resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 },
-        }),
-      ),
-      "s-012345abcdef",
-    );
+    const low = hourJobItem();
     await settled();
     expect(low.hasClass("csWalltimeStatusLow")).toBe(true);
     low.dispose();

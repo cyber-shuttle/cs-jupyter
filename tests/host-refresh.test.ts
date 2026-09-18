@@ -33,11 +33,11 @@ afterEach(() => {
   Dialog.flush();
 });
 
-function harness() {
+function harness(initialHosts: ISshHost[] = [alpha]) {
   const api = {
     signIn: vi.fn(async () => undefined),
     listSessions: vi.fn(async () => sessionListFixture()),
-    listSshHosts: vi.fn(async () => [alpha]),
+    listSshHosts: vi.fn(async (): Promise<ISshHost[]> => initialHosts),
     createSession: vi.fn(),
   };
   const panel = panelFake(api);
@@ -171,18 +171,7 @@ describe("host refresh while the session wizard is active", () => {
   );
 
   it("enables Add Session after adding a host from inside the create wizard", async () => {
-    const api = {
-      signIn: vi.fn(async () => undefined),
-      listSessions: vi.fn(async () => sessionListFixture()),
-      listSshHosts: vi.fn(async (): Promise<ISshHost[]> => []),
-    };
-    const panel = panelFake(api);
-    const forms: CreateSessionForm[] = [];
-    (panel as any)._modals._createForm = () => {
-      const form = new CreateSessionForm(api as any);
-      forms.push(form);
-      return form;
-    };
+    const { panel, api, forms } = harness([]);
     await panel.signIn();
     await vi.waitFor(() => expect(api.listSshHosts).toHaveBeenCalled());
     const addButton = (): HTMLButtonElement =>
