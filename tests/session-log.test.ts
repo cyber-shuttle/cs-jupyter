@@ -272,6 +272,14 @@ describe("session detail modal body", () => {
     detail.dispose();
   });
 
+  it("shows a spinner and names the session while it is stopping", () => {
+    const { detail } = sessionDetail(sessionInState("STOPPING"));
+    const note = detail.node.querySelector(".csStopping");
+    expect(note?.querySelector(".csSpinner")).not.toBeNull();
+    expect(note?.textContent).toBe("Session delta is stopping...");
+    detail.dispose();
+  });
+
   it("runs a finished session again on the session it is showing", () => {
     const finished = sessionInState("STOPPED");
     const { detail, controller } = sessionDetail(finished);
