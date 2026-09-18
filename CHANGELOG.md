@@ -37,6 +37,8 @@ All notable changes to CyberShuttle Jupyter are recorded here. The format follow
 
 ### Changed
 
+- A stopping session's dialog shows a spinner with "Session <host> is stopping..." in place of the
+  access refusal cs-control answers while the job winds down.
 - The terminology follows cs-bridge: what you launch is a **session**, described by a job spec. Wire fields
   and routes are renamed to match; see the breaking change below.
 - A session's dialog closes from the × in its header, like every other dialog here, rather than from a button

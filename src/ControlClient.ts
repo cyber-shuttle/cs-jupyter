@@ -86,6 +86,10 @@ export const needsSshLogin = (error: unknown): boolean =>
 export const needsTunnelLink = (error: unknown): boolean =>
   error instanceof ControlError && error.code === "tunnel_link_required";
 
+// A 409 while the session leaves READY is state the next poll shows, not an error to surface.
+export const accessUnavailable = (error: unknown): boolean =>
+  error instanceof ControlError && error.code === "session_access_unavailable";
+
 export function safeControlFetch(
   controlApiUrl: string,
   auth: ITokenProvider,

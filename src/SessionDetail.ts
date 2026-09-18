@@ -176,6 +176,14 @@ export class SessionDetail extends RebuildingWidget {
       ),
     );
 
+    if (state === "STOPPING") {
+      const stopping = element("div", "", "csStatus csStopping");
+      stopping.append(
+        element("span", "", "csSpinner"),
+        element("span", `Session ${session.sshHost} is stopping...`),
+      );
+      root.appendChild(stopping);
+    }
     root.append(
       ...notes([
         [this._state.error || session.error || "", "csError"],

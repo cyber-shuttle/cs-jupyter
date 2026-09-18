@@ -6,6 +6,7 @@
 import { Dialog, showDialog } from "@jupyterlab/apputils";
 import { errorMessage, ISession, isTerminal } from "./Common";
 import {
+  accessUnavailable,
   ControlClient,
   ControlError,
   needsSshLogin,
@@ -208,8 +209,8 @@ export class SessionActions {
       this._accessBackoffMs.set(sessionId, nextBackoff);
       this._accessRetryAt.set(sessionId, Date.now() + nextBackoff);
       this._accessBackoffSeq.set(sessionId, session.seq);
-      const message = errorMessage(error);
-      this._lastAccessError = message;
+      const message = accessUnavailable(error) ? "" : errorMessage(error);
+      this._lastAccessError = message || undefined;
       this._hooks.onError(message);
       this._hooks.emitState();
     } finally {
@@ -276,7 +277,9 @@ export class SessionActions {
       if (current()) await this._hooks.select(session.id, current);
     } catch (error) {
       if (current()) {
-        this._hooks.onError(errorMessage(error));
+        this._hooks.onError(
+          accessUnavailable(error) ? "" : errorMessage(error),
+        );
         this._hooks.emitState();
       }
     } finally {

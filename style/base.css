@@ -180,6 +180,11 @@
 .csMeta {
   color: var(--jp-ui-font-color2);
 }
+.csStopping {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .csError {
   color: var(--jp-error-color1);
   white-space: pre-wrap;

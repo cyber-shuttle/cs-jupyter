@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CyberShuttlePanel } from "../src/CyberShuttlePanel";
 import type { ISessionUiState } from "../src/session";
 import type { ISession } from "../src/Common";
-import type { ISessionLogTail } from "../src/ControlClient";
+import { ControlError, type ISessionLogTail } from "../src/ControlClient";
 import { SessionController } from "../src/SessionController";
 import {
   cacheSessionAccess,
@@ -254,6 +254,23 @@ describe("serialized session selection", () => {
       panel.dispose();
     },
   );
+
+  it("keeps quiet when access is refused because the session is leaving READY", async () => {
+    const { panel, api } = harness([first, second], async () => first);
+    await ready(panel);
+    clearSessionAccess(first.id);
+    api.getSessionAccess.mockRejectedValueOnce(
+      new ControlError(
+        "session_access_unavailable",
+        "Session access is unavailable: the session is stopping",
+      ),
+    );
+
+    await panel.actions.refreshJupyter(first.id);
+
+    expect(panel.state.error).toBe("");
+    panel.dispose();
+  });
 
   it("names the access failure instead of a generic one when the target leaves READY mid-read", async () => {
     const { panel, api, navigate } = harness([first, second], async (id) =>
