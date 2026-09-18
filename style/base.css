@@ -313,15 +313,11 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.csSessionCardMeta,
 .csSessionCardMeta {
-  display: flex;
   flex-wrap: wrap;
   gap: 3px;
   align-items: center;
-  justify-content: center;
-  color: var(--jp-ui-font-color2);
-  font-size: var(--jp-ui-font-size0);
-  line-height: 1.35;
 }
 .csResourceMeasure {
   display: inline-flex;
@@ -335,13 +331,6 @@
 }
 .csResourceSeparator {
   color: var(--jp-ui-font-color3);
-}
-.csSessionCardCountdown {
-  display: flex;
-  justify-content: center;
-  color: var(--jp-ui-font-color2);
-  font-size: var(--jp-ui-font-size0);
-  line-height: 1.35;
 }
 .csSessionCardCountdownLow,
 .csSessionCardCountdownLow .csResourceMeasure svg,

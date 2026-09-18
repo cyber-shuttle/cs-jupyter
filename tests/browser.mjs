@@ -603,8 +603,6 @@ try {
   await page.getByText("Validation passed.", { exact: false }).waitFor();
   await page.getByRole("button", { name: "Submit", exact: true }).click();
 
-  // Session create is refused until Dev Tunnels is linked; the Add Session
-  // dialog hosts the link widget and retries once linking succeeds.
   const linkGitHub = page.getByRole("button", { name: "Link GitHub" });
   await linkGitHub.waitFor();
   await linkGitHub.click();

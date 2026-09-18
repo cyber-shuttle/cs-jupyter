@@ -21,6 +21,18 @@ import {
 
 const session = sessionFixture({ state: "QUEUED" });
 
+async function signingInWhileInFlight() {
+  const inFlight =
+    Promise.withResolvers<ReturnType<typeof sessionListFixture>>();
+  const api = controlFake({
+    listSessions: vi.fn(() => inFlight.promise),
+  });
+  const panel = panelFake(api);
+  const signedIn = panel.signIn();
+  await Promise.resolve();
+  return { inFlight, api, panel, signedIn };
+}
+
 function cacheAccess(
   sessionId: string,
   seq: number,
@@ -102,14 +114,7 @@ describe("session polling", () => {
   });
 
   it("runs one poll at a time and stops on disposal", async () => {
-    const inFlight =
-      Promise.withResolvers<ReturnType<typeof sessionListFixture>>();
-    const api = controlFake({
-      listSessions: vi.fn(() => inFlight.promise),
-    });
-    const panel = panelFake(api);
-    const signedIn = panel.signIn();
-    await Promise.resolve();
+    const { inFlight, api, panel, signedIn } = await signingInWhileInFlight();
     const calls = api.listSessions.mock.calls.length;
     void pollPanel(panel);
     void pollPanel(panel);
@@ -240,14 +245,7 @@ describe("session polling", () => {
 
 describe("sign-out during an in-flight poll", () => {
   it("does not let a listSessions read that was already in flight refill state after sign-out", async () => {
-    const inFlight =
-      Promise.withResolvers<ReturnType<typeof sessionListFixture>>();
-    const api = controlFake({
-      listSessions: vi.fn(() => inFlight.promise),
-    });
-    const panel = panelFake(api);
-    const signedIn = panel.signIn();
-    await Promise.resolve();
+    const { inFlight, panel, signedIn } = await signingInWhileInFlight();
     panel.signOut();
     inFlight.resolve(sessionListFixture([session]));
     await signedIn;
@@ -371,7 +369,7 @@ describe("conditional polling across sessions", () => {
   const etag = '"abc123"';
   const auth = { ...fakeAuth(), invalidateToken: vi.fn() };
 
-  const conditionalControl = () =>
+  const conditionalControl = (sessions: unknown = [sessionFixture()]) =>
     new ControlClient(
       "https://control.example.edu/api/v1",
       auth as any,
@@ -384,32 +382,14 @@ describe("conditional polling across sessions", () => {
         if (new Headers(init?.headers).get("If-None-Match") === etag) {
           return new Response(null, { status: 304 });
         }
-        return new Response(
-          JSON.stringify({ sessions: [sessionFixture()], logs: [] }),
-          { headers: { "content-type": "application/json", ETag: etag } },
-        );
+        return new Response(JSON.stringify({ sessions, logs: [] }), {
+          headers: { "content-type": "application/json", ETag: etag },
+        });
       }) as any,
     );
 
   it("keeps reporting failure instead of going silently blank after an invalid, ETagged list", async () => {
-    const control = new ControlClient(
-      "https://control.example.edu/api/v1",
-      auth as any,
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        if (new URL(String(input)).pathname.endsWith("/ssh")) {
-          return new Response(JSON.stringify({ hosts: [] }), {
-            headers: { "content-type": "application/json" },
-          });
-        }
-        if (new Headers(init?.headers).get("If-None-Match") === etag) {
-          return new Response(null, { status: 304 });
-        }
-        return new Response(
-          JSON.stringify({ sessions: [{ state: "READY" }], logs: [] }),
-          { headers: { "content-type": "application/json", ETag: etag } },
-        );
-      }) as any,
-    );
+    const control = conditionalControl([{ state: "READY" }]);
     const panel = panelFake(control);
     await vi.waitFor(() =>
       expect(panel.state.updatesStatus).toBe("Session updates unavailable."),

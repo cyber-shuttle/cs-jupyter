@@ -1,6 +1,8 @@
 // The SSH login console fails closed unless cs-control negotiates the
 // CyberShuttle WebSocket subprotocol. It must swallow the Enter key itself,
-// since the hosting dialog would otherwise close on the same keystroke.
+// since the hosting dialog would otherwise close on the same keystroke. Only
+// the dock parked on the body floats: .csSshAuth, the in-form progress row,
+// must never be position fixed or it would cover the shell.
 import type { ITerminalOptions } from "@xterm/xterm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "fs";
@@ -167,9 +169,6 @@ describe("SSH operation console protocol", () => {
   });
 });
 
-// .csSshAuth is SlurmDiscovery's in-form progress row; the login dock floats
-// only while parked on the body, not inside a dialog. Pinning .csSshAuth to
-// position fixed would float the in-form progress row over the shell.
 describe("SSH auth CSS", () => {
   const css = readFileSync(join(__dirname, "../style/base.css"), "utf8");
 

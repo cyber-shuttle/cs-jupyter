@@ -1,7 +1,9 @@
 // Session actions that a host refuses pending an SSH login through the login
 // dock. Stop and Delete open their own confirmation by rejecting the detail
 // dialog first, including through its own close control. The dock sits inside
-// the open dialog without being its child, so it survives that rejection.
+// the open dialog without being its child, so it survives that rejection. The
+// dock, a fixed overlay, vanishes once a login succeeds and returns for the
+// next login on the same instance.
 import { describe, expect, it, vi } from "vitest";
 import { ControlError } from "../src/ControlClient";
 import { SshLoginDock } from "../src/ssh";
@@ -58,6 +60,10 @@ async function opened(
   };
 }
 
+async function openedRefused(operation: FakeOperation) {
+  return opened(vi.fn().mockRejectedValue(refused()), operation);
+}
+
 const awaitingLogin = (operation: FakeOperation): Promise<void> =>
   vi.waitFor(() => expect(operation.starts.length).toBe(1));
 
@@ -66,6 +72,14 @@ const completeLogin = (operation: FakeOperation): void => {
   expect(ready).toBeDefined();
   ready?.();
 };
+
+async function refusedRunAgain() {
+  const operation = new FakeOperation();
+  const { panel, api, close } = await openedRefused(operation);
+  const running = panel.actions.runAgain(base.id);
+  await awaitingLogin(operation);
+  return { operation, panel, api, close, running };
+}
 
 describe("a session action a host refuses for a login", () => {
   it("offers the login and runs the action again once it is done", async () => {
@@ -91,14 +105,7 @@ describe("a session action a host refuses for a login", () => {
   });
 
   it("does not offer a second login when the host refuses again", async () => {
-    const operation = new FakeOperation();
-    const { panel, api, close } = await opened(
-      vi.fn().mockRejectedValue(refused()),
-      operation,
-    );
-
-    const running = panel.actions.runAgain(base.id);
-    await awaitingLogin(operation);
+    const { operation, panel, api, close, running } = await refusedRunAgain();
     completeLogin(operation);
     await running;
     expect(api.startSession).toHaveBeenCalledTimes(2);
@@ -146,14 +153,7 @@ describe("a session action a host refuses for a login", () => {
   });
 
   it("reports a login the person could not complete", async () => {
-    const operation = new FakeOperation();
-    const { panel, api, close } = await opened(
-      vi.fn().mockRejectedValue(refused()),
-      operation,
-    );
-
-    const running = panel.actions.runAgain(base.id);
-    await awaitingLogin(operation);
+    const { operation, panel, api, close, running } = await refusedRunAgain();
     operation.starts[0].callbacks.failed("Permission denied.");
     await running;
     expect(panel.state.error).toBe("Permission denied.");
@@ -233,16 +233,17 @@ describe("a session action a host refuses for a login", () => {
   });
 });
 
-// The login dock is a fixed-position overlay that must vanish once a login
-// succeeds. It must also come back for the next login on the same dock
-// instance.
+function startedLogin() {
+  const operation = new FakeOperation();
+  const dock = new SshLoginDock(() => operation);
+  const login = dock.login("nexus", vi.fn());
+  expect(dock.isHidden).toBe(false);
+  return { operation, dock, login };
+}
+
 describe("SshLoginDock visibility", () => {
   it("hides itself once a login succeeds, and shows again on the next login", async () => {
-    const operation = new FakeOperation();
-    const dock = new SshLoginDock(() => operation);
-
-    const login = dock.login("nexus", vi.fn());
-    expect(dock.isHidden).toBe(false);
+    const { operation, dock, login } = startedLogin();
 
     const { ready } = operation.starts[0].callbacks;
     ready?.();
@@ -255,11 +256,7 @@ describe("SshLoginDock visibility", () => {
   });
 
   it("hides itself once a login fails, leaving no stranded dismiss control", async () => {
-    const operation = new FakeOperation();
-    const dock = new SshLoginDock(() => operation);
-
-    const login = dock.login("nexus", vi.fn());
-    expect(dock.isHidden).toBe(false);
+    const { operation, dock, login } = startedLogin();
 
     const { failed } = operation.starts[0].callbacks;
     failed?.("Authentication failed.");

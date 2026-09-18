@@ -165,6 +165,15 @@ function formHarness() {
   return { form, api, operations, discoveries, deliver, failDiscovery };
 }
 
+async function discoveredAlpha(
+  overrides: Record<string, unknown> = {},
+): Promise<CreateSessionForm> {
+  const { form, deliver } = formHarness();
+  choose(form, "alpha");
+  await deliver(0, { ...discovery("alpha"), ...overrides });
+  return form;
+}
+
 async function pendingValidation(
   workspaceValue: string,
   configure?: (form: CreateSessionForm) => void,
@@ -191,6 +200,31 @@ async function pendingValidation(
     throw new Error("validation was requested without an abort signal");
   }
   return { form, api, signal, resolveValidation };
+}
+
+function submitWorkspace(form: CreateSessionForm, value: string): void {
+  const workspace = input(form, "rootFolder");
+  workspace.value = value;
+  workspace.dispatchEvent(new Event("input"));
+  submitConfiguration(form);
+}
+
+async function backAfterStaleValidation(
+  form: CreateSessionForm,
+  signal: AbortSignal,
+  resolveValidation: (value: any) => void,
+): Promise<void> {
+  [...form.node.querySelectorAll<HTMLButtonElement>("button")]
+    .find((item) => item.textContent === "Back")!
+    .click();
+  expect(signal.aborted).toBe(true);
+  resolveValidation({
+    sessionId: "s-012345abcdef",
+    status: "PASSED",
+    script: "#!/bin/bash\n#SBATCH --partition=test\n",
+    message: "stale",
+  });
+  await Promise.resolve();
 }
 
 describe("SSH CRUD and session-first creation", () => {
@@ -329,10 +363,7 @@ describe("SSH CRUD and session-first creation", () => {
   });
 
   it("filters CPU-only discovery and omits GPU fields from the payload", async () => {
-    const { form, deliver } = formHarness();
-    choose(form, "alpha");
-    await deliver(0, {
-      ...discovery("alpha"),
+    const form = await discoveredAlpha({
       partitions: [{ name: "cpu", cpuCount: 32, memoryMb: 128000, gres: [] }],
     });
     const partition = picker(form, "partition");
@@ -358,10 +389,7 @@ describe("SSH CRUD and session-first creation", () => {
   });
 
   it("keeps non-GPU GRES on CPU and does not drop mixed GPU partitions", async () => {
-    const { form, deliver } = formHarness();
-    choose(form, "alpha");
-    await deliver(0, {
-      ...discovery("alpha"),
+    const form = await discoveredAlpha({
       partitions: [
         {
           name: "licensed-cpu",
@@ -405,10 +433,7 @@ describe("SSH CRUD and session-first creation", () => {
   });
 
   it("submits generic GPU GRES using the stable gpu type", async () => {
-    const { form, deliver } = formHarness();
-    choose(form, "alpha");
-    await deliver(0, {
-      ...discovery("alpha"),
+    const form = await discoveredAlpha({
       partitions: [
         {
           name: "accelerated",
@@ -431,10 +456,7 @@ describe("SSH CRUD and session-first creation", () => {
   });
 
   it("auto-selects GPU-only discovery and includes GPU fields", async () => {
-    const { form, deliver } = formHarness();
-    choose(form, "alpha");
-    await deliver(0, {
-      ...discovery("alpha"),
+    const form = await discoveredAlpha({
       partitions: [
         {
           name: "gpu",
@@ -493,10 +515,7 @@ describe("SSH CRUD and session-first creation", () => {
   });
 
   it("keeps duplicate scheduler partition names deterministic and submits the real name", async () => {
-    const { form, deliver } = formHarness();
-    choose(form, "alpha");
-    await deliver(0, {
-      ...discovery("alpha"),
+    const form = await discoveredAlpha({
       partitions: [
         { name: "full", cpuCount: 32, memoryMb: 64000, gres: [] },
         { name: "full", cpuCount: 64, memoryMb: 128000, gres: [] },
@@ -527,9 +546,7 @@ describe("SSH CRUD and session-first creation", () => {
   });
 
   it("shows the discovered home directory as the workspace field's help, not a placeholder", async () => {
-    const { form, deliver } = formHarness();
-    choose(form, "alpha");
-    await deliver(0, discovery("alpha"));
+    const form = await discoveredAlpha();
     const workspace = input(form, "rootFolder");
     expect(workspace.getAttribute("aria-describedby")).toBe(
       "cybershuttle-workspace-help",
@@ -554,9 +571,7 @@ describe("SSH CRUD and session-first creation", () => {
   });
 
   it("preserves a raw workspace expression in the create payload", async () => {
-    const { form, deliver } = formHarness();
-    choose(form, "alpha");
-    await deliver(0, discovery("alpha"));
+    const form = await discoveredAlpha();
     const workspace = input(form, "rootFolder");
     workspace.value = "$HOME/work";
     workspace.dispatchEvent(new Event("input"));
@@ -602,17 +617,7 @@ describe("SSH CRUD and session-first creation", () => {
         ],
       },
     );
-    [...form.node.querySelectorAll<HTMLButtonElement>("button")]
-      .find((item) => item.textContent === "Back")!
-      .click();
-    expect(signal.aborted).toBe(true);
-    resolveValidation({
-      sessionId: "s-012345abcdef",
-      status: "PASSED",
-      script: "#!/bin/bash\n#SBATCH --partition=test\n",
-      message: "stale",
-    });
-    await Promise.resolve();
+    await backAfterStaleValidation(form, signal, resolveValidation);
     expect(form.node.textContent).not.toContain("Review Slurm job");
     expect(
       form.node.querySelector<HTMLInputElement>('input[name="rootFolder"]')
@@ -634,30 +639,15 @@ describe("SSH CRUD and session-first creation", () => {
         picker(form, "account").onchange?.(new Event("change"));
       },
     );
-    [...form.node.querySelectorAll<HTMLButtonElement>("button")]
-      .find((item) => item.textContent === "Back")!
-      .click();
-    expect(signal.aborted).toBe(true);
-    resolveValidation({
-      sessionId: "s-012345abcdef",
-      status: "PASSED",
-      script: "#!/bin/bash\n#SBATCH --partition=test\n",
-      message: "stale",
-    });
-    await Promise.resolve();
+    await backAfterStaleValidation(form, signal, resolveValidation);
     expect(picker(form, "account").value).toBe("");
   });
 
   it("keeps the script out of sight unless validation fails", async () => {
-    const { form, deliver } = formHarness();
-    choose(form, "alpha");
-    await deliver(0, discovery("alpha"));
+    const form = await discoveredAlpha();
     const validation = Promise.withResolvers<unknown>();
     (form as any)._api.validateCreateRequest = () => validation.promise;
-    const workspace = input(form, "rootFolder");
-    workspace.value = "$HOME";
-    workspace.dispatchEvent(new Event("input"));
-    submitConfiguration(form);
+    submitWorkspace(form, "$HOME");
     await vi.waitFor(() =>
       expect(form.node.textContent).toContain("Validating with Slurm"),
     );
@@ -677,9 +667,7 @@ describe("SSH CRUD and session-first creation", () => {
   });
 
   it("shows the script when validation fails", async () => {
-    const { form, deliver } = formHarness();
-    choose(form, "alpha");
-    await deliver(0, discovery("alpha"));
+    const form = await discoveredAlpha();
     (form as any)._api.validateCreateRequest = async () => ({
       sessionId: "s-012345abcdef",
       status: "FAILED",
@@ -687,10 +675,7 @@ describe("SSH CRUD and session-first creation", () => {
       message: "Slurm rejected the script.",
       stderr: "sbatch: error: invalid partition specified: missing",
     });
-    const workspace = input(form, "rootFolder");
-    workspace.value = "$HOME";
-    workspace.dispatchEvent(new Event("input"));
-    submitConfiguration(form);
+    submitWorkspace(form, "$HOME");
     await vi.waitFor(() =>
       expect(form.node.textContent).toContain("Validation failed."),
     );
@@ -743,6 +728,12 @@ const withKeys = <T extends object>(api: T) => ({
   listSshKeys: vi.fn(async () => []),
   ...api,
 });
+
+function submitHostForm(hosts: SshHosts): void {
+  hosts.node
+    .querySelector("form")!
+    .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+}
 
 describe("SSH hosts modal chrome", () => {
   it("opens with its meaning and a rule, and carries no close of its own", async () => {
@@ -871,9 +862,7 @@ describe("SSH hosts modal chrome", () => {
     expect(hosts.node.querySelector('input[name="sshHostName"]')).toBeNull();
     command.value = "ssh -p 22 me@login2.example.edu";
     command.dispatchEvent(new Event("input"));
-    hosts.node
-      .querySelector("form")!
-      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    submitHostForm(hosts);
     await vi.waitFor(() =>
       expect(api.updateSshHost).toHaveBeenCalledWith(
         "delta",
@@ -903,9 +892,7 @@ describe("SSH hosts modal chrome", () => {
     name.dispatchEvent(new Event("input"));
     command.value = " ssh -p 2222 me@login.example.edu ";
     command.dispatchEvent(new Event("input"));
-    hosts.node
-      .querySelector("form")!
-      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    submitHostForm(hosts);
     await vi.waitFor(() =>
       expect(api.addSshHost).toHaveBeenCalledWith(
         "delta",
@@ -1042,9 +1029,7 @@ describe("SSH hosts modal chrome", () => {
     expect(key.value).toBe("delta-key");
     key.value = "";
     key.dispatchEvent(new Event("change"));
-    hosts.node
-      .querySelector("form")!
-      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    submitHostForm(hosts);
     await vi.waitFor(() =>
       expect(api.updateSshHost).toHaveBeenCalledWith(
         "delta",

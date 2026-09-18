@@ -34,6 +34,14 @@ export class ReviewStep {
     return !!this._request;
   }
 
+  private get _passed(): boolean {
+    return this._validation?.status === "PASSED";
+  }
+
+  private get _failed(): boolean {
+    return this._validation?.status === "FAILED";
+  }
+
   start(request: ISessionCreateRequest): void {
     this.leave();
     this._request = request;
@@ -96,10 +104,9 @@ export class ReviewStep {
       };
     }
     if (this._validation) {
-      const passed = this._validation.status === "PASSED";
       return {
-        text: `Validation ${passed ? "passed" : "failed"}. ${this._validation.message}`,
-        modifier: passed ? "csValidationPassed" : "csValidationFailed",
+        text: `Validation ${this._passed ? "passed" : "failed"}. ${this._validation.message}`,
+        modifier: this._passed ? "csValidationPassed" : "csValidationFailed",
       };
     }
     return {
@@ -112,8 +119,7 @@ export class ReviewStep {
     this._busy = busy;
     if (this._submit) {
       this._submit.textContent = busy ? "Submitting…" : "Submit";
-      this._submit.disabled =
-        busy || this._validating || this._validation?.status !== "PASSED";
+      this._submit.disabled = busy || this._validating || !this._passed;
     }
     if (this._status) {
       const { text, modifier } = this._validationState();
@@ -124,10 +130,7 @@ export class ReviewStep {
       this._status.className = `csValidationStatus ${modifier}`.trim();
     }
     if (this._errorNode) {
-      const failed =
-        !!formError ||
-        !!this._validationError ||
-        this._validation?.status === "FAILED";
+      const failed = !!formError || !!this._validationError || this._failed;
       const detail =
         formError || this._validation?.stderr || this._validationError;
       this._errorNode.textContent = detail;
@@ -150,8 +153,9 @@ export class ReviewStep {
       "csMeta",
     );
     const scriptHeader = element("div", "", "csScriptHeader");
-    const scriptLabel = element("label", "Generated Slurm script", "csLabel");
-    scriptLabel.htmlFor = "cybershuttle-slurm-script";
+    const scriptLabel = element("label", "Generated Slurm script", "csLabel", {
+      for: "cybershuttle-slurm-script",
+    });
     const copy = button("Copy script", "csSecondaryButton", () => {
       const generatedScript = this._validation?.script ?? "";
       if (generatedScript) {
@@ -174,31 +178,23 @@ export class ReviewStep {
     const retry = button("Retry validation", "csSecondaryButton", () => {
       void this.validate(hooks);
     });
-    this._sync = () => {
-      const failed = this._validation?.status === "FAILED";
-      const generatedScript = this._validation?.script ?? "";
-      script.textContent = generatedScript;
-      copy.disabled = !generatedScript;
-      scriptHeader.hidden = script.hidden = !failed || !generatedScript;
-      retry.hidden =
-        this._validating ||
-        (!this._validationError && this._validation?.status !== "FAILED");
-    };
-
     const footer = element("div", "", "csFormFooter");
     const back = button("Back", "csSecondaryButton", hooks.onBack);
     const submit = button("Submit", "csPrimaryButton", () => {
-      if (
-        !this._busy &&
-        !this._validating &&
-        this._validation?.status === "PASSED" &&
-        this._request
-      ) {
+      if (!this._busy && !this._validating && this._passed && this._request) {
         hooks.onSubmit(this._request);
       }
     });
     this._submit = submit;
     footer.append(back, submit);
+    this._sync = () => {
+      const generatedScript = this._validation?.script ?? "";
+      script.textContent = generatedScript;
+      copy.disabled = !generatedScript;
+      scriptHeader.hidden = script.hidden = !this._failed || !generatedScript;
+      retry.hidden =
+        this._validating || (!this._validationError && !this._failed);
+    };
     review.append(
       heading,
       description,

@@ -4,6 +4,8 @@
 // stopping and deleting a session both confirm first.
 import { vi } from "vitest";
 import { Signal } from "@lumino/signaling";
+import type { Widget } from "@lumino/widgets";
+import type { ReadonlyPartialJSONObject } from "@lumino/coreutils";
 import type { IRun, ISession } from "../src/Common";
 import type {
   IControlAuth,
@@ -18,6 +20,37 @@ import type { ISshOperationCallbacks, ISshOperationConsole } from "../src/ssh";
 
 export async function pollPanel(panel: unknown): Promise<void> {
   await (panel as { _poll(): Promise<void> })._poll();
+}
+
+export function fakeCommandApp() {
+  const execute = vi.fn<
+    (command: string, args?: ReadonlyPartialJSONObject) => Promise<void>
+  >(async () => undefined);
+  const app = {
+    commands: { execute, hasCommand: vi.fn(() => true) },
+    shell: { currentWidget: null },
+  };
+  return { execute, app };
+}
+
+export function fakeApp(
+  current: Widget,
+  currentChanged: Signal<unknown, { newValue: Widget | null }>,
+) {
+  return {
+    commands: {
+      addCommand: vi.fn(),
+      execute: vi.fn(),
+      hasCommand: () => true,
+    },
+    shell: {
+      currentWidget: current,
+      widgets: () => [current].values(),
+      activateById: vi.fn(),
+      currentChanged,
+    },
+    restored: Promise.resolve(),
+  };
 }
 
 export class FakeOperation implements ISshOperationConsole {
@@ -153,6 +186,15 @@ export function fakeAuth(idToken = "delegated-token") {
     acquireToken: vi.fn(async () => ({ idToken })),
     interactiveLogin: vi.fn(async () => undefined),
   } satisfies IControlAuth;
+}
+
+export async function removeConfirmed(
+  panel: CyberShuttlePanel,
+  id: string,
+): Promise<void> {
+  const removing = panel.actions.remove(id);
+  await acceptDialog();
+  await removing;
 }
 
 export async function acceptDialog(): Promise<void> {

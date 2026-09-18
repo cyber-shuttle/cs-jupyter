@@ -2,10 +2,10 @@
 // The history outlives the cards in it, so a deleted session's run stays, and
 // a session's current seq is itself a run entry with no outcome yet.
 // RunReport renders one finished entry's accounting, usage and frozen log.
-import { RebuildingWidget } from "./RebuildingWidget";
+import { PanelBoundWidget } from "./RebuildingWidget";
 import type { IRun, ISession, SessionState } from "./Common";
 import { isTerminal } from "./Common";
-import { displayState, type ISessionUiState } from "./session";
+import { displayState } from "./session";
 import type { CyberShuttlePanel } from "./CyberShuttlePanel";
 import {
   countsDown,
@@ -33,32 +33,13 @@ interface IHistoryEntry {
   session?: ISession;
 }
 
-export class RunHistory extends RebuildingWidget {
-  private _state: ISessionUiState;
+export class RunHistory extends PanelBoundWidget {
   private _open = new Set<string>();
 
-  constructor(private _panel: CyberShuttlePanel) {
-    super();
+  constructor(panel: CyberShuttlePanel) {
+    super(panel);
     this.id = "cybershuttle-run-history";
     this.addClass("csSessionPanel");
-    this._state = _panel.state;
-    this._panel.stateChanged.connect(this._onStateChanged, this);
-    this._render();
-  }
-
-  dispose(): void {
-    if (this.isDisposed) {
-      return;
-    }
-    this._panel.stateChanged.disconnect(this._onStateChanged, this);
-    super.dispose();
-  }
-
-  private _onStateChanged(
-    _sender: CyberShuttlePanel,
-    state: ISessionUiState,
-  ): void {
-    this._state = state;
     this._render();
   }
 

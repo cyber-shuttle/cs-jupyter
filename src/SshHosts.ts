@@ -35,8 +35,6 @@ export class SshHosts extends RemoteListWidget {
   private _hosts: ISshHost[] = [];
   private _keys: ISshKey[] = [];
   private _form: IHostDraft | undefined;
-  private _addError = "";
-  private _saving = false;
   private _open = new Set<string>();
   private _tests = new Map<string, IHostTest>();
 
@@ -58,10 +56,7 @@ export class SshHosts extends RemoteListWidget {
   }
 
   private async _save(form: IHostDraft): Promise<void> {
-    this._saving = true;
-    this._addError = "";
-    this._sync();
-    try {
+    await this._submitForm(async () => {
       await (form.alias
         ? this._api.updateSshHost(form.alias, form.command.trim(), form.key)
         : this._api.addSshHost(
@@ -69,22 +64,13 @@ export class SshHosts extends RemoteListWidget {
             form.command.trim(),
             form.key,
           ));
-      if (this.isDisposed) {
-        return;
-      }
       this._form = undefined;
-      this._saving = false;
-      await this.refresh();
-    } catch (error) {
-      this._addError = errorMessage(error);
-      this._saving = false;
-      this._sync();
-    }
+    });
   }
 
   private _openForm(form: IHostDraft | undefined): void {
     this._form = form;
-    this._addError = "";
+    this._formError = "";
     this._render();
   }
 
@@ -174,7 +160,7 @@ export class SshHosts extends RemoteListWidget {
       "csFieldHelp",
     );
     const [error, footer] = formFooter(
-      this._addError,
+      this._formError,
       this._saving ? "Saving…" : draft.alias ? "Save changes" : "Save host",
       this._saving,
     );

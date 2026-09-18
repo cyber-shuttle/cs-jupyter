@@ -330,15 +330,6 @@ describe("AuthClient credential persistence", () => {
 
 describe("AuthClient response validation", () => {
   it("rejects a redirected, non-JSON, or malformed exchange response", async () => {
-    sessionStorage.setItem(
-      "cybershuttle.oauth.pkce.v1",
-      JSON.stringify({
-        state: "s",
-        verifier: "v",
-        redirectUri: "http://localhost:3000/lite/lab/",
-      }),
-    );
-    setUrl("/lite/lab/?code=c&state=s");
     for (const reply of [
       { body: { idToken: "x", expiresInSeconds: 900 }, redirected: true },
       {

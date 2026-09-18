@@ -1,7 +1,6 @@
 // The shared ControlClient used for session lifecycle calls and for building
 // Jupyter server connection settings. Validating a session id before an action
 // avoids reporting a spurious failure for an already-stopped session.
-import type { ReadonlyPartialJSONObject } from "@lumino/coreutils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ControlClient,
@@ -21,7 +20,12 @@ import {
   selectedSession,
   sessionLiteUrl,
 } from "../src/session";
-import { accessFixture, fakeAuth, sessionFixture } from "./fakes";
+import {
+  accessFixture,
+  fakeAuth,
+  fakeCommandApp,
+  sessionFixture,
+} from "./fakes";
 
 const auth = fakeAuth("test-delegated-token");
 
@@ -246,13 +250,7 @@ describe("shared cs-control client", () => {
 
 describe("session command guard", () => {
   it("opens the chooser for notebooks, consoles, and terminals until selected", async () => {
-    const execute = vi.fn<
-      (command: string, args?: ReadonlyPartialJSONObject) => Promise<void>
-    >(async () => undefined);
-    const app = {
-      commands: { execute, hasCommand: vi.fn(() => true) },
-      shell: { currentWidget: null },
-    };
+    const { execute, app } = fakeCommandApp();
     const controller = new SessionController(
       app as any,
       {} as any,

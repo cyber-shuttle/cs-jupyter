@@ -349,14 +349,9 @@ export class AuthClient {
 }
 
 function signInFailure(status: number, value: unknown): Error {
-  const code =
-    isPlainObject(value) && isPlainObject(value.error)
-      ? value.error.code
-      : undefined;
-  const message =
-    isPlainObject(value) && isPlainObject(value.error)
-      ? value.error.message
-      : undefined;
+  const error =
+    isPlainObject(value) && isPlainObject(value.error) ? value.error : {};
+  const { code, message } = error;
   return new Error(
     typeof message === "string"
       ? message
