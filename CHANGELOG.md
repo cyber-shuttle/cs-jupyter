@@ -37,6 +37,7 @@ All notable changes to CyberShuttle Jupyter are recorded here. The format follow
 
 ### Changed
 
+- Dialog controls keep their CyberShuttle styling while JupyterLab applies its host control classes.
 - The status-bar countdown is a dark badge that warns under ten minutes and opens Run history at timeout.
 - Active session pages show a back chevron beside Sessions.
 - A session card's CPU or GPU icon takes the colour of its state pill.

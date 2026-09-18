@@ -557,6 +557,21 @@ try {
   );
   await sessionDialog.waitFor();
   assert.deepEqual(
+    await sessionDialog
+      .locator(".csSessionDetailActions button")
+      .evaluateAll((buttons) =>
+        buttons.map((button) => {
+          const style = getComputedStyle(button);
+          return [button.textContent, style.color, style.borderStyle];
+        }),
+      ),
+    [
+      ["Run again", "rgb(255, 255, 255)", "solid"],
+      ["Delete", "rgb(211, 47, 47)", "solid"],
+    ],
+    "Jupyter dialog styling must not override session action variants",
+  );
+  assert.deepEqual(
     await sessionDialog.evaluate((node) => [
       node.clientWidth >= 700,
       getComputedStyle(node.querySelector(".jp-Dialog-body")).overflowY,
@@ -589,6 +604,51 @@ try {
   await sessionDialog.locator(".jp-Dialog-close-button").click();
 
   await page.getByRole("button", { name: "Add Session" }).click();
+  const styledControlDifferences = await page
+    .locator(".csInput.jp-mod-styled, .csSelect.jp-mod-styled")
+    .evaluateAll((controls) =>
+      controls.flatMap((control) => {
+        const clone = control.cloneNode(true);
+        clone.classList.remove("jp-mod-styled");
+        clone.style.position = "fixed";
+        clone.style.visibility = "hidden";
+        document.body.appendChild(clone);
+        const styled = getComputedStyle(control);
+        const plain = getComputedStyle(clone);
+        const properties = [
+          "padding",
+          "border",
+          "color",
+          "font",
+          "lineHeight",
+          "letterSpacing",
+          "appearance",
+        ];
+        const differences = properties
+          .filter((property) => styled[property] !== plain[property])
+          .map((property) => [
+            control.getAttribute("name"),
+            property,
+            styled[property],
+            plain[property],
+          ]);
+        clone.remove();
+        return differences;
+      }),
+    );
+  assert.deepEqual(
+    styledControlDifferences,
+    [],
+    "Jupyter dialog styling must not alter CyberShuttle inputs or selects",
+  );
+  assert.equal(
+    await page
+      .locator(".jp-select-wrapper:has(> .csSelect)")
+      .first()
+      .evaluate((wrapper) => getComputedStyle(wrapper).display),
+    "contents",
+    "Jupyter's select wrapper must not alter the form layout",
+  );
   await page.getByLabel("SSH Host").selectOption("cluster");
   await page
     .locator(".csSshOperationTerminal .xterm-rows")
