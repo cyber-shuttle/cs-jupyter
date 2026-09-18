@@ -393,10 +393,11 @@ describe("current session pill", () => {
       ...list.node.querySelectorAll<HTMLElement>(".csSessionCard"),
     ];
     const back = list.node.querySelector<HTMLAnchorElement>(".csSessionBack")!;
-    expect([back.textContent, back.ariaLabel]).toEqual([
-      "<",
-      "Back to sessions",
-    ]);
+    expect([
+      back.querySelector("svg") !== null,
+      back.textContent,
+      back.ariaLabel,
+    ]).toEqual([true, "", "Back to sessions"]);
     expect(cards[0].querySelector(".csCurrentPill")?.textContent).toBe(
       "Current",
     );

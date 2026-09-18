@@ -420,14 +420,18 @@ describe("conditional polling across sessions", () => {
 });
 
 describe("session resume", () => {
-  it("treats a restored credential as signed in without repeating sign-in", async () => {
+  it("restores the credential and queued run report", async () => {
+    sessionStorage.setItem("cybershuttle.run-report.v1", `${session.id}/1`);
     const api = controlFake({
       resumeSignIn: vi.fn(async () => undefined),
     });
     const panel = panelFake(api);
+    const open = vi.spyOn(panel.modals, "openRunHistory").mockResolvedValue();
     await vi.waitFor(() => expect(panel.state.signedIn).toBe(true));
     expect(api.signIn).not.toHaveBeenCalled();
     expect(api.listSessions).toHaveBeenCalled();
+    expect(open).toHaveBeenCalledWith(`${session.id}/1`);
+    expect(sessionStorage.getItem("cybershuttle.run-report.v1")).toBeNull();
     panel.dispose();
   });
 

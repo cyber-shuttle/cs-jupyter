@@ -228,9 +228,13 @@ describe("run history view", () => {
     new ControllerFake(uiState({ runs, sessions })) as never;
 
   it("lists finished runs with their report", async () => {
-    const history = new RunHistory(panelWith([finished], []));
+    const history = new RunHistory(
+      panelWith([finished], []),
+      `${finished.sessionId}/${finished.seq}`,
+    );
     expect(history.node.textContent).toContain("delta");
     expect(history.node.textContent).toContain("2.0 GB");
+    expect(history.node.querySelector("details")?.open).toBe(true);
     expect(history.node.querySelector(".csRunReport")).not.toBeNull();
     history.dispose();
   });

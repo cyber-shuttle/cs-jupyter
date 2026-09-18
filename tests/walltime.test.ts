@@ -93,7 +93,7 @@ describe("walltime status bar item", () => {
     for (let i = 0; i < 20; i++) await Promise.resolve();
   };
 
-  const hourJobItem = (overrides: Partial<ISession> = {}) =>
+  const hourJobItem = (overrides: Partial<ISession> = {}, leave?: () => void) =>
     new WalltimeStatus(
       client(
         session({
@@ -103,6 +103,7 @@ describe("walltime status bar item", () => {
         }),
       ),
       "s-012345abcdef",
+      leave,
     );
 
   it("shows the remaining time for the session this page is attached to", async () => {
@@ -122,13 +123,23 @@ describe("walltime status bar item", () => {
     expect(low.hasClass("csWalltimeStatusLow")).toBe(true);
     low.dispose();
 
-    const over = new WalltimeStatus(
-      client(session({ state: "STOPPED", startedAt: "2030-01-01T00:00:00Z" })),
-      "s-012345abcdef",
-    );
+    const over = hourJobItem({ state: "STOPPED" });
     await settled();
     expect(over.isHidden).toBe(true);
     expect(over.node.textContent).toBe("");
+    over.dispose();
+  });
+
+  it("queues the finished run and leaves after walltime expires", async () => {
+    sessionStorage.clear();
+    vi.setSystemTime(Date.parse("2030-01-01T01:00:00Z"));
+    const leave = vi.fn();
+    const over = hourJobItem({ state: "STOPPED" }, leave);
+    await settled();
+    expect(sessionStorage.getItem("cybershuttle.run-report.v1")).toBe(
+      "s-012345abcdef/1",
+    );
+    expect(leave).toHaveBeenCalledOnce();
     over.dispose();
   });
 });

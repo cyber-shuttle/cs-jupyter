@@ -132,8 +132,8 @@ export class SessionModals {
       .catch(() => undefined);
   }
 
-  async openRunHistory(): Promise<void> {
-    await openDialog("Run history", new RunHistory(this._panel))
+  async openRunHistory(open?: string): Promise<void> {
+    await openDialog("Run history", new RunHistory(this._panel, open))
       .launch()
       .catch(() => undefined);
   }

@@ -289,7 +289,6 @@
 .csSessionBack {
   display: grid;
   place-items: center;
-  font-size: 28px;
   text-decoration: none;
 }
 .csSessionSectionRack svg {
@@ -351,8 +350,7 @@
 }
 .csSessionCardCountdownLow,
 .csSessionCardCountdownLow .csResourceMeasure svg,
-.csSessionDetailLow,
-.csWalltimeStatusLow {
+.csSessionDetailLow {
   color: var(--jp-warn-color1);
 }
 .csDetailColumns {
@@ -434,6 +432,14 @@
 .csWalltimeStatus {
   display: flex;
   align-items: center;
+  padding: 0 6px;
+  border-radius: 3px;
+  background: #303030;
+  color: #fff;
+}
+.csWalltimeStatusLow {
+  background: var(--jp-warn-color1);
+  color: #111;
 }
 .csWalltimeStatusItem {
   display: inline-flex;
