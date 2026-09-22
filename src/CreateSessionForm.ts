@@ -9,7 +9,7 @@ import { Signal } from "@lumino/signaling";
 import { Widget } from "@lumino/widgets";
 import { IPartition, ISessionCreateRequest, ISshHost } from "./Common";
 import { ControlClient } from "./ControlClient";
-import { SshOperationConsoleFactory } from "./ssh";
+import type { SshLoginDock } from "./ssh";
 import { button, element, field, fillOptions, select } from "./dom";
 import { ReviewStep, type IReviewStepHooks } from "./ReviewStep";
 import { SlurmDiscovery } from "./SlurmDiscovery";
@@ -68,12 +68,10 @@ function availableResourceTypes(partitions: IPartition[]): ResourceType[] {
 function gpuOptions(
   partition: IPartition | undefined,
 ): Array<[string, string]> {
-  return (partition?.gres.filter(isGpuGres) ?? []).map(
-    (item): [string, string] => {
-      const { value, label } = gpuType(item.name);
-      return [value, label];
-    },
-  );
+  return (partition?.gres.filter(isGpuGres) ?? []).map((item) => {
+    const { value, label } = gpuType(item.name);
+    return [value, label];
+  });
 }
 
 function gpuMax(
@@ -129,13 +127,13 @@ export class CreateSessionForm extends Widget {
 
   constructor(
     private _api: ControlClient,
-    operationFactory?: SshOperationConsoleFactory,
+    loginDock: () => SshLoginDock,
   ) {
     super();
     this.id = "cybershuttle-create-session";
     this.addClass("csSessionPanel");
     this.hide();
-    this._discovery = new SlurmDiscovery(this._api, operationFactory);
+    this._discovery = new SlurmDiscovery(this._api, loginDock);
     this._review = new ReviewStep(this._api);
     this._render();
   }
@@ -156,7 +154,10 @@ export class CreateSessionForm extends Widget {
   }
 
   dispose(): void {
-    this._discovery.dispose();
+    if (this.isDisposed) {
+      return;
+    }
+    this._discovery.stop();
     this._review.cancel();
     super.dispose();
   }
@@ -213,10 +214,11 @@ export class CreateSessionForm extends Widget {
     root.append(
       element("hr", "", "csDialogRule"),
       this._review.isActive
-        ? this._buildReviewStep()
+        ? this._review.build(this._reviewHooks())
         : this._buildConfigurationStep(),
     );
     this.node.appendChild(root);
+    this._syncStatus();
   }
 
   private _reviewHooks(): IReviewStepHooks {
@@ -229,12 +231,6 @@ export class CreateSessionForm extends Widget {
       isDisposed: () => this.isDisposed,
       onChange: () => this._syncStatus(),
     };
-  }
-
-  private _buildReviewStep(): HTMLElement {
-    const node = this._review.build(this._reviewHooks());
-    this._syncStatus();
-    return node;
   }
 
   private _buildConfigurationStep(): HTMLElement {
@@ -293,14 +289,16 @@ export class CreateSessionForm extends Widget {
         this._draft.partitionKey !== "" &&
         partition.value === this._draft.partitionKey;
       cores.value = String(
-        restoring
-          ? Math.min(this._draft.cores, selected?.cpuCount ?? MIN_CORES)
-          : Math.min(MIN_CORES, selected?.cpuCount ?? MIN_CORES),
+        Math.min(
+          restoring ? this._draft.cores : MIN_CORES,
+          selected?.cpuCount ?? MIN_CORES,
+        ),
       );
       memory.value = String(
-        restoring
-          ? Math.min(this._draft.memoryMb, selected?.memoryMb ?? MIN_MEMORY_MB)
-          : Math.min(MIN_MEMORY_MB, selected?.memoryMb ?? MIN_MEMORY_MB),
+        Math.min(
+          restoring ? this._draft.memoryMb : MIN_MEMORY_MB,
+          selected?.memoryMb ?? MIN_MEMORY_MB,
+        ),
       );
       gpuCount.value = restoring ? String(this._draft.gpuCount) : "1";
       this._draft.partitionKey = partition.value;
@@ -367,7 +365,7 @@ export class CreateSessionForm extends Widget {
       }
       for (const type of types) {
         const label = element("label", "", "csResourceTypeOption");
-        const radio = document.createElement("input");
+        const radio = element("input");
         radio.type = "radio";
         radio.name = "resourceType";
         radio.value = type;
@@ -437,7 +435,6 @@ export class CreateSessionForm extends Widget {
       footer,
     );
     form.appendChild(options);
-    this._syncStatus();
 
     form.onsubmit = (event) => {
       event.preventDefault();

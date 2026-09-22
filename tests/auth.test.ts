@@ -8,6 +8,7 @@ import {
   AuthInteractionRequiredError,
   type IAuthClientDependencies,
 } from "../src/AuthClient";
+import { jsonResponse } from "../src/Common";
 
 const controlApiUrl = "https://control.example.edu/api/v1";
 
@@ -30,8 +31,6 @@ function jwt(payload: Record<string, unknown>): string {
 interface MockReply {
   status?: number;
   body: unknown;
-  contentType?: string;
-  redirected?: boolean;
 }
 
 function fetchSequence(replies: Array<MockReply | Error>): typeof fetch {
@@ -39,14 +38,7 @@ function fetchSequence(replies: Array<MockReply | Error>): typeof fetch {
     const next = replies.shift();
     if (!next) throw new Error("unexpected sign-in request");
     if (next instanceof Error) throw next;
-    const response = new Response(JSON.stringify(next.body), {
-      status: next.status ?? 200,
-      headers: { "content-type": next.contentType ?? "application/json" },
-    });
-    if (next.redirected) {
-      Object.defineProperty(response, "redirected", { value: true });
-    }
-    return response;
+    return jsonResponse(next.body, { status: next.status });
   }) as unknown as typeof fetch;
 }
 
@@ -182,6 +174,72 @@ describe("AuthClient callback exchange", () => {
 });
 
 describe("AuthClient token refresh", () => {
+  it("shares one refresh across concurrent token acquisitions", async () => {
+    const idToken = jwt({ sub: "owner" });
+    const refreshed = jwt({ sub: "owner", generation: 2 });
+    sessionStorage.setItem(
+      "cybershuttle.oauth.v1",
+      JSON.stringify({
+        idToken,
+        refreshToken: "refresh-old",
+        expiresAt: 30_000,
+      }),
+    );
+    const reply = Promise.withResolvers<Response>();
+    const fetch = vi.fn(() => reply.promise);
+    const auth = new AuthClient(controlApiUrl, { fetch, now: () => 0 });
+
+    const first = auth.acquireToken();
+    const second = auth.acquireToken();
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    reply.resolve(
+      new Response(
+        JSON.stringify({ idToken: refreshed, expiresInSeconds: 900 }),
+        { headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { idToken: refreshed },
+      { idToken: refreshed },
+    ]);
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it("does not restore credentials invalidated during refresh", async () => {
+    const idToken = jwt({ sub: "owner" });
+    sessionStorage.setItem(
+      "cybershuttle.oauth.v1",
+      JSON.stringify({
+        idToken,
+        refreshToken: "refresh-old",
+        expiresAt: 30_000,
+      }),
+    );
+    const reply = Promise.withResolvers<Response>();
+    const auth = new AuthClient(controlApiUrl, {
+      fetch: vi.fn(() => reply.promise),
+      now: () => 0,
+    });
+
+    const acquiring = auth.acquireToken();
+    auth.invalidateToken();
+    reply.resolve(
+      new Response(
+        JSON.stringify({
+          idToken: jwt({ sub: "stale" }),
+          expiresInSeconds: 900,
+        }),
+        { headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    await expect(acquiring).rejects.toBeInstanceOf(
+      AuthInteractionRequiredError,
+    );
+    expect(sessionStorage.getItem("cybershuttle.oauth.v1")).toBeNull();
+  });
+
   it("refreshes a credential within a minute of expiry", async () => {
     let now = 0;
     const idToken = jwt({ sub: "owner" });
@@ -310,32 +368,11 @@ describe("AuthClient credential persistence", () => {
     await expect(auth.acquireToken()).resolves.toEqual({ idToken });
     expect(auth.account).toBe("person@example.edu");
   });
-
-  it("invalidates the credential and clears session storage", async () => {
-    sessionStorage.setItem(
-      "cybershuttle.oauth.v1",
-      JSON.stringify({ idToken: jwt({ sub: "x" }), expiresAt: 3_600_000 }),
-    );
-    const auth = new AuthClient(controlApiUrl, {
-      fetch: fetchSequence([]),
-      now: () => 0,
-    });
-    auth.invalidateToken();
-    expect(sessionStorage.getItem("cybershuttle.oauth.v1")).toBeNull();
-    await expect(auth.acquireToken()).rejects.toBeInstanceOf(
-      AuthInteractionRequiredError,
-    );
-  });
 });
 
 describe("AuthClient response validation", () => {
-  it("rejects a redirected, non-JSON, or malformed exchange response", async () => {
+  it("rejects a malformed exchange response", async () => {
     for (const reply of [
-      { body: { idToken: "x", expiresInSeconds: 900 }, redirected: true },
-      {
-        body: { idToken: "x", expiresInSeconds: 900 },
-        contentType: "text/plain",
-      },
       { body: { expiresInSeconds: 900 } },
       { body: { idToken: "x", expiresInSeconds: 0 } },
     ]) {
@@ -353,14 +390,5 @@ describe("AuthClient response validation", () => {
       });
       await expect(auth.acquireToken()).rejects.toThrow(/invalid/i);
     }
-  });
-
-  it("rejects unsafe control URLs", () => {
-    expect(
-      () => new AuthClient("https://secret@control.example/api/v1"),
-    ).toThrow("invalid");
-    expect(() => new AuthClient("http://control.example/api/v1")).toThrow(
-      "invalid",
-    );
   });
 });

@@ -38,9 +38,9 @@ export class RunHistory extends PanelBoundWidget {
 
   constructor(panel: CyberShuttlePanel, open?: string) {
     super(panel);
-    if (open) this._open.add(open);
     this.id = "cybershuttle-run-history";
     this.addClass("csSessionPanel");
+    if (open) this._open.add(open);
     this._render();
   }
 

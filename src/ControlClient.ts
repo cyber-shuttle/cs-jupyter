@@ -7,6 +7,7 @@
 // READY, which the next poll shows and no caller surfaces.
 import { PageConfig, URLExt } from "@jupyterlab/coreutils";
 import { ServerConnection } from "@jupyterlab/services";
+import { Token } from "@lumino/coreutils";
 import { AuthClient } from "./AuthClient";
 import { OAuthWebSocketFactory, type OAuthWebSocketConnector } from "./ssh";
 import {
@@ -39,15 +40,16 @@ import {
   expect,
   isPlainObject,
   jsonResponse,
-  isPositiveInteger,
   requestUrl,
   vArray,
   vBoolean,
   vBoundedInt,
+  vEither,
   vNumber,
   vObject,
   vOneOf,
   vOptional,
+  vPositiveInt,
   vString,
   validControlApiUrl,
   validSessionId,
@@ -77,19 +79,35 @@ export class ControlError extends Error {
   constructor(
     readonly code: string,
     message: string,
+    readonly status?: number,
   ) {
     super(message);
   }
 }
 
-export const needsSshLogin = (error: unknown): boolean =>
-  error instanceof ControlError && error.code === "ssh_authentication_required";
+const failsWith =
+  (code: string) =>
+  (error: unknown): boolean =>
+    error instanceof ControlError && error.code === code;
 
-export const needsTunnelLink = (error: unknown): boolean =>
-  error instanceof ControlError && error.code === "tunnel_link_required";
+export const needsSshLogin = failsWith("ssh_authentication_required");
+export const needsTunnelLink = failsWith("tunnel_link_required");
+export const accessUnavailable = failsWith("session_access_unavailable");
 
-export const accessUnavailable = (error: unknown): boolean =>
-  error instanceof ControlError && error.code === "session_access_unavailable";
+const json = (body: unknown, method = "POST"): RequestInit => ({
+  method,
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body),
+});
+
+const encoded = encodeURIComponent;
+
+function owned<T>(value: T, id: string, expected: string, what: string): T {
+  if (id !== expected) {
+    throw new Error(`cs-control returned ${what} for ${id}, not ${expected}.`);
+  }
+  return value;
+}
 
 export function safeControlFetch(
   controlApiUrl: string,
@@ -116,12 +134,17 @@ export function safeControlFetch(
       credentials: "omit",
       redirect: "error",
     });
-    if (response.status === 401 || response.status === 403) {
+    if (response.status === 401) {
       auth.invalidateToken?.();
     }
     return response;
   };
 }
+
+export const IControlClient = new Token<ControlClient>(
+  "@cybershuttle/jupyter:IControlClient",
+  "The shared cs-control API client.",
+);
 
 export class ControlClient {
   private _base: string;
@@ -132,15 +155,16 @@ export class ControlClient {
 
   constructor(
     base = PageConfig.getOption("cybershuttleControlApiUrl"),
-    auth: IControlAuth = new AuthClient(),
+    auth?: IControlAuth,
     fetch: typeof globalThis.fetch = globalThis.fetch.bind(globalThis),
     webSockets?: OAuthWebSocketFactory,
   ) {
     this._base = validControlApiUrl(base);
-    this._auth = auth;
-    this._fetch = safeControlFetch(this._base, auth, fetch);
+    this._auth = auth ?? new AuthClient(this._base);
+    this._fetch = safeControlFetch(this._base, this._auth, fetch);
     this._webSockets =
-      webSockets ?? new OAuthWebSocketFactory(auth, new URL(this._base).origin);
+      webSockets ??
+      new OAuthWebSocketFactory(this._auth, new URL(this._base).origin);
   }
 
   async signIn(): Promise<void> {
@@ -164,17 +188,12 @@ export class ControlClient {
   }
 
   async listSshHosts(): Promise<ISshHost[]> {
-    return expect(sshHostListShape, "SSH host list")(await this._request("ssh"))
-      .hosts;
+    return validateHostList(await this._request("ssh/hosts")).hosts;
   }
 
   async addSshHost(name: string, command: string, key = ""): Promise<ISshHost> {
     return validateHost(
-      await this._request("ssh", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, command, key }),
-      }),
+      await this._request("ssh/hosts", json({ name, command, key })),
     );
   }
 
@@ -184,59 +203,38 @@ export class ControlClient {
     key = "",
   ): Promise<ISshHost> {
     return validateHost(
-      await this._request(`ssh/${encodeURIComponent(alias)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command, key }),
-      }),
+      await this._request(
+        `ssh/hosts/${encoded(alias)}`,
+        json({ command, key }, "PUT"),
+      ),
     );
   }
 
   async listSshKeys(): Promise<ISshKey[]> {
-    return expect(sshKeyListShape, "SSH key list")(await this._request("keys"))
-      .keys;
+    return validateKeyList(await this._request("ssh/keys")).keys;
   }
 
   async addSshKey(name: string, privateKey: string): Promise<ISshKey> {
-    return expect(
-      sshKeyShape,
-      "SSH key",
-    )(
-      await this._request("keys", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, privateKey }),
-      }),
+    return validateKey(
+      await this._request("ssh/keys", json({ name, privateKey })),
     );
   }
 
   async removeSshKey(name: string): Promise<void> {
-    await this._request(`keys/${encodeURIComponent(name)}`, {
-      method: "DELETE",
-    });
+    await this._request(`ssh/keys/${encoded(name)}`, { method: "DELETE" });
   }
 
   async removeSshHost(alias: string): Promise<void> {
-    await this._request(`ssh/${encodeURIComponent(alias)}`, {
-      method: "DELETE",
-    });
+    await this._request(`ssh/hosts/${encoded(alias)}`, { method: "DELETE" });
   }
 
   async testSshHost(alias: string): Promise<ISshHostTest> {
-    const value = expect(
-      sshHostTestShape,
-      "SSH host test",
-    )(
-      await this._request(`ssh/${encodeURIComponent(alias)}/test`, {
+    const value = validateHostTest(
+      await this._request(`ssh/hosts/${encoded(alias)}/test`, {
         method: "POST",
       }),
     );
-    if (value.host !== alias) {
-      throw new Error(
-        `Received an SSH host test for ${value.host}, not ${alias}.`,
-      );
-    }
-    return value;
+    return owned(value, value.host, alias, "an SSH host test");
   }
 
   async discoverSlurm(
@@ -244,63 +242,54 @@ export class ControlClient {
     signal?: AbortSignal,
   ): Promise<ISlurmInfo> {
     const value = validateSlurmResource(
-      await this._request(`ssh/${encodeURIComponent(alias)}/slurm`, { signal }),
+      await this._request(`ssh/hosts/${encoded(alias)}/slurm`, { signal }),
     );
-    if (value.host !== alias) {
-      throw new Error(
-        `Received Slurm discovery for ${value.host}, not ${alias}.`,
-      );
-    }
-    return value;
+    return owned(value, value.host, alias, "Slurm discovery");
   }
 
   sshAuthWebSocket(alias: string): OAuthWebSocketConnector {
-    return this._webSocketConnector(`ssh/${encodeURIComponent(alias)}/auth`);
+    const url = new URL(
+      URLExt.join(this._base, `ssh/hosts/${encoded(alias)}/auth`),
+    );
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    const endpoint = url.toString();
+    return () => this._webSockets.open(endpoint);
   }
 
   async getTunnelLink(): Promise<ITunnelLinkStatus> {
-    return validateTunnelLinkStatus(await this._request("tunnel/link"));
+    return validateTunnelLinkStatus(await this._request("tunnel"));
   }
 
   async startTunnelLink(provider: TunnelProvider): Promise<ITunnelLinkStart> {
     return validateTunnelLinkStart(
-      await this._request("tunnel/link/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider }),
-      }),
+      await this._request("tunnel/authorizations", json({ provider })),
     );
   }
 
   async pollTunnelLink(handle: string): Promise<ITunnelLinkPoll> {
     return validateTunnelLinkPoll(
-      await this._request(`tunnel/link/poll/${encodeURIComponent(handle)}`, {
+      await this._request(`tunnel/authorizations/${encoded(handle)}/poll`, {
         method: "POST",
       }),
     );
   }
 
-  async removeTunnelLink(): Promise<ITunnelLinkStatus> {
-    return validateTunnelLinkStatus(
-      await this._request("tunnel/link", { method: "DELETE" }),
-    );
+  async removeTunnelLink(): Promise<void> {
+    await this._request("tunnel", { method: "DELETE" });
   }
 
   async listSessions(): Promise<ISessionList | typeof UNCHANGED> {
-    let tag: string | undefined;
-    const value = await this._request(
-      "sessions",
-      {},
-      { tag: this._sessionsTag, onTag: (etag) => (tag = etag) },
-    );
-    if (value === UNCHANGED) {
+    const response = await this._send("sessions", {
+      headers: this._sessionsTag ? { "If-None-Match": this._sessionsTag } : {},
+    });
+    if (response.status === 304) {
       return UNCHANGED;
     }
-    const parsed = expect(sessionListShape, "session list")(value);
+    const parsed = validateSessionList(await parseJson(response));
     for (const tail of parsed.logs ?? []) {
       checkLogBudget(tail.lines);
     }
-    this._sessionsTag = tag;
+    this._sessionsTag = response.headers.get("ETag") ?? undefined;
     return { sessions: parsed.sessions, logs: parsed.logs ?? [] };
   }
 
@@ -309,80 +298,44 @@ export class ControlClient {
     signal?: AbortSignal,
   ): Promise<ISessionValidation> {
     return validateSessionValidation(
-      await this._request("sessions/validate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(request),
-        signal,
-      }),
+      await this._request("sessions/validate", { ...json(request), signal }),
     );
   }
 
   async createSession(request: ISessionCreateRequest): Promise<ISession> {
-    return validateSession(
-      await this._request("sessions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(request),
-      }),
-    );
+    return validateSession(await this._request("sessions", json(request)));
   }
 
-  async getSession(id: string): Promise<ISession> {
-    const session = validateSession(
-      await this._request(`sessions/${encodeURIComponent(id)}`),
-    );
-    if (session.id !== id) {
-      throw new Error("cs-control returned a different session.");
-    }
-    return session;
+  getSession(id: string): Promise<ISession> {
+    return this._sessionAt(id);
   }
 
-  async startSession(id: string): Promise<ISession> {
-    return this._sessionAction(id, "start", "POST", "started");
+  startSession(id: string): Promise<ISession> {
+    return this._sessionAction(id, "start");
   }
 
-  async stopSession(id: string): Promise<ISession> {
-    return this._sessionAction(id, "stop", "POST", "stopped");
+  stopSession(id: string): Promise<ISession> {
+    return this._sessionAction(id, "stop");
   }
 
-  async deleteSession(id: string): Promise<ISession> {
-    return this._sessionAction(id, "", "DELETE", "deleted");
-  }
-
-  private async _sessionAction(
-    id: string,
-    suffix: string,
-    method: string,
-    past: string,
-  ): Promise<ISession> {
+  async deleteSession(id: string): Promise<void> {
     const sessionId = validSessionId(id);
-    const path = `sessions/${encodeURIComponent(sessionId)}${suffix ? `/${suffix}` : ""}`;
-    const session = validateSession(await this._request(path, { method }));
-    if (session.id !== sessionId) {
-      throw new Error(`cs-control returned an invalid ${past} session.`);
-    }
+    await this._request(`sessions/${encoded(sessionId)}`, { method: "DELETE" });
     clearSessionAccess(sessionId);
-    return session;
   }
 
   async getSessionMetrics(id: string): Promise<ISessionSeries> {
-    return validateSessionSeries(
-      await this._request(
-        `sessions/${encodeURIComponent(validSessionId(id))}/metrics`,
-      ),
+    const sessionId = validSessionId(id);
+    const series = validateSessionSeries(
+      await this._request(`sessions/${encoded(sessionId)}/metrics`),
     );
+    return owned(series, series.sessionId, sessionId, "metrics");
   }
 
   async listRuns(): Promise<IRun[]> {
-    const { runs } = expect(
-      runListShape,
-      "run history",
-    )(await this._request("sessions/history"));
+    const runs = validateRunList(await this._request("telemetry")).runs;
     for (const run of runs) {
-      if (run.logs) {
-        checkLogBudget(run.logs);
-      }
+      checkLogBudget(run.logs ?? []);
     }
     return runs;
   }
@@ -390,70 +343,62 @@ export class ControlClient {
   async getSessionAccess(id: string): Promise<ISessionAccess> {
     const sessionId = validSessionId(id);
     const access = validateSessionAccess(
-      await this._request(`sessions/${encodeURIComponent(sessionId)}/access`),
+      await this._request(`sessions/${encoded(sessionId)}/access`),
     );
-    if (access.sessionId !== sessionId) {
-      throw new Error("cs-control returned access for a different session.");
-    }
-    return access;
+    return owned(access, access.sessionId, sessionId, "access");
   }
 
-  private _webSocketConnector(path: string): OAuthWebSocketConnector {
-    const url = new URL(URLExt.join(this._base, path));
-    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-    const endpoint = url.toString();
-    return () => this._webSockets.open(endpoint);
+  private async _sessionAction(id: string, verb: string): Promise<ISession> {
+    const session = await this._sessionAt(id, `/${verb}`, { method: "POST" });
+    clearSessionAccess(session.id);
+    return session;
   }
 
-  private async _fail(response: Response): Promise<never> {
-    let message = `cs-control returned ${response.status}`;
-    let code = "request_failed";
-    try {
-      const value = await response.json();
-      if (isPlainObject(value) && isPlainObject(value.error)) {
-        if (typeof value.error.code === "string") {
-          code = value.error.code;
+  private async _sessionAt(
+    id: string,
+    suffix = "",
+    init?: RequestInit,
+  ): Promise<ISession> {
+    const sessionId = validSessionId(id);
+    const session = validateSession(
+      await this._request(`sessions/${encoded(sessionId)}${suffix}`, init),
+    );
+    return owned(session, session.id, sessionId, "a session");
+  }
+
+  private async _send(path: string, init: RequestInit = {}): Promise<Response> {
+    const response = await this._fetch(URLExt.join(this._base, path), init);
+    if (!response.ok && response.status !== 304) {
+      let message = `cs-control returned ${response.status}`;
+      let code = "request_failed";
+      try {
+        const value = await response.json();
+        if (isPlainObject(value) && isPlainObject(value.error)) {
+          if (typeof value.error.code === "string") code = value.error.code;
+          if (typeof value.error.message === "string") {
+            message = value.error.message;
+          }
         }
-        if (typeof value.error.message === "string") {
-          message = value.error.message;
-        }
-      }
-    } catch {}
-    throw new ControlError(code, message);
-  }
-
-  private async _json(response: Response): Promise<unknown> {
-    try {
-      return await response.json();
-    } catch {
-      throw new Error("cs-control returned invalid JSON.");
+      } catch {}
+      throw new ControlError(code, message, response.status);
     }
+    return response;
   }
 
   private async _request(
     path: string,
     init: RequestInit = {},
-    unless304?: {
-      tag: string | undefined;
-      onTag: (tag: string | undefined) => void;
-    },
   ): Promise<unknown> {
-    const headers = unless304?.tag
-      ? { ...init.headers, "If-None-Match": unless304.tag }
-      : init.headers;
-    const response = await this._fetch(URLExt.join(this._base, path), {
-      ...init,
-      headers,
-    });
-    if (unless304 && response.status === 304) {
-      return UNCHANGED;
-    }
-    if (!response.ok) {
-      await this._fail(response);
-    }
-    const value = await this._json(response);
-    unless304?.onTag(response.headers.get("ETag") ?? undefined);
-    return value;
+    const response = await this._send(path, init);
+    return response.status === 204 ? undefined : parseJson(response);
+  }
+}
+
+async function parseJson(response: Response): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    throw new Error("cs-control returned invalid JSON.");
   }
 }
 
@@ -501,26 +446,7 @@ export function createSessionServerSettings(
   });
 }
 
-const sessionValidationShape = vObject<ISessionValidation>({
-  sessionId: vString(),
-  status: vOneOf(VALIDATION_STATUSES),
-  script: vString(),
-  message: vString(),
-  stdout: vOptional(vString()),
-  stderr: vOptional(vString()),
-});
-const validateSessionValidation = expect(
-  sessionValidationShape,
-  "session validation",
-);
-
-const logLineShape = vObject<ILogLine>({
-  stream: vOneOf(["status", "stdout", "stderr"] as const),
-  text: vString(),
-  at: vString(),
-});
-
-function checkLogBudget(lines: ILogLine[]): ILogLine[] {
+function checkLogBudget(lines: ILogLine[]): void {
   let bytes = 0;
   const encoder = new TextEncoder();
   for (const line of lines) {
@@ -533,29 +459,44 @@ function checkLogBudget(lines: ILogLine[]): ILogLine[] {
       throw new Error("cs-control returned an oversized session log event.");
     }
   }
-  return lines;
 }
+
+const validateSessionValidation = expect(
+  vObject<ISessionValidation>({
+    sessionId: vString(),
+    status: vOneOf(VALIDATION_STATUSES),
+    script: vString(),
+    message: vString(),
+    stdout: vOptional(vString()),
+    stderr: vOptional(vString()),
+  }),
+  "session validation",
+);
+
+const logLineShape = vObject<ILogLine>({
+  stream: vOneOf(["status", "stdout", "stderr"] as const),
+  text: vString(),
+  at: vString(),
+});
 
 const sessionLogTailShape = vObject<ISessionLogTail>({
   sessionId: vString(SESSION_ID),
   lines: vArray(logLineShape, 100),
 });
 
-const resourcesShape = vObject<ISession["resources"]>({
-  cores: vNumber,
-  memoryMb: vNumber,
-  wallMinutes: vNumber,
-  gpuType: vOptional(vString()),
-  gpuCount: vOptional(vNumber),
-});
-
 const seqAndJobSpecFields = {
-  seq: isPositiveInteger,
+  seq: vPositiveInt,
   sshHost: vString(),
   account: vOptional(vString()),
   partition: vString(),
   rootFolder: vString(),
-  resources: resourcesShape,
+  resources: vObject<ISession["resources"]>({
+    cores: vBoundedInt(2, Number.MAX_SAFE_INTEGER),
+    memoryMb: vBoundedInt(4096, Number.MAX_SAFE_INTEGER),
+    wallMinutes: vBoundedInt(1, 525600),
+    gpuType: vOptional(vString()),
+    gpuCount: vOptional(vPositiveInt),
+  }),
 };
 
 const sessionShape = vObject<ISession>({
@@ -569,48 +510,65 @@ const sessionShape = vObject<ISession>({
 });
 const validateSession = expect(sessionShape, "session");
 
-const gpuUtilisationShape = vObject<NonNullable<IMetricSample["gpus"]>[number]>(
-  {
-    index: vNumber,
-    utilPct: vOptional(vNumber),
-    memUsedMiB: vOptional(vNumber),
-    memTotalMiB: vOptional(vNumber),
-  },
+const validateSessionList = expect(
+  vObject<{ sessions: ISession[]; logs?: ISessionLogTail[] }>({
+    sessions: vArray(sessionShape),
+    logs: vOptional(vArray(sessionLogTailShape)),
+  }),
+  "session list",
 );
 
 const sampleShape = vObject<IMetricSample>({
   at: vString(),
   memBytes: vOptional(vNumber),
   cpuUsageUsec: vOptional(vNumber),
-  gpus: vOptional(vArray(gpuUtilisationShape)),
+  gpus: vOptional(
+    vArray(
+      vObject<NonNullable<IMetricSample["gpus"]>[number]>({
+        index: vNumber,
+        utilPct: vOptional(vNumber),
+        memUsedMiB: vOptional(vNumber),
+        memTotalMiB: vOptional(vNumber),
+      }),
+    ),
+  ),
 });
 
-const sessionSeriesShape = vObject<ISessionSeries>({
-  sessionId: vString(SESSION_ID),
-  samples: vArray(sampleShape),
-});
-const validateSessionSeries = expect(sessionSeriesShape, "metric series");
+const validateSessionSeries = expect(
+  vObject<ISessionSeries>({
+    sessionId: vString(SESSION_ID),
+    samples: vArray(sampleShape),
+  }),
+  "metric series",
+);
 
-const runStatsShape = vObject<IRunStats>({
-  requestedMemory: vOptional(vString()),
-  elapsedSeconds: vOptional(vNumber),
-  maxRss: vOptional(vString()),
-  cpuEfficiencyPct: vOptional(vNumber),
-  memoryEfficiencyPct: vOptional(vNumber),
-  cores: vOptional(vNumber),
-});
-
-const runShape = vObject<IRun>({
-  sessionId: vString(SESSION_ID),
-  ...seqAndJobSpecFields,
-  finalState: vOneOf(SESSION_STATES),
-  error: vOptional(vString()),
-  startedAt: vOptional(vString()),
-  endedAt: vString(),
-  stats: vOptional(runStatsShape),
-  samples: vOptional(vArray(sampleShape)),
-  logs: vOptional(vArray(logLineShape)),
-});
+const validateRunList = expect(
+  vObject<{ runs: IRun[] }>({
+    runs: vArray(
+      vObject<IRun>({
+        sessionId: vString(SESSION_ID),
+        ...seqAndJobSpecFields,
+        finalState: vOneOf(SESSION_STATES),
+        error: vOptional(vString()),
+        startedAt: vOptional(vString()),
+        endedAt: vString(),
+        stats: vOptional(
+          vObject<IRunStats>({
+            requestedMemory: vOptional(vString()),
+            elapsedSeconds: vOptional(vNumber),
+            maxRss: vOptional(vString()),
+            cpuEfficiencyPct: vOptional(vNumber),
+            memoryEfficiencyPct: vOptional(vNumber),
+            cores: vOptional(vNumber),
+          }),
+        ),
+        samples: vOptional(vArray(sampleShape)),
+        logs: vOptional(vArray(logLineShape)),
+      }),
+    ),
+  }),
+  "run history",
+);
 
 const hostShape = vObject<ISshHost>({
   name: vString(),
@@ -623,44 +581,43 @@ const hostShape = vObject<ISshHost>({
   managed: vOptional(vBoolean),
 });
 const validateHost = expect(hostShape, "SSH host");
+const validateHostList = expect(
+  vObject<{ hosts: ISshHost[] }>({ hosts: vArray(hostShape) }),
+  "SSH host list",
+);
 
-const sshKeyShape = vObject<ISshKey>({
+const keyShape = vObject<ISshKey>({
   name: vString(),
   type: vString(),
   fingerprint: vString(),
 });
+const validateKey = expect(keyShape, "SSH key");
+const validateKeyList = expect(
+  vObject<{ keys: ISshKey[] }>({ keys: vArray(keyShape) }),
+  "SSH key list",
+);
 
-const sshKeyListShape = vObject<{ keys: ISshKey[] }>({
-  keys: vArray(sshKeyShape),
-});
+const validateHostTest = expect(
+  vObject<ISshHostTest>({ host: vString(), ok: vBoolean, message: vString() }),
+  "SSH host test",
+);
 
-const sshHostTestShape = vObject<ISshHostTest>({
-  host: vString(),
-  ok: vBoolean,
-  message: vString(),
-});
-
-const sshHostListShape = vObject<{ hosts: ISshHost[] }>({
-  hosts: vArray(hostShape),
-});
-
-const gresShape = vObject<IGres>({ name: vString(), count: vNumber });
-
-const partitionShape = vObject<IPartition>({
-  name: vString(),
-  cpuCount: vNumber,
-  memoryMb: vNumber,
-  gres: vArray(gresShape),
-});
-
-const slurmShape = vObject<ISlurmInfo>({
-  host: vString(),
-  accounts: vArray(vString()),
-  partitions: vArray(partitionShape),
-  homeDir: vOptional(vString()),
-});
-
-export const validateSlurmResource = expect(slurmShape, "Slurm discovery");
+export const validateSlurmResource = expect(
+  vObject<ISlurmInfo>({
+    host: vString(),
+    accounts: vArray(vString()),
+    partitions: vArray(
+      vObject<IPartition>({
+        name: vString(),
+        cpuCount: vNumber,
+        memoryMb: vNumber,
+        gres: vArray(vObject<IGres>({ name: vString(), count: vNumber })),
+      }),
+    ),
+    homeDir: vOptional(vString()),
+  }),
+  "Slurm discovery",
+);
 
 export type ITunnelLinkStatus =
   | {
@@ -671,7 +628,7 @@ export type ITunnelLinkStatus =
     }
   | { linked: false };
 
-export interface ITunnelLinkStart {
+interface ITunnelLinkStart {
   handle: string;
   userCode: string;
   verificationUri: string;
@@ -679,58 +636,44 @@ export interface ITunnelLinkStart {
   intervalSeconds: number;
 }
 
-export type ITunnelLinkPoll =
+type ITunnelLinkPoll =
   | { status: "pending"; intervalSeconds: number }
   | ITunnelLinkStatus;
 
-const tunnelLinkedShape = vObject<Extract<ITunnelLinkStatus, { linked: true }>>(
-  {
-    linked: (v): v is true => v === true,
+const tunnelLinkStatusShape = vEither<ITunnelLinkStatus>(
+  vObject<Extract<ITunnelLinkStatus, { linked: true }>>({
+    linked: vOneOf([true] as const),
     provider: vOneOf(["microsoft", "github"] as const),
     account: vOptional(vString()),
     linkedAt: vString(),
-  },
+  }),
+  vObject<Extract<ITunnelLinkStatus, { linked: false }>>({
+    linked: vOneOf([false] as const),
+  }),
 );
-const tunnelUnlinkedShape = vObject<
-  Extract<ITunnelLinkStatus, { linked: false }>
->({ linked: (v): v is false => v === false });
-function isTunnelLinkStatus(value: unknown): value is ITunnelLinkStatus {
-  return tunnelLinkedShape(value) || tunnelUnlinkedShape(value);
-}
-const validateTunnelLinkStatus = expect(isTunnelLinkStatus, "Dev Tunnels link");
+const validateTunnelLinkStatus = expect(
+  tunnelLinkStatusShape,
+  "Dev Tunnels link",
+);
 
-const tunnelLinkStartShape = vObject<ITunnelLinkStart>({
-  handle: vString(TOKEN_43),
-  userCode: vString(),
-  verificationUri: vString(),
-  expiresInSeconds: vBoundedInt(1, 3600),
-  intervalSeconds: vBoundedInt(1, 60),
-});
 const validateTunnelLinkStart = expect(
-  tunnelLinkStartShape,
+  vObject<ITunnelLinkStart>({
+    handle: vString(TOKEN_43),
+    userCode: vString(),
+    verificationUri: vString(),
+    expiresInSeconds: vBoundedInt(1, 3600),
+    intervalSeconds: vBoundedInt(1, 60),
+  }),
   "Dev Tunnels link start",
 );
 
-const tunnelLinkPendingShape = vObject<
-  Extract<ITunnelLinkPoll, { status: "pending" }>
->({
-  status: vOneOf(["pending"] as const),
-  intervalSeconds: vBoundedInt(1, 60),
-});
-function isTunnelLinkPoll(value: unknown): value is ITunnelLinkPoll {
-  return tunnelLinkPendingShape(value) || isTunnelLinkStatus(value);
-}
 const validateTunnelLinkPoll = expect(
-  isTunnelLinkPoll,
+  vEither<ITunnelLinkPoll>(
+    vObject<Extract<ITunnelLinkPoll, { status: "pending" }>>({
+      status: vOneOf(["pending"] as const),
+      intervalSeconds: vBoundedInt(1, 60),
+    }),
+    tunnelLinkStatusShape,
+  ),
   "Dev Tunnels link poll",
 );
-
-const sessionListShape = vObject<{
-  sessions: ISession[];
-  logs?: ISessionLogTail[];
-}>({
-  sessions: vArray(sessionShape),
-  logs: vOptional(vArray(sessionLogTailShape)),
-});
-
-const runListShape = vObject<{ runs: IRun[] }>({ runs: vArray(runShape) });

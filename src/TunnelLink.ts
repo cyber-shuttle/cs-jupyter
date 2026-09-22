@@ -21,7 +21,7 @@ const PROVIDER_GLYPH: Record<TunnelProvider, string> = {
 };
 
 const sleep = (milliseconds: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, milliseconds));
+  new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 
 export class TunnelLink extends RemoteListWidget {
   onLinked: (() => void) | undefined;
@@ -137,22 +137,15 @@ export class TunnelLink extends RemoteListWidget {
         ...confirmDelete(
           "Unlink Dev Tunnels?",
           "unlink-tunnel",
-          () => {
-            this._confirming = "";
-            this._render();
-          },
-          () =>
-            void this._removeItem(() =>
-              this._api.removeTunnelLink().then(() => undefined),
-            ),
+          () => this._confirm(""),
+          () => void this._removeItem(() => this._api.removeTunnelLink()),
         ),
       );
       return row;
     }
-    const unlink = button("Unlink", "csDangerButton", () => {
-      this._confirming = "unlink";
-      this._render();
-    });
+    const unlink = button("Unlink", "csDangerButton", () =>
+      this._confirm("unlink"),
+    );
     unlink.dataset.sessionAction = "unlink-tunnel";
     row.appendChild(unlink);
     return row;

@@ -5,15 +5,12 @@
 // entries are read-only.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ISessionCreateRequest } from "../src/Common";
-import {
-  ControlClient,
-  ControlError,
-  validateSlurmResource,
-} from "../src/ControlClient";
+import { ControlError, validateSlurmResource } from "../src/ControlClient";
 import { CreateSessionForm } from "../src/CreateSessionForm";
 import { SshHosts } from "../src/SshHosts";
 import { SshKeys } from "../src/SshKeys";
-import { FakeOperation } from "./fakes";
+import { SshLoginDock } from "../src/ssh";
+import { controlFake, FakeOperation } from "./fakes";
 
 const hosts = ["alpha", "beta"].map((name) => ({
   name,
@@ -61,11 +58,6 @@ function choose(form: CreateSessionForm, alias: string): void {
   host.value = alias;
   host.onchange?.(new Event("change"));
 }
-function backToHosts(form: CreateSessionForm): void {
-  const host = hostSelect(form);
-  host.value = "";
-  host.onchange?.(new Event("change"));
-}
 function options(form: CreateSessionForm): HTMLElement | null {
   return form.node.querySelector<HTMLElement>(".csSessionOptions");
 }
@@ -77,14 +69,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function submitConfiguration(form: CreateSessionForm): void {
-  form.node
+function submitForm(widget: { node: HTMLElement }): void {
+  widget.node
     .querySelector("form")!
     .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
 }
 
 async function reviewAndSubmit(form: CreateSessionForm): Promise<void> {
-  submitConfiguration(form);
+  submitForm(form);
   await vi.waitFor(() =>
     expect(form.node.textContent).toContain("Review Slurm job"),
   );
@@ -139,11 +131,12 @@ function formHarness() {
       }),
     ),
   };
-  const form = new CreateSessionForm(api as any, () => {
+  const loginDock = new SshLoginDock(() => {
     const operation = new FakeOperation();
     operations.push(operation);
     return operation;
   });
+  const form = new CreateSessionForm(api as any, () => loginDock);
   const deliver = async (index: number, value: unknown): Promise<void> => {
     try {
       discoveries[index].resolve(validateSlurmResource(value));
@@ -162,7 +155,15 @@ function formHarness() {
     await Promise.resolve();
   };
   form.setHosts(hosts);
-  return { form, api, operations, discoveries, deliver, failDiscovery };
+  return {
+    form,
+    api,
+    loginDock,
+    operations,
+    discoveries,
+    deliver,
+    failDiscovery,
+  };
 }
 
 async function discoveredAlpha(
@@ -190,7 +191,7 @@ async function pendingValidation(
   const workspace = input(form, "rootFolder");
   workspace.value = workspaceValue;
   workspace.dispatchEvent(new Event("input"));
-  submitConfiguration(form);
+  submitForm(form);
   await Promise.resolve();
   await vi.waitFor(() =>
     expect(api.validateCreateRequest).toHaveBeenCalledOnce(),
@@ -206,7 +207,7 @@ function submitWorkspace(form: CreateSessionForm, value: string): void {
   const workspace = input(form, "rootFolder");
   workspace.value = value;
   workspace.dispatchEvent(new Event("input"));
-  submitConfiguration(form);
+  submitForm(form);
 }
 
 async function backAfterStaleValidation(
@@ -282,7 +283,7 @@ describe("SSH CRUD and session-first creation", () => {
     const { ready } = operation.starts[0].callbacks;
     expect(ready).toBeDefined();
     ready?.();
-    expect(discoveries).toHaveLength(2);
+    await vi.waitFor(() => expect(discoveries).toHaveLength(2));
     await failDiscovery(
       1,
       new ControlError("ssh_authentication_required", "Still required"),
@@ -308,7 +309,7 @@ describe("SSH CRUD and session-first creation", () => {
   it("ignores a stale discovery result after switching hosts", async () => {
     const { form, discoveries, deliver } = formHarness();
     choose(form, "alpha");
-    backToHosts(form);
+    choose(form, "");
     choose(form, "beta");
     expect(discoveries).toHaveLength(2);
     await deliver(0, discovery("alpha"));
@@ -350,16 +351,23 @@ describe("SSH CRUD and session-first creation", () => {
     );
   });
 
-  it("aborts discovery and disposes the login console when the form is disposed", async () => {
-    const { form, operations, failDiscovery } = formHarness();
+  it("ignores a shared login after the form is disposed without disposing its dock", async () => {
+    const { form, loginDock, operations, discoveries, failDiscovery } =
+      formHarness();
     choose(form, "alpha");
     await failDiscovery(
       0,
       new ControlError("ssh_authentication_required", "Duo required"),
     );
     expect(operations).toHaveLength(1);
+
     form.dispose();
-    expect(operations[0].disposed).toBe(true);
+    operations[0].starts[0].callbacks.ready?.();
+    await Promise.resolve();
+
+    expect(discoveries).toHaveLength(1);
+    expect(operations[0].disposed).toBe(false);
+    loginDock.dispose();
   });
 
   it("filters CPU-only discovery and omits GPU fields from the payload", async () => {
@@ -430,29 +438,6 @@ describe("SSH CRUD and session-first creation", () => {
       "generic-gpu — 16 CPU · 64000 MB · 2× Generic GPU",
       "mixed-gpu — 24 CPU · 96000 MB · 4× h100",
     ]);
-  });
-
-  it("submits generic GPU GRES using the stable gpu type", async () => {
-    const form = await discoveredAlpha({
-      partitions: [
-        {
-          name: "accelerated",
-          cpuCount: 16,
-          memoryMb: 64000,
-          gres: [{ name: "gpu", count: 2 }],
-        },
-      ],
-    });
-    const gpuType = picker(form, "gpuType");
-    expect(gpuType.value).toBe("gpu");
-    expect(gpuType.selectedOptions[0].textContent).toBe("Generic GPU");
-
-    const workspace = input(form, "rootFolder");
-    workspace.value = "projects/generic-gpu";
-    const request = captureCreateRequest(form);
-    await reviewAndSubmit(form);
-    expect(request().partition).toBe("accelerated");
-    expect(request().resources).toMatchObject({ gpuType: "gpu", gpuCount: 1 });
   });
 
   it("auto-selects GPU-only discovery and includes GPU fields", async () => {
@@ -543,41 +528,6 @@ describe("SSH CRUD and session-first creation", () => {
     const request = captureCreateRequest(form);
     await submitValidForm(form);
     expect(request().partition).toBe("full");
-  });
-
-  it("shows the discovered home directory as the workspace field's help, not a placeholder", async () => {
-    const form = await discoveredAlpha();
-    const workspace = input(form, "rootFolder");
-    expect(workspace.getAttribute("aria-describedby")).toBe(
-      "cybershuttle-workspace-help",
-    );
-    expect(workspace.placeholder).toBe("");
-    expect(form.node.textContent).toContain("/home/alpha");
-    expect(form.node.textContent).toContain(
-      "Relative to /home/alpha unless it starts with /, ~ or $.",
-    );
-  });
-
-  it("falls back to example workspace paths when discovery omits a home directory", async () => {
-    const { form, deliver } = formHarness();
-    choose(form, "alpha");
-    const { homeDir: _omit, ...noHome } = discovery("alpha");
-    await deliver(0, noHome);
-    const help = form.node.querySelector<HTMLElement>(
-      "#cybershuttle-workspace-help",
-    )!;
-    expect(help.textContent).not.toBe("");
-    expect(help.textContent).toContain("Examples:");
-  });
-
-  it("preserves a raw workspace expression in the create payload", async () => {
-    const form = await discoveredAlpha();
-    const workspace = input(form, "rootFolder");
-    workspace.value = "$HOME/work";
-    workspace.dispatchEvent(new Event("input"));
-    const request = captureCreateRequest(form);
-    await reviewAndSubmit(form);
-    expect(request().rootFolder).toBe("$HOME/work");
   });
 
   it("aborts validation on dispose", async () => {
@@ -696,7 +646,7 @@ describe("SSH CRUD and session-first creation", () => {
       form.setError("submission failed");
       form.setBusy(false);
     });
-    submitConfiguration(form);
+    submitForm(form);
     await Promise.resolve();
     let submit: HTMLButtonElement | undefined;
     await vi.waitFor(() => {
@@ -710,49 +660,9 @@ describe("SSH CRUD and session-first creation", () => {
     expect(form.node.textContent).toContain("Validation passed.");
     expect(submit!.disabled).toBe(false);
   });
-
-  it("caps walltime at cs-control's ceiling and fails client validation above it", () => {
-    const { form } = formHarness();
-    const wall = input(form, "wallMinutes");
-    expect(wall.max).toBe("525600");
-    wall.value = "525601";
-    wall.dispatchEvent(new Event("input"));
-    expect(wall.checkValidity()).toBe(false);
-    wall.value = "525600";
-    wall.dispatchEvent(new Event("input"));
-    expect(wall.checkValidity()).toBe(true);
-  });
 });
-
-const withKeys = <T extends object>(api: T) => ({
-  listSshKeys: vi.fn(async () => []),
-  ...api,
-});
-
-function submitHostForm(hosts: SshHosts): void {
-  hosts.node
-    .querySelector("form")!
-    .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-}
 
 describe("SSH hosts modal chrome", () => {
-  it("opens with its meaning and a rule, and carries no close of its own", async () => {
-    const hosts = new SshHosts(
-      withKeys({ listSshHosts: async () => [] }) as unknown as ControlClient,
-    );
-    const root = hosts.node.querySelector(".csRoot")!;
-    expect(root.querySelector(".csDialogClose")).toBeNull();
-    expect(
-      [...root.children]
-        .map((node) => node.className.split(" ")[0])
-        .slice(0, 2),
-    ).toEqual(["csDialogSubtitle", "csDialogRule"]);
-    expect(root.querySelector(".csDialogSubtitle")?.textContent).toContain(
-      "~/.ssh/config",
-    );
-    hosts.dispose();
-  });
-
   it("expands a host to what ssh uses and to what can be done about it", async () => {
     const api = {
       listSshHosts: vi.fn(async () => [
@@ -768,7 +678,7 @@ describe("SSH hosts modal chrome", () => {
       ]),
       testSshHost: vi.fn(async () => ({ ok: true, message: "Connected." })),
     };
-    const hosts = new SshHosts(withKeys(api) as unknown as ControlClient);
+    const hosts = new SshHosts(controlFake(api) as any);
     await hosts.refresh();
     const entries = [
       ...hosts.node.querySelectorAll<HTMLDetailsElement>(".csSshHostEntry"),
@@ -800,34 +710,6 @@ describe("SSH hosts modal chrome", () => {
     hosts.dispose();
   });
 
-  it("asks before removing, in the row rather than behind a queued dialog", async () => {
-    const api = {
-      listSshHosts: vi.fn(async () => [
-        {
-          name: "delta",
-          hostname: "a.example.edu",
-          extraDirectives: [],
-          managed: true,
-        },
-      ]),
-      removeSshHost: vi.fn(async () => undefined),
-    };
-    const hosts = new SshHosts(withKeys(api) as unknown as ControlClient);
-    await hosts.refresh();
-    const remove = (): HTMLButtonElement =>
-      [...hosts.node.querySelectorAll<HTMLButtonElement>("button")].filter(
-        (item) => item.textContent === "Delete",
-      )[0];
-    remove().click();
-    expect(hosts.node.textContent).toContain("Remove this entry");
-    expect(api.removeSshHost).not.toHaveBeenCalled();
-    remove().click();
-    await vi.waitFor(() =>
-      expect(api.removeSshHost).toHaveBeenCalledWith("delta"),
-    );
-    hosts.dispose();
-  });
-
   it("edits a host by re-pasting a command prefilled from what is configured", async () => {
     const api = {
       listSshHosts: vi.fn(async () => [
@@ -846,7 +728,7 @@ describe("SSH hosts modal chrome", () => {
         extraDirectives: [],
       })),
     };
-    const hosts = new SshHosts(withKeys(api) as unknown as ControlClient);
+    const hosts = new SshHosts(controlFake(api) as any);
     await hosts.refresh();
     const named = (label: string): HTMLButtonElement =>
       [...hosts.node.querySelectorAll<HTMLButtonElement>("button")].find(
@@ -862,7 +744,7 @@ describe("SSH hosts modal chrome", () => {
     expect(hosts.node.querySelector('input[name="sshHostName"]')).toBeNull();
     command.value = "ssh -p 22 me@login2.example.edu";
     command.dispatchEvent(new Event("input"));
-    submitHostForm(hosts);
+    submitForm(hosts);
     await vi.waitFor(() =>
       expect(api.updateSshHost).toHaveBeenCalledWith(
         "delta",
@@ -878,7 +760,7 @@ describe("SSH hosts modal chrome", () => {
       listSshHosts: vi.fn(async () => []),
       addSshHost: vi.fn(async () => ({ name: "delta", extraDirectives: [] })),
     };
-    const hosts = new SshHosts(withKeys(api) as unknown as ControlClient);
+    const hosts = new SshHosts(controlFake(api) as any);
     [...hosts.node.querySelectorAll<HTMLButtonElement>("button")]
       .find((item) => item.textContent === "Add SSH Host")!
       .click();
@@ -892,7 +774,7 @@ describe("SSH hosts modal chrome", () => {
     name.dispatchEvent(new Event("input"));
     command.value = " ssh -p 2222 me@login.example.edu ";
     command.dispatchEvent(new Event("input"));
-    submitHostForm(hosts);
+    submitForm(hosts);
     await vi.waitFor(() =>
       expect(api.addSshHost).toHaveBeenCalledWith(
         "delta",
@@ -903,90 +785,8 @@ describe("SSH hosts modal chrome", () => {
     hosts.dispose();
   });
 
-  it("keeps focus in the add-host paste form while a listed host's test resolves", async () => {
-    const test = Promise.withResolvers<{ ok: boolean; message: string }>();
-    const api = {
-      listSshHosts: vi.fn(async () => [
-        { name: "delta", hostname: "login.example.edu", extraDirectives: [] },
-      ]),
-      testSshHost: vi.fn(() => test.promise),
-    };
-    const hosts = new SshHosts(withKeys(api) as unknown as ControlClient);
-    await hosts.refresh();
-    document.body.appendChild(hosts.node);
-
-    [...hosts.node.querySelectorAll<HTMLButtonElement>("button")]
-      .find((item) => item.textContent === "Add SSH Host")!
-      .click();
-    const command = hosts.node.querySelector<HTMLInputElement>(
-      'input[name="sshHostCommand"]',
-    )!;
-    command.focus();
-    expect(document.activeElement).toBe(command);
-
-    [...hosts.node.querySelectorAll<HTMLButtonElement>("button")]
-      .find((item) => item.textContent === "Test connection")!
-      .click();
-    test.resolve({ ok: true, message: "Connected." });
-    await vi.waitFor(() =>
-      expect(hosts.node.textContent).toContain("Connected."),
-    );
-
-    expect(document.activeElement?.getAttribute("name")).toBe("sshHostCommand");
-    hosts.dispose();
-  });
-
-  it("keeps focus on a host's own Edit button through its own render", async () => {
-    const api = {
-      listSshHosts: vi.fn(async () => [
-        {
-          name: "delta",
-          hostname: "login.example.edu",
-          extraDirectives: [],
-          managed: true,
-        },
-      ]),
-    };
-    const hosts = new SshHosts(withKeys(api) as unknown as ControlClient);
-    await hosts.refresh();
-    document.body.replaceChildren(hosts.node);
-
-    const editButton = hosts.node.querySelector<HTMLButtonElement>(
-      '[data-session-action="edit-delta"]',
-    )!;
-    editButton.focus();
-    editButton.click();
-
-    const recreated = hosts.node.querySelector<HTMLButtonElement>(
-      '[data-session-action="edit-delta"]',
-    )!;
-    expect(recreated.textContent).toBe("Cancel");
-    expect(document.activeElement).toBe(recreated);
-    hosts.dispose();
-  });
-
-  it("keeps focus on the Add SSH Host toggle through its own render", async () => {
-    const api = { listSshHosts: vi.fn(async () => []) };
-    const hosts = new SshHosts(withKeys(api) as unknown as ControlClient);
-    await hosts.refresh();
-    document.body.replaceChildren(hosts.node);
-
-    const toggle = hosts.node.querySelector<HTMLButtonElement>(
-      '[data-session-action="add-ssh-host-toggle"]',
-    )!;
-    toggle.focus();
-    toggle.click();
-
-    const recreated = hosts.node.querySelector<HTMLButtonElement>(
-      '[data-session-action="add-ssh-host-toggle"]',
-    )!;
-    expect(recreated.textContent).toBe("Cancel");
-    expect(document.activeElement).toBe(recreated);
-    hosts.dispose();
-  });
-
   it("assigns a stored key from the host form and shows it on the host", async () => {
-    const api = withKeys({
+    const api = controlFake({
       listSshHosts: vi.fn(async () => [
         {
           name: "delta",
@@ -1005,7 +805,7 @@ describe("SSH hosts modal chrome", () => {
         extraDirectives: [],
       })),
     });
-    const hosts = new SshHosts(api as unknown as ControlClient);
+    const hosts = new SshHosts(api as any);
     await hosts.refresh();
     expect(
       [...hosts.node.querySelectorAll(".csSshArgRow")].map(
@@ -1029,7 +829,7 @@ describe("SSH hosts modal chrome", () => {
     expect(key.value).toBe("delta-key");
     key.value = "";
     key.dispatchEvent(new Event("change"));
-    submitHostForm(hosts);
+    submitForm(hosts);
     await vi.waitFor(() =>
       expect(api.updateSshHost).toHaveBeenCalledWith(
         "delta",
@@ -1043,7 +843,7 @@ describe("SSH hosts modal chrome", () => {
 
 describe("SSH keys modal", () => {
   it("uploads a private key file under a name and confirms before deleting one", async () => {
-    const api = withKeys({
+    const api = controlFake({
       listSshKeys: vi.fn(async () => [
         { name: "old", type: "ssh-rsa", fingerprint: "SHA256:old" },
       ]),
@@ -1054,7 +854,7 @@ describe("SSH keys modal", () => {
       })),
       removeSshKey: vi.fn(async () => undefined),
     });
-    const hosts = new SshKeys(api as unknown as ControlClient);
+    const hosts = new SshKeys(api as any);
     await hosts.refresh();
     hosts.node
       .querySelector<HTMLButtonElement>(

@@ -5,12 +5,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthInteractionRequiredError } from "../src/AuthClient";
 import { ControlClient, UNCHANGED } from "../src/ControlClient";
-import type { IRun } from "../src/Common";
+import { jsonResponse, type IRun } from "../src/Common";
 import { cacheSessionAccess } from "../src/session";
 import { setActiveSessionId } from "../src/session";
 import {
   accessFixture,
   controlFake,
+  etagResponse,
   fakeAuth,
   panelFake,
   pollPanel,
@@ -374,17 +375,13 @@ describe("conditional polling across sessions", () => {
       "https://control.example.edu/api/v1",
       auth as any,
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        if (new URL(String(input)).pathname.endsWith("/ssh")) {
-          return new Response(JSON.stringify({ hosts: [] }), {
-            headers: { "content-type": "application/json" },
-          });
+        if (new URL(String(input)).pathname.endsWith("/ssh/hosts")) {
+          return jsonResponse({ hosts: [] });
         }
         if (new Headers(init?.headers).get("If-None-Match") === etag) {
           return new Response(null, { status: 304 });
         }
-        return new Response(JSON.stringify({ sessions, logs: [] }), {
-          headers: { "content-type": "application/json", ETag: etag },
-        });
+        return etagResponse({ sessions, logs: [] }, etag);
       }) as any,
     );
 

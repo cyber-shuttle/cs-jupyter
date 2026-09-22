@@ -9,9 +9,11 @@ assert.ok(existsSync(dist), "dist/ is missing; run bun run build first");
 
 const configText = readFileSync(new URL("jupyter-lite.json", dist), "utf8");
 const config = JSON.parse(configText)["jupyter-config-data"];
-const extensionNames = (config.federated_extensions ?? []).map(
-  ({ name }) => name,
+assert.ok(
+  Array.isArray(config.federated_extensions),
+  "federated_extensions is missing from the built jupyter-lite.json",
 );
+const extensionNames = config.federated_extensions.map(({ name }) => name);
 assert.ok(
   extensionNames.includes("@cybershuttle/jupyter"),
   "remote adapter is missing from the distribution",

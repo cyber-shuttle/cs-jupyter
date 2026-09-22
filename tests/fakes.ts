@@ -13,7 +13,9 @@ import type {
   ISessionLogTail,
 } from "../src/ControlClient";
 import type { ISessionAccess } from "../src/session";
+import { ControlClient } from "../src/ControlClient";
 import { CyberShuttlePanel } from "../src/CyberShuttlePanel";
+import { jsonResponse } from "../src/Common";
 import { emptyState, type ISessionUiState } from "../src/session";
 import type { OAuthWebSocketConnector } from "../src/ssh";
 import type { ISshOperationCallbacks, ISshOperationConsole } from "../src/ssh";
@@ -83,7 +85,7 @@ export function sessionFixture(overrides: Partial<ISession> = {}): ISession {
     sshHost: "delta",
     partition: "debug",
     rootFolder: "projects/demo",
-    resources: { cores: 1, memoryMb: 1024, wallMinutes: 30 },
+    resources: { cores: 2, memoryMb: 4096, wallMinutes: 30 },
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:00:01Z",
     ...overrides,
@@ -187,6 +189,18 @@ export function fakeAuth(idToken = "delegated-token") {
     interactiveLogin: vi.fn(async () => undefined),
   } satisfies IControlAuth;
 }
+
+export const etagResponse = (value: unknown, etag: string): Response =>
+  new Response(JSON.stringify(value), {
+    headers: { "content-type": "application/json", ETag: etag },
+  });
+
+export const clientFor = (value: unknown): ControlClient =>
+  new ControlClient(
+    "https://control.example.edu/api/v1",
+    fakeAuth(),
+    vi.fn<typeof globalThis.fetch>(async () => jsonResponse(value)),
+  );
 
 export async function removeConfirmed(
   panel: CyberShuttlePanel,

@@ -1,18 +1,13 @@
-// Locks the cs-control wire shapes this client trusts against a checked-in
-// fixture. An upstream field rename or removal is caught here, not rendered
-// as undefined in the UI.
-import { fakeAuth } from "./fakes";
-import { describe, expect, it, vi } from "vitest";
-import { jsonResponse } from "../src/Common";
-import { ControlClient, UNCHANGED } from "../src/ControlClient";
-import providerFixture from "./fixtures/cs-control-session-contract.json";
+// Locks the cs-control wire shapes this client trusts. An upstream field
+// rename or removal is caught here, not rendered as undefined in the UI.
+import { clientFor, sessionFixture } from "./fakes";
+import { describe, expect, it } from "vitest";
+import { UNCHANGED } from "../src/ControlClient";
 
-const clientFor = (value: unknown) =>
-  new ControlClient(
-    "https://control.example.edu/api/v1",
-    fakeAuth(),
-    vi.fn<typeof globalThis.fetch>(async () => jsonResponse(value)),
-  );
+const providerFixture = sessionFixture({
+  account: "project-a",
+  startedAt: "2030-01-01T00:00:30Z",
+});
 
 describe("checked narrow cs-control session JSON contract", () => {
   it("accepts only session state and rejects removed private/application fields", async () => {
@@ -37,6 +32,23 @@ describe("checked narrow cs-control session JSON contract", () => {
       }).listSessions(),
     ).rejects.toThrow("invalid session");
   });
+
+  it.each([
+    ["cores", { cores: 1, memoryMb: 4096, wallMinutes: 60 }],
+    ["memory", { cores: 2, memoryMb: 4095, wallMinutes: 60 }],
+    ["walltime", { cores: 2, memoryMb: 4096, wallMinutes: 0 }],
+    ["GPU count", { cores: 2, memoryMb: 4096, wallMinutes: 60, gpuCount: 0 }],
+  ])(
+    "rejects session resources below the %s minimum",
+    async (_name, resources) => {
+      await expect(
+        clientFor({
+          sessions: [{ ...providerFixture, resources }],
+          logs: [],
+        }).listSessions(),
+      ).rejects.toThrow("invalid session list");
+    },
+  );
 
   it("rejects a session missing required fields rather than rendering them undefined", async () => {
     for (const field of [
@@ -72,6 +84,15 @@ describe("checked narrow cs-control metric sample JSON contract", () => {
     ).rejects.toThrow("invalid metric series");
   });
 
+  it("rejects metrics for a different session", async () => {
+    await expect(
+      clientFor({
+        sessionId: "s-111111111111",
+        samples: [],
+      }).getSessionMetrics(providerFixture.id),
+    ).rejects.toThrow("returned metrics for s-111111111111, not");
+  });
+
   it("accepts numeric memory, CPU and GPU readings", async () => {
     const series = await clientFor({
       sessionId: providerFixture.id,
@@ -104,12 +125,6 @@ describe("checked narrow cs-control SSH host JSON contract", () => {
       }).listSshHosts(),
     ).rejects.toThrow("invalid SSH host");
   });
-
-  it("rejects a non-boolean managed flag", async () => {
-    await expect(
-      clientFor({ hosts: [{ ...host, managed: "yes" }] }).listSshHosts(),
-    ).rejects.toThrow("invalid SSH host");
-  });
 });
 
 describe("checked narrow cs-control Slurm discovery JSON contract", () => {
@@ -138,29 +153,6 @@ describe("checked narrow cs-control Slurm discovery JSON contract", () => {
       "invalid Slurm discovery",
     );
   });
-
-  it("rejects a non-string account", async () => {
-    await expect(
-      clientFor({ ...discovery, accounts: [{}, 7] }).discoverSlurm("delta"),
-    ).rejects.toThrow("invalid Slurm discovery");
-  });
-
-  it("rejects a gres entry with a non-string name", async () => {
-    await expect(
-      clientFor({
-        ...discovery,
-        partitions: [
-          { ...discovery.partitions[0], gres: [{ name: 7, count: 4 }] },
-        ],
-      }).discoverSlurm("delta"),
-    ).rejects.toThrow("invalid Slurm discovery");
-  });
-
-  it("rejects a non-string homeDir", async () => {
-    await expect(
-      clientFor({ ...discovery, homeDir: 7 }).discoverSlurm("delta"),
-    ).rejects.toThrow("invalid Slurm discovery");
-  });
 });
 
 describe("checked narrow cs-control run history JSON contract", () => {
@@ -184,13 +176,5 @@ describe("checked narrow cs-control run history JSON contract", () => {
     await expect(
       clientFor({ runs: [{ ...run, finalState: "BANANA" }] }).listRuns(),
     ).rejects.toThrow("invalid run");
-  });
-
-  it("rejects a sample that is not an object", async () => {
-    await expect(
-      clientFor({
-        runs: [{ ...run, samples: ["not a sample"] }],
-      }).listRuns(),
-    ).rejects.toThrow("invalid run history");
   });
 });

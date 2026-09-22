@@ -59,7 +59,7 @@ describe("OAuth WebSocket factory", () => {
     );
     await client.sshAuthWebSocket("delta")();
     expect(open.mock.calls.map(([url]) => url)).toEqual([
-      "wss://control.example.edu/api/v1/ssh/delta/auth",
+      "wss://control.example.edu/api/v1/ssh/hosts/delta/auth",
     ]);
   });
 
@@ -80,8 +80,8 @@ describe("OAuth WebSocket factory", () => {
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
 
-    await factory.open("wss://control.example.edu/api/v1/ssh/delta/auth");
-    await factory.open("wss://control.example.edu/api/v1/ssh/echo/auth");
+    await factory.open("wss://control.example.edu/api/v1/ssh/hosts/delta/auth");
+    await factory.open("wss://control.example.edu/api/v1/ssh/hosts/echo/auth");
 
     expect(acquireToken).toHaveBeenCalledTimes(2);
     expect(sockets.slice(-2).map(({ protocols }) => protocols)).toEqual([
@@ -89,7 +89,7 @@ describe("OAuth WebSocket factory", () => {
       ["cybershuttle.v1", "bearer.c2Vjb25kLXRva2Vu"],
     ]);
     expect(sockets.at(-2)?.url).toBe(
-      "wss://control.example.edu/api/v1/ssh/delta/auth",
+      "wss://control.example.edu/api/v1/ssh/hosts/delta/auth",
     );
     expect([
       window.localStorage.length,
@@ -119,7 +119,7 @@ describe("OAuth WebSocket factory", () => {
         Socket,
       );
       await expect(
-        factory.open("wss://control.example.edu/api/v1/ssh/delta/auth"),
+        factory.open("wss://control.example.edu/api/v1/ssh/hosts/delta/auth"),
       ).rejects.toThrow(/token/i);
       expect(sockets).toHaveLength(before);
     },
@@ -133,10 +133,12 @@ describe("OAuth WebSocket factory", () => {
       Socket,
     );
     await expect(
-      factory.open("wss://control.example.edu/api/v1/ssh/delta/auth?token=x"),
+      factory.open(
+        "wss://control.example.edu/api/v1/ssh/hosts/delta/auth?token=x",
+      ),
     ).rejects.toThrow("without credentials, query, or fragment");
     await expect(
-      factory.open("wss://hostile.example/api/v1/ssh/delta/auth"),
+      factory.open("wss://hostile.example/api/v1/ssh/hosts/delta/auth"),
     ).rejects.toThrow("outside the configured control origin");
     expect(acquireToken).not.toHaveBeenCalled();
   });

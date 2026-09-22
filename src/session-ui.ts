@@ -6,14 +6,14 @@ import type { JupyterFrontEndPlugin } from "@jupyterlab/application";
 import { Dialog, ICommandPalette, showDialog } from "@jupyterlab/apputils";
 import type { ReactWidget } from "@jupyterlab/ui-components";
 import { BoxPanel, Widget } from "@lumino/widgets";
-import { ControlClient } from "./ControlClient.js";
-import { CyberShuttlePanel } from "./CyberShuttlePanel.js";
+import { ControlClient, IControlClient } from "./ControlClient";
+import { CyberShuttlePanel } from "./CyberShuttlePanel";
 import {
   SessionController,
   installSessionCommandGuard,
-} from "./SessionController.js";
-import { detach, mount } from "./dom.js";
-import { getActiveSessionId, sessionLiteUrl } from "./session.js";
+} from "./SessionController";
+import { detach, mount } from "./dom";
+import { getActiveSessionId, sessionLiteUrl } from "./session";
 
 const SELECT_SESSION_COMMAND = "@cybershuttle/jupyter:select-session";
 
@@ -36,10 +36,15 @@ async function offerSignIn(panel: CyberShuttlePanel): Promise<void> {
 
 export const sessionUiPlugin: JupyterFrontEndPlugin<void> = {
   id: "@cybershuttle/jupyter:session-ui",
+  description: "Mount the CyberShuttle session panel into the launcher.",
   autoStart: true,
+  requires: [IControlClient],
   optional: [ICommandPalette],
-  activate: async (app, palette) => {
-    const api = new ControlClient();
+  activate: async (
+    app,
+    api: ControlClient,
+    palette: ICommandPalette | null,
+  ) => {
     const controller = new SessionController(app, api, sessionLiteUrl);
     let panel: CyberShuttlePanel | undefined;
     let current: MainWidget | undefined;

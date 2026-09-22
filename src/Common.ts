@@ -20,10 +20,6 @@ export function validSessionId(value: string): string {
   return value;
 }
 
-export function isPositiveInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1;
-}
-
 export interface ITokenProvider {
   acquireToken(): Promise<OAuthCredentials>;
   invalidateToken?(): void;
@@ -241,17 +237,6 @@ export function jsonResponse(
   });
 }
 
-export function exactKeys(
-  value: unknown,
-  expected: string[],
-): value is Record<string, any> {
-  return (
-    isPlainObject(value) &&
-    Object.keys(value).length === expected.length &&
-    Object.keys(value).every((key) => expected.includes(key))
-  );
-}
-
 export function base64UrlEncode(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
@@ -289,6 +274,8 @@ export function vBoundedInt(
     v <= maximum;
 }
 
+export const vPositiveInt = vBoundedInt(1, Number.MAX_SAFE_INTEGER);
+
 export function vOptional<T>(field: Validator<T>): Validator<T | undefined> {
   return (v): v is T | undefined => v === undefined || field(v);
 }
@@ -303,9 +290,14 @@ export function vArray<T>(
     v.every((item) => of(item));
 }
 
-export function vOneOf<T extends string>(options: readonly T[]): Validator<T> {
-  return (v): v is T =>
-    typeof v === "string" && (options as readonly string[]).includes(v);
+export function vOneOf<T extends string | boolean>(
+  options: readonly T[],
+): Validator<T> {
+  return (v): v is T => (options as readonly unknown[]).includes(v);
+}
+
+export function vEither<T>(...shapes: Validator<T>[]): Validator<T> {
+  return (v): v is T => shapes.some((shape) => shape(v));
 }
 
 export function vObject<T>(fields: {

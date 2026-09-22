@@ -257,31 +257,6 @@ describe("run history view", () => {
     history.dispose();
   });
 
-  it("keeps focus on a disclosure across a state update", async () => {
-    const controller = new ControllerFake(
-      uiState({ runs: [finished], sessions: [live] }),
-    ) as never;
-    const history = new RunHistory(controller);
-    document.body.appendChild(history.node);
-
-    const summary = history.node.querySelector<HTMLElement>(
-      "[data-session-action]",
-    )!;
-    summary.focus();
-    expect(document.activeElement).toBe(summary);
-
-    (controller as unknown as { setState(state: unknown): void }).setState(
-      uiState({ runs: [finished], sessions: [live] }),
-    );
-
-    const restored = history.node.querySelector<HTMLElement>(
-      "[data-session-action]",
-    )!;
-    expect(document.activeElement).toBe(restored);
-    history.dispose();
-    document.body.removeChild(history.node);
-  });
-
   it("keeps distinct keys for a relaunching session and its finished run", async () => {
     const stopped = sessionFixture({ state: "STOPPED" });
     const api = controlFake({

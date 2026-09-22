@@ -96,20 +96,23 @@ export interface ISshOperationConsole {
     connect: OAuthWebSocketConnector,
     callbacks: ISshOperationCallbacks,
   ): void;
-  complete(message: string, collapse?: boolean): void;
+  complete(message: string): void;
   focus(): void;
   dispose(): void;
 }
-
-export type SshOperationConsoleFactory = () => ISshOperationConsole;
 
 type ServerFrame =
   | { type: "ready" }
   | { type: "exit"; code?: number; message?: string };
 
 export class SshOperationConsole implements ISshOperationConsole {
-  readonly node = document.createElement("section");
-  private _terminalHost = document.createElement("div");
+  readonly node = element("section", "", "csSshAuthTranscript", {
+    role: "region",
+    "aria-label": "SSH operation console",
+  });
+  private _terminalHost = element("div", "", "csSshOperationTerminal", {
+    "aria-label": "SSH operation output",
+  });
   private _terminal = new Terminal({
     convertEol: true,
     cursorBlink: true,
@@ -130,11 +133,6 @@ export class SshOperationConsole implements ISshOperationConsole {
   private _finished = false;
 
   constructor() {
-    this.node.className = "csSshAuthTranscript";
-    this.node.setAttribute("role", "region");
-    this.node.setAttribute("aria-label", "SSH operation console");
-    this._terminalHost.className = "csSshOperationTerminal";
-    this._terminalHost.setAttribute("aria-label", "SSH operation output");
     this.node.appendChild(this._terminalHost);
     this._terminal.loadAddon(this._fitAddon);
     this._terminal.open(this._terminalHost);
@@ -169,11 +167,11 @@ export class SshOperationConsole implements ISshOperationConsole {
     this._connect(connect);
   }
 
-  complete(message: string, collapse = true): void {
+  complete(message: string): void {
     this._finished = true;
     this._epoch++;
     this._say(boundedAnnouncement(message, "Operation complete."));
-    this.node.hidden = collapse;
+    this.node.hidden = true;
     this._closeSocket();
   }
 
@@ -340,15 +338,16 @@ function boundedAnnouncement(value: unknown, fallback: string): string {
 export class SshLoginDock extends Widget {
   private _console: ISshOperationConsole | undefined;
   private _pending: ((reason: Error) => void) | undefined;
-  private _status = element("div", "", "csSshAuthStatus");
+  private _status = element("div", "", "csSshAuthStatus", {
+    role: "status",
+  });
 
   constructor(
-    private _consoleFactory: SshOperationConsoleFactory = () =>
+    private _consoleFactory: () => ISshOperationConsole = () =>
       new SshOperationConsole(),
   ) {
     super();
     this.addClass("csSshLoginDock");
-    this._status.setAttribute("role", "status");
     this.node.appendChild(this._status);
     this.hide();
   }

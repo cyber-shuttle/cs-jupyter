@@ -59,7 +59,14 @@ export class SessionDetail extends PanelBoundWidget {
   }
 
   protected _rebuild(): void {
-    this._captureLogView();
+    const before = this._logScroller();
+    if (before) {
+      this._logView = {
+        scrollTop: before.scrollTop,
+        atBottom:
+          before.scrollHeight - before.scrollTop - before.clientHeight <= 2,
+      };
+    }
     this._session = this._state.sessions.find(
       (session) => session.id === this._sessionId,
     );
@@ -69,7 +76,11 @@ export class SessionDetail extends PanelBoundWidget {
         ? this._buildSession(this._session)
         : element("div", "Waiting for live session state…", "csStatus"),
     );
-    this._restoreLogView();
+    const after = this._logScroller();
+    if (after) {
+      const view = this._logView!;
+      after.scrollTop = view.atBottom ? after.scrollHeight : view.scrollTop;
+    }
   }
 
   private _buildSession(session: ISession): HTMLElement {
@@ -77,7 +88,7 @@ export class SessionDetail extends PanelBoundWidget {
     const state = displayState(session, this._state.busySessionIds);
 
     const header = element("div", "", "csSessionDetailHeader");
-    const identity = document.createElement("div");
+    const identity = element("div");
     identity.append(
       element("h3", session.sshHost, "csSessionDetailTitle"),
       element(
@@ -189,7 +200,7 @@ export class SessionDetail extends PanelBoundWidget {
     this._logView ??= { scrollTop: 0, atBottom: true };
     const { section, scroller } = logSection(tail.lines);
     scroller.dataset.sessionId = session.id;
-    scroller.ariaLabel = `Status for ${session.sshHost}`;
+    scroller.setAttribute("aria-label", `Status for ${session.sshHost}`);
     scroller.setAttribute("aria-live", "polite");
     return section;
   }
@@ -200,30 +211,6 @@ export class SessionDetail extends PanelBoundWidget {
           ".csSessionLogScroll[data-session-id]",
         )
       : null;
-  }
-
-  private _captureLogView(): void {
-    const scroller = this._logScroller();
-    if (!scroller) {
-      return;
-    }
-    this._logView!.scrollTop = scroller.scrollTop;
-    this._logView!.atBottom = this._atBottom(scroller);
-  }
-
-  private _restoreLogView(): void {
-    const scroller = this._logScroller();
-    if (!scroller) {
-      return;
-    }
-    const view = this._logView!;
-    scroller.scrollTop = view.atBottom ? scroller.scrollHeight : view.scrollTop;
-  }
-
-  private _atBottom(scroller: HTMLElement): boolean {
-    return (
-      scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 2
-    );
   }
 
   private _button(

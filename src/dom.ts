@@ -224,8 +224,7 @@ export function logSection(lines: ILogLine[]): {
 } {
   const section = element("section", "", "csSessionLog");
   section.appendChild(element("h4", "Status", "csSessionLogTitle"));
-  const scroller = element("div", "", "csSessionLogScroll");
-  scroller.role = "log";
+  const scroller = element("div", "", "csSessionLogScroll", { role: "log" });
   for (const line of lines) {
     scroller.appendChild(logLine(line));
   }
@@ -255,12 +254,10 @@ export function disclosure(
   openSet: Set<string>,
   summaryChildren: HTMLElement[],
 ): { entry: HTMLDetailsElement; body: HTMLElement } {
-  const entry = document.createElement("details");
-  entry.className = "csSshHostEntry";
+  const entry = element("details", "", "csSshHostEntry");
   entry.open = openSet.has(key);
   entry.ontoggle = () => (entry.open ? openSet.add(key) : openSet.delete(key));
-  const summary = document.createElement("summary");
-  summary.className = "csSshHostSummary";
+  const summary = element("summary", "", "csSshHostSummary");
   summary.append(...summaryChildren);
   const body = element("div", "", "csSshHostBody");
   entry.append(summary, body);

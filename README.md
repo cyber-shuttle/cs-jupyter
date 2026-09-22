@@ -15,7 +15,7 @@ session is running (`READY`) the application fails closed rather than falling ba
 
 ## Status
 
-Pre-release. Version 0.1.0 in both `package.json` and `pyproject.toml`, no tags cut and no published
+Pre-release. Version 0.1.0 in both `package.json` and `pyproject.toml`, with no published
 artifact. The built `dist/` directory is the only deliverable, and its configuration and the API it speaks
 can change without notice. [CHANGELOG.md](CHANGELOG.md) records what has landed so far.
 

@@ -18,6 +18,9 @@ export abstract class RebuildingWidget extends Widget {
   }
 
   dispose(): void {
+    if (this.isDisposed) {
+      return;
+    }
     this._clock.stop();
     super.dispose();
   }
@@ -28,14 +31,11 @@ export abstract class RebuildingWidget extends Widget {
       : undefined;
     this._rebuild();
     if (action !== undefined) {
-      for (const control of Array.from(
+      Array.from(
         this.node.querySelectorAll<HTMLElement>("[data-session-action]"),
-      )) {
-        if (control.dataset.sessionAction === action) {
-          control.focus();
-          break;
-        }
-      }
+      )
+        .find((control) => control.dataset.sessionAction === action)
+        ?.focus();
     }
     this._clock.sync(this._counting());
   }
@@ -51,9 +51,6 @@ export abstract class PanelBoundWidget extends RebuildingWidget {
   }
 
   dispose(): void {
-    if (this.isDisposed) {
-      return;
-    }
     this._panel.stateChanged.disconnect(this._onStateChanged, this);
     super.dispose();
   }
@@ -98,6 +95,11 @@ export abstract class RemoteListWidget extends RebuildingWidget {
     if (!this.isDisposed) {
       this._render();
     }
+  }
+
+  protected _confirm(name: string): void {
+    this._confirming = name;
+    this._sync();
   }
 
   protected async _refreshing(load: () => Promise<void>): Promise<void> {

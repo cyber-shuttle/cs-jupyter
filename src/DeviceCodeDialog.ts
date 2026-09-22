@@ -29,45 +29,41 @@ export function showDeviceCodeDialog(
   );
   instructions.id = `cs-device-code-instructions-${crypto.randomUUID()}`;
   overlay.setAttribute("aria-describedby", instructions.id);
-  const code = element("code", authorization.userCode, "csDeviceCode");
-  code.setAttribute("aria-label", `Device code ${authorization.userCode}`);
+  const code = element("code", authorization.userCode, "csDeviceCode", {
+    "aria-label": `Device code ${authorization.userCode}`,
+  });
 
   const copy = button("", "csDeviceCodeCopy");
-  copy.innerHTML = COPY_GLYPH;
-  const describeCopy = (text: string): void => {
+  const showCopy = (copied: boolean, text: string): void => {
+    copy.innerHTML = copied ? CHECK_GLYPH : COPY_GLYPH;
+    copy.classList.toggle("csDeviceCodeCopied", copied);
     copy.title = text;
     copy.setAttribute("aria-label", text);
   };
-  describeCopy("Copy code");
-  let copyReset: ReturnType<typeof setTimeout> | undefined;
+  showCopy(false, "Copy code");
+  let copyReset: number | undefined;
   copy.onclick = async () => {
-    clearTimeout(copyReset);
+    window.clearTimeout(copyReset);
     if (await copyText(authorization.userCode)) {
-      copy.innerHTML = CHECK_GLYPH;
-      copy.classList.add("csDeviceCodeCopied");
-      describeCopy("Code copied");
-      copyReset = setTimeout(() => {
-        copy.innerHTML = COPY_GLYPH;
-        copy.classList.remove("csDeviceCodeCopied");
-        describeCopy("Copy code");
-      }, 2000);
+      showCopy(true, "Code copied");
+      copyReset = window.setTimeout(() => showCopy(false, "Copy code"), 2000);
     } else {
-      copy.innerHTML = COPY_GLYPH;
-      copy.classList.remove("csDeviceCodeCopied");
-      describeCopy("Could not copy the code");
+      showCopy(false, "Could not copy the code");
     }
   };
   const codeRow = element("div", "", "csDeviceCodeRow");
   codeRow.append(code, copy);
 
   const actions = element("div", "", "csDeviceCodeActions");
-  const open = document.createElement("a");
-  open.className = "csPrimaryButton csDeviceCodeOpen";
+  const open = element(
+    "a",
+    "Open sign-in page",
+    "csPrimaryButton csDeviceCodeOpen",
+  );
   open.href = authorization.verificationUri;
   open.target = "_blank";
   open.rel = "noopener noreferrer";
   open.referrerPolicy = "no-referrer";
-  open.textContent = "Open sign-in page";
   open.onclick = () => {
     open.classList.add("csDeviceCodeWaiting");
     open.textContent = "";

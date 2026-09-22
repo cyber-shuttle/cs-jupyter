@@ -29,8 +29,10 @@ import {
 } from "@jupyterlab/services";
 import { afterEach, assert, describe, expect, it, vi } from "vitest";
 
-import { remoteServicePlugins } from "../src/index.js";
-import { getActiveSessionId } from "../src/session.js";
+import plugins, { remoteServicePlugins } from "../src/index";
+import { ControlClient, IControlClient } from "../src/ControlClient";
+import { jsonResponse } from "../src/Common";
+import { getActiveSessionId } from "../src/session";
 import { accessFixture } from "./fakes";
 
 const id = "s-012345abcdef";
@@ -81,11 +83,31 @@ function registryFor(path: string): PluginRegistry<null> {
       activate: () => supportManagers.user,
     },
   ] as never);
-  registry.registerPlugins(remoteServicePlugins);
+  registry.registerPlugins(remoteServicePlugins as never);
   return registry;
 }
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe("shared cs-control service", () => {
+  it("provides one client to every plugin that reaches cs-control", () => {
+    const providers = plugins.filter(
+      (plugin) => plugin.provides === IControlClient,
+    );
+    expect(providers).toHaveLength(1);
+    expect(providers[0].activate(null as never)).toBeInstanceOf(ControlClient);
+
+    for (const id of [
+      "@cybershuttle/jupyter:remote-server-settings",
+      "@cybershuttle/jupyter:session-ui",
+      "@cybershuttle/jupyter:walltime-status",
+    ]) {
+      expect(plugins.find((plugin) => plugin.id === id)?.requires).toContain(
+        IControlClient,
+      );
+    }
+  });
+});
 
 describe("remote service manager registry", () => {
   it("constructs a fail-closed IServiceManager without session selection", async () => {
@@ -170,9 +192,7 @@ describe("remote service manager registry", () => {
           },
         };
       }
-      return new Response(JSON.stringify(body), {
-        headers: { "content-type": "application/json" },
-      });
+      return jsonResponse(body);
     });
     vi.stubGlobal("fetch", browserFetch);
     sessionStorage.setItem(

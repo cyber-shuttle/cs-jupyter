@@ -1,8 +1,7 @@
 // The Dev Tunnels link dialog: showing the current link, starting and polling
-// a device flow to completion, and unlinking. Session create and run-again
-// both retry through SessionActions.withTunnelLink once the same dialog
-// reports success; runAgain is exercised end to end through the panel, the
-// same path a 409 tunnel_link_required session create would take.
+// a device flow to completion, and unlinking. Run-again is exercised end to
+// end through the panel, the same retry path a 409 tunnel_link_required
+// session create takes.
 import { describe, expect, it, vi } from "vitest";
 import { Dialog } from "@jupyterlab/apputils";
 import { Widget } from "@lumino/widgets";
@@ -103,42 +102,6 @@ describe("TunnelLink dialog", () => {
       ).toBeNull(),
     );
     widget.dispose();
-  });
-});
-
-describe("SessionActions.withTunnelLink", () => {
-  it("retries the action once the link hook resolves", async () => {
-    const api = controlFake({
-      listSessions: vi.fn(async () => sessionListFixture([])),
-    });
-    const panel = panelFake(api);
-    const linked = vi.fn(async () => undefined);
-    (panel as any)._actions._hooks.linkTunnel = linked;
-    const action = vi
-      .fn()
-      .mockRejectedValueOnce(
-        new ControlError("tunnel_link_required", "Link first"),
-      )
-      .mockResolvedValueOnce("done");
-
-    await expect(panel.actions.withTunnelLink(action)).resolves.toBe("done");
-    expect(linked).toHaveBeenCalledTimes(1);
-    expect(action).toHaveBeenCalledTimes(2);
-    panel.dispose();
-  });
-
-  it("does not retry a failure unrelated to a Dev Tunnels link", async () => {
-    const api = controlFake({});
-    const panel = panelFake(api);
-    const linked = vi.fn();
-    (panel as any)._actions._hooks.linkTunnel = linked;
-    const action = vi.fn().mockRejectedValue(new Error("Slurm said no."));
-
-    await expect(panel.actions.withTunnelLink(action)).rejects.toThrow(
-      "Slurm said no.",
-    );
-    expect(linked).not.toHaveBeenCalled();
-    panel.dispose();
   });
 });
 

@@ -14,12 +14,11 @@ import {
 } from "./Common";
 import { AuthInteractionRequiredError } from "./AuthClient";
 import { ControlClient, ISessionLogTail, UNCHANGED } from "./ControlClient";
-import { RebuildingWidget } from "./RebuildingWidget";
+import { PanelBoundWidget } from "./RebuildingWidget";
 import { SessionController } from "./SessionController";
 import {
   clearSessionAccess,
   loadSessionAccess,
-  emptyState,
   getActiveSessionId,
   RUN_REPORT_KEY,
   sessionHomeUrl,
@@ -32,23 +31,17 @@ import { button, element } from "./dom";
 
 const SESSION_POLL_INTERVAL_MS = 1000;
 
-export class CyberShuttleHeader extends RebuildingWidget {
+export class CyberShuttleHeader extends PanelBoundWidget {
   readonly signInRequested = new Signal<this, void>(this);
   readonly signOutRequested = new Signal<this, void>(this);
   readonly sshKeysRequested = new Signal<this, void>(this);
   readonly tunnelLinkRequested = new Signal<this, void>(this);
 
-  private _state = emptyState();
   private _accountMenuOpen = false;
 
-  constructor() {
-    super();
+  constructor(panel: CyberShuttlePanel) {
+    super(panel);
     this.addClass("csSessionHeaderWidget");
-    this._render();
-  }
-
-  setState(state: ISessionUiState): void {
-    this._state = state;
     this._render();
   }
 
@@ -75,8 +68,8 @@ export class CyberShuttleHeader extends RebuildingWidget {
       "",
       `csTextButton csIdentityButton ${signedIn ? "csAccountButton" : "csSignInButton"}`,
     );
-    trigger.append(
-      userGlyph(),
+    trigger.innerHTML = USER_GLYPH;
+    trigger.appendChild(
       element(
         "span",
         signedIn
@@ -123,15 +116,14 @@ export class CyberShuttleHeader extends RebuildingWidget {
     glyph: string,
     choose: () => void,
   ): HTMLButtonElement {
-    const item = button("", "csAccountMenuItem");
+    const item = button("", "csAccountMenuItem", () => {
+      this._accountMenuOpen = false;
+      choose();
+    });
     item.innerHTML = glyph;
     item.appendChild(element("span", label));
     item.dataset.sessionAction = action;
     item.setAttribute("role", "menuitem");
-    item.onclick = () => {
-      this._accountMenuOpen = false;
-      choose();
-    };
     return item;
   }
 }
@@ -140,108 +132,15 @@ const KEY_GLYPH = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"
 const TUNNEL_GLYPH = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><path d="M7 13 13 7" /><path d="M8.5 4.5h3A3.5 3.5 0 0 1 15 8v0" /><path d="M11.5 15.5h-3A3.5 3.5 0 0 1 5 12v0" /></g></svg>`;
 const SIGN_OUT_GLYPH = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.5H4.5v13H8M12.5 6.5 16 10l-3.5 3.5M16 10H7.5" /></g></svg>`;
 
-function userGlyph(): SVGSVGElement {
-  const holder = element("div", "");
-  holder.innerHTML = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><circle cx="10" cy="10" r="8.6" /><circle cx="10" cy="8.2" r="2.6" /><path d="M5.3 16.5a5 5 0 0 1 9.4 0" /></g></svg>`;
-  return holder.firstElementChild as SVGSVGElement;
-}
-
-interface ISignInHooks {
-  isDisposed: () => boolean;
-  emitState: () => void;
-  activate: () => Promise<void>;
-  stopPolling: () => void;
-  setUpdatesStatus: (message: string) => void;
-  onError: (message: string) => void;
-}
-
-class SignInController {
-  private _signedIn = false;
-  private _signingIn = false;
-  private _signInPromise: Promise<void> | undefined;
-
-  constructor(
-    private _api: ControlClient,
-    private _hooks: ISignInHooks,
-  ) {}
-
-  get signedIn(): boolean {
-    return this._signedIn;
-  }
-
-  get signingIn(): boolean {
-    return this._signingIn;
-  }
-
-  get account(): string | undefined {
-    return this._signedIn ? this._api.account : undefined;
-  }
-
-  signIn(): Promise<void> {
-    if (!this._signInPromise) {
-      this._signingIn = true;
-      this._hooks.onError("");
-      this._hooks.emitState();
-      this._signInPromise = this._signIn().finally(() => {
-        this._signingIn = false;
-        this._signInPromise = undefined;
-        if (!this._hooks.isDisposed()) this._hooks.emitState();
-      });
-    }
-    return this._signInPromise;
-  }
-
-  private async _signIn(): Promise<void> {
-    try {
-      await this._api.signIn();
-      if (this._hooks.isDisposed()) return;
-      await this._activate();
-    } catch (error) {
-      if (!this._hooks.isDisposed()) {
-        if (error instanceof AuthInteractionRequiredError) {
-          this.requireAuthentication();
-        } else {
-          this._hooks.onError(errorMessage(error));
-        }
-      }
-    }
-  }
-
-  signOut(): void {
-    this._api.signOut();
-    this._hooks.stopPolling();
-    this._signedIn = false;
-  }
-
-  async resume(): Promise<void> {
-    try {
-      await this._api.resumeSignIn();
-    } catch {
-      return;
-    }
-    if (!this._hooks.isDisposed()) await this._activate();
-  }
-
-  requireAuthentication(): void {
-    if (this._hooks.isDisposed()) return;
-    this._signedIn = false;
-    this._hooks.stopPolling();
-    this._hooks.setUpdatesStatus("Sign in again to resume session updates.");
-  }
-
-  private async _activate(): Promise<void> {
-    this._signedIn = true;
-    await this._hooks.activate();
-  }
-}
+const USER_GLYPH = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><circle cx="10" cy="10" r="8.6" /><circle cx="10" cy="8.2" r="2.6" /><path d="M5.3 16.5a5 5 0 0 1 9.4 0" /></g></svg>`;
 
 export class CyberShuttlePanel extends StackedPanel {
   readonly stateChanged = new Signal<this, ISessionUiState>(this);
   readonly restored: Promise<void>;
 
-  readonly header = new CyberShuttleHeader();
+  readonly header: CyberShuttleHeader;
   private _list: SessionList;
-  private _pollTimer: ReturnType<typeof setInterval> | undefined;
+  private _pollTimer: number | undefined;
   private _polling = false;
   private _sessions: ISession[] = [];
   private _logs = new Map<string, ISessionLogTail>();
@@ -253,7 +152,8 @@ export class CyberShuttlePanel extends StackedPanel {
   private _hosts: ISshHost[] | undefined;
   private _signedInEpoch = 0;
   private _hostsError: string | undefined;
-  private _auth: SignInController;
+  private _signedIn = false;
+  private _signInPromise: Promise<void> | undefined;
   private _modals: SessionModals;
   private _actions: SessionActions;
 
@@ -264,14 +164,6 @@ export class CyberShuttlePanel extends StackedPanel {
     super();
     this.id = "cybershuttle-session-panel";
     this.addClass("csShell");
-    this._auth = new SignInController(_api, {
-      isDisposed: () => this.isDisposed,
-      emitState: () => this._emitState(),
-      activate: () => this._activateSignIn(),
-      stopPolling: () => this._stopPolling(),
-      setUpdatesStatus: (message) => this._setUpdatesStatus(message),
-      onError: (message) => (this._error = message),
-    });
     this._actions = new SessionActions(_api, {
       isDisposed: () => this.isDisposed,
       emitState: () => this._emitState(),
@@ -291,7 +183,8 @@ export class CyberShuttlePanel extends StackedPanel {
       },
     });
     this._modals = new SessionModals(this, _api);
-    this._list = new SessionList();
+    this.header = new CyberShuttleHeader(this);
+    this._list = new SessionList(this);
     this.addWidget(this._list);
     this._list.sessionRequested.connect(
       (_sender, id) => void this._modals.openSession(id),
@@ -323,17 +216,14 @@ export class CyberShuttlePanel extends StackedPanel {
       busySessionIds: this._actions.busySessionIds,
       connectingSessionId: this._actions.connectingSessionId,
       jupyterReady: new Set(this._actions.jupyterReady),
-      signedIn: this._auth.signedIn,
-      signingIn: this._auth.signingIn,
-      account: this._auth.account,
+      signedIn: this._signedIn,
+      signingIn: this._signInPromise !== undefined,
+      account: this._signedIn ? this._api.account : undefined,
     };
   }
 
   private _emitState(): void {
-    const state = this.state;
-    this.header.setState(state);
-    this._list.setState(state);
-    this.stateChanged.emit(state);
+    this.stateChanged.emit(this.state);
   }
 
   private _setSessions(sessions: ISession[]): void {
@@ -384,10 +274,8 @@ export class CyberShuttlePanel extends StackedPanel {
   }
 
   private _stopPolling(): void {
-    if (this._pollTimer !== undefined) {
-      clearInterval(this._pollTimer);
-      this._pollTimer = undefined;
-    }
+    window.clearInterval(this._pollTimer);
+    this._pollTimer = undefined;
   }
 
   private _stale(epoch: number): boolean {
@@ -432,7 +320,7 @@ export class CyberShuttlePanel extends StackedPanel {
         return;
       }
       if (error instanceof AuthInteractionRequiredError) {
-        this._auth.requireAuthentication();
+        this._requireAuthentication();
         return;
       }
       this._setUpdatesStatus("Session updates unavailable.");
@@ -488,12 +376,44 @@ export class CyberShuttlePanel extends StackedPanel {
   }
 
   signIn(): Promise<void> {
-    return this._auth.signIn();
+    if (!this._signInPromise) {
+      this._error = "";
+      this._signInPromise = this._signIn().finally(() => {
+        this._signInPromise = undefined;
+        if (!this.isDisposed) this._emitState();
+      });
+      this._emitState();
+    }
+    return this._signInPromise;
+  }
+
+  private async _signIn(): Promise<void> {
+    try {
+      await this._api.signIn();
+      if (this.isDisposed) return;
+      this._signedIn = true;
+      await this._activateSignIn();
+    } catch (error) {
+      if (this.isDisposed) return;
+      if (error instanceof AuthInteractionRequiredError) {
+        this._requireAuthentication();
+      } else {
+        this._error = errorMessage(error);
+      }
+    }
+  }
+
+  private _requireAuthentication(): void {
+    this._signedIn = false;
+    this._stopPolling();
+    this._setUpdatesStatus("Sign in again to resume session updates.");
   }
 
   signOut(): void {
     this._signedInEpoch++;
-    this._auth.signOut();
+    this._api.signOut();
+    this._stopPolling();
+    this._signedIn = false;
     this._actions.dispose();
     this._sessions = [];
     this._hosts = undefined;
@@ -508,7 +428,7 @@ export class CyberShuttlePanel extends StackedPanel {
 
   private async _activateSignIn(): Promise<void> {
     this._setUpdatesStatus("");
-    this._pollTimer ??= setInterval(
+    this._pollTimer ??= window.setInterval(
       () => void this._poll(),
       SESSION_POLL_INTERVAL_MS,
     );
@@ -521,16 +441,26 @@ export class CyberShuttlePanel extends StackedPanel {
     await Promise.all([this._poll(), this._refreshHosts()]);
     const run = sessionStorage.getItem(RUN_REPORT_KEY);
     sessionStorage.removeItem(RUN_REPORT_KEY);
-    if (run && this._auth.signedIn) void this._modals.openRunHistory(run);
+    if (run && this._signedIn) void this._modals.openRunHistory(run);
     this._loading = false;
     this._emitState();
   }
 
   async resume(): Promise<void> {
-    return this._auth.resume();
+    try {
+      await this._api.resumeSignIn();
+    } catch {
+      return;
+    }
+    if (this.isDisposed) return;
+    this._signedIn = true;
+    await this._activateSignIn();
   }
 
   dispose(): void {
+    if (this.isDisposed) {
+      return;
+    }
     this._actions.dispose();
     this._modals.dispose();
     this._stopPolling();
@@ -550,8 +480,7 @@ export class CyberShuttlePanel extends StackedPanel {
       }
       this._hostsError = undefined;
       this._emitState();
-      this._list.setCanCreate(
-        hosts.length > 0,
+      this._list.setCreateBlocked(
         hosts.length ? "" : "Add an SSH host before creating a session.",
       );
     } catch (error) {
@@ -559,10 +488,7 @@ export class CyberShuttlePanel extends StackedPanel {
         return;
       }
       if (this._hosts === undefined) {
-        this._list.setCanCreate(
-          false,
-          "SSH hosts are temporarily unavailable.",
-        );
+        this._list.setCreateBlocked("SSH hosts are temporarily unavailable.");
       }
       this._hostsError = errorMessage(error);
       this._error = this._hostsError;

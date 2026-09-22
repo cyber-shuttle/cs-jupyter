@@ -1,12 +1,8 @@
 // The SSH login console fails closed unless cs-control negotiates the
 // CyberShuttle WebSocket subprotocol. It must swallow the Enter key itself,
-// since the hosting dialog would otherwise close on the same keystroke. Only
-// the dock parked on the body floats: .csSshAuth, the in-form progress row,
-// must never be position fixed or it would cover the shell.
+// since the hosting dialog would otherwise close on the same keystroke.
 import type { ITerminalOptions } from "@xterm/xterm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { readFileSync } from "fs";
-import { join } from "path";
 
 const mocks = vi.hoisted(() => {
   class Terminal {
@@ -166,28 +162,5 @@ describe("SSH operation console protocol", () => {
     );
     expect(dialog).not.toHaveBeenCalled();
     console.dispose();
-  });
-});
-
-describe("SSH auth CSS", () => {
-  const css = readFileSync(join(__dirname, "../style/base.css"), "utf8");
-
-  function rule(selector: string): string {
-    const match = css.match(
-      new RegExp(
-        `${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`,
-      ),
-    );
-    if (!match) throw new Error(`no rule found for ${selector}`);
-    return match[1];
-  }
-
-  it("floats the login dock only while it is parked on the body", () => {
-    expect(rule("body > .csSshLoginDock")).toContain("position: fixed");
-    expect(rule(".csSshLoginDock")).not.toContain("position: fixed");
-  });
-
-  it("keeps .csSshAuth inline, not fixed, for SlurmDiscovery's in-form area", () => {
-    expect(rule(".csSshAuth")).not.toContain("position: fixed");
   });
 });

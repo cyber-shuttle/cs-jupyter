@@ -9,10 +9,11 @@ import type { IMetricSample, IRun, ISession, SessionState } from "./Common";
 import {
   SESSION_ID,
   TOKEN_43,
-  exactKeys,
-  isPositiveInteger,
   isTerminal,
   parseUrl,
+  vObject,
+  vPositiveInt,
+  vString,
   validSessionId,
 } from "./Common";
 import type { ISessionLogTail } from "./ControlClient";
@@ -28,10 +29,8 @@ export function selectedSession(
     : undefined;
 }
 
-export function sessionHomeUrl(
-  location: Pick<Location, "href"> = window.location,
-): string {
-  const url = new URL("index.html", location.href);
+export function sessionHomeUrl(): string {
+  const url = new URL("index.html", window.location.href);
   url.search = "";
   url.hash = "";
   return url.toString();
@@ -134,23 +133,19 @@ export function validDevTunnelRoot(value: string): URL {
   return url;
 }
 
+const accessShape = vObject<ISessionAccess>({
+  sessionId: vString(SESSION_ID),
+  seq: vPositiveInt,
+  expiresAt: vString(),
+  jupyter: vObject({ uri: vString(), token: vString(TOKEN_43) }),
+});
+
 export function validateSessionAccess(value: unknown): ISessionAccess {
-  if (
-    !exactKeys(value, ["expiresAt", "jupyter", "seq", "sessionId"]) ||
-    !isPositiveInteger(value.seq) ||
-    !(Date.parse(value.expiresAt) > Date.now()) ||
-    !exactKeys(value.jupyter, ["token", "uri"]) ||
-    !TOKEN_43.test(value.jupyter.token)
-  ) {
+  if (!accessShape(value) || !(Date.parse(value.expiresAt) > Date.now())) {
     throw new Error("Session access is invalid or expired.");
   }
   validDevTunnelRoot(value.jupyter.uri);
-  return {
-    sessionId: value.sessionId,
-    seq: value.seq,
-    expiresAt: value.expiresAt,
-    jupyter: { uri: value.jupyter.uri, token: value.jupyter.token },
-  };
+  return value;
 }
 
 export function cacheSessionAccess(access: ISessionAccess): void {
