@@ -5,9 +5,9 @@
 
 CyberShuttle Jupyter is a browser-based JupyterLab distribution, built with
 [JupyterLite](https://github.com/jupyterlite/jupyterlite), that runs notebooks and terminals on a
-high-performance computing (HPC) compute node rather than on the machine in front of you. You sign in, ask a
-[cs-plane](https://github.com/cyber-shuttle/cs-plane) daemon for a [Slurm](https://slurm.schedmd.com/)
-session, and the file browser, kernels and terminals talk directly to the Jupyter server running inside
+high-performance computing (HPC) compute node rather than on the machine in front of you. You sign in, ask
+[cs-plane](https://github.com/cyber-shuttle/cs-plane) for a [Slurm](https://slurm.schedmd.com/) session, and
+the file browser, kernels and terminals talk directly to the Jupyter server running inside
 that job.
 
 No compute runs locally: there is no notebook server on your machine and no in-browser kernel. Until a
@@ -21,8 +21,8 @@ can change without notice. [CHANGELOG.md](CHANGELOG.md) records what has landed 
 
 ## Requirements
 
-- **cs-plane running on your own machine.** It owns every API this client calls and listens on loopback
-  only, so each user runs their own.
+- **A cs-plane deployment.** cs-plane owns every API this client calls: it signs you in through Custos, holds
+  your credentials, SSH hosts and session records, and submits the Linkspan job that runs each session.
 - **CILogon sign-in.** An authorization-code flow with PKCE, finished by cs-plane, is the only
   authentication path; this client has no other login.
 - **A linked Dev Tunnels account.** Sessions run over your own [Microsoft or GitHub Dev
@@ -34,7 +34,7 @@ can change without notice. [CHANGELOG.md](CHANGELOG.md) records what has landed 
 
 ## Using it
 
-Start `cs serve` on your machine, then open the site. **Sign in** is on the CyberShuttle title row and
+Open the site. **Sign in** is on the CyberShuttle title row and
 sends you to CILogon. The Launcher's **Sessions** section offers **Add Session**, which
 submits a Slurm job and creates a session, and its card tracks the job's state: host, account, state, resources, and a remaining
 walltime countdown. Open that card and choose **Connect** once it reads `READY`; notebooks and terminals then

@@ -8,9 +8,9 @@ traffic, so every control call is cross-origin and pinned to the configured orig
 ## Configuration
 
 One `PageConfig` option, `cybershuttleControlApiUrl`, points a deployment at its cs-plane API. It must be an
-absolute URL using HTTPS or loopback HTTP — relative and implicit same-origin values are rejected. cs-plane
-listens on loopback, so a deployment normally names a loopback URL, and the cs-plane each user runs must
-list this site's own origin under `--allowed-origin`. The OIDC issuer, client and Custos URL are configured
+absolute URL using HTTPS or loopback HTTP — relative and implicit same-origin values are rejected. A deployment
+names the cs-plane it is served with, and that cs-plane must list this site's own origin under
+`--allowed-origin`. The OIDC issuer, client and Custos URL are configured
 only on cs-plane; this client reads the authorization endpoint from `GET /api/v1/oauth/config` and holds no
 client secret.
 [DEPLOYING.md](DEPLOYING.md) covers where the option goes.
