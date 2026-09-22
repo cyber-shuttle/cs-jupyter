@@ -37,8 +37,12 @@ import {
   TerminalManager,
 } from "@jupyterlab/services";
 import { Token } from "@lumino/coreutils";
-import { ControlClient, createSessionServerSettings } from "./ControlClient.js";
-import { jsonResponse, requestUrl } from "./Common.js";
+import {
+  ControlClient,
+  IControlClient,
+  createSessionServerSettings,
+} from "./ControlClient";
+import { jsonResponse, requestUrl } from "./Common";
 import {
   cacheSessionAccess,
   clearAllSessionAccess,
@@ -46,15 +50,23 @@ import {
   selectedSession,
   sessionHomeUrl,
   setActiveSessionId,
-} from "./session.js";
-import { sessionUiPlugin } from "./session-ui.js";
-import { RemoteWorkspaces } from "./workspaces.js";
-import { walltimeStatusPlugin } from "./metrics.js";
+} from "./session";
+import { sessionUiPlugin } from "./session-ui";
+import { RemoteWorkspaces } from "./workspaces";
+import { walltimeStatusPlugin } from "./metrics";
 
 const IRemoteServerSettings = new Token<ServerConnection.ISettings>(
   "@cybershuttle/jupyter:IRemoteServerSettings",
   "Server settings for the selected READY CyberShuttle session.",
 );
+
+const controlClientPlugin: JupyterFrontEndPlugin<ControlClient> = {
+  id: "@cybershuttle/jupyter:control-client",
+  description: "Provide the shared cs-control API client.",
+  autoStart: true,
+  provides: IControlClient,
+  activate: () => new ControlClient(),
+};
 
 function failClosedServerSettings(): ServerConnection.ISettings {
   const baseUrl = new URL(PageConfig.getBaseUrl(), window.location.origin);
@@ -109,15 +121,14 @@ const remoteServerSettingsPlugin: ServiceManagerPlugin<
     "Provide a READY cs-control session or the fail-closed controller bootstrap to compute managers.",
   autoStart: true,
   provides: IRemoteServerSettings,
-  activate: async () => {
+  requires: [IControlClient],
+  activate: async (_app, api) => {
     try {
       const selected = selectedSession();
       if (!selected) {
         throw new Error("No session selected.");
       }
-      const access = await new ControlClient().getSessionAccess(
-        selected.sessionId,
-      );
+      const access = await api.getSessionAccess(selected.sessionId);
       cacheSessionAccess(access);
       PageConfig.setOption("terminalsAvailable", "true");
       setActiveSessionId(selected.sessionId);
@@ -270,6 +281,7 @@ const serviceManagerPlugin: ServiceManagerPlugin<ServiceManagerType.IManager> =
   };
 
 export const remoteServicePlugins = [
+  controlClientPlugin,
   remoteServerSettingsPlugin,
   defaultDrivePlugin,
   contentsManagerPlugin,

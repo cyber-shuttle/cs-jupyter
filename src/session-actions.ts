@@ -38,25 +38,59 @@ interface IJupyterOperation {
   selection: number;
 }
 
+interface IAccessBackoff {
+  ms: number;
+  retryAt: number;
+  seq: number;
+}
+
+type BusyKind = "relaunch" | "action";
+
+const deleteMissing = (error: unknown): boolean =>
+  error instanceof ControlError &&
+  (error.status === 404 || error.code === "session_not_found");
+
+const transientDeleteFailure = (error: unknown): boolean =>
+  error instanceof TypeError ||
+  (error instanceof ControlError &&
+    (error.code === "session_not_stopped" ||
+      error.status === 408 ||
+      error.status === 429 ||
+      (error.status !== undefined && error.status >= 500)));
+
+async function confirm(
+  title: string,
+  body: string,
+  label: string,
+): Promise<boolean> {
+  const result = await showDialog({
+    title,
+    body,
+    buttons: [
+      Dialog.cancelButton({ label: "Cancel" }),
+      Dialog.warnButton({ label }),
+    ],
+  });
+  return result.button.accept;
+}
+
 export class SessionActions {
   private _selection = 0;
-  private _busySessionIds = new Map<string, "relaunch" | "action">();
+  private _busySessionIds = new Map<string, BusyKind>();
   private _busyTokens = new Map<string, number>();
   private _pendingDeletes = new Set<string>();
   private _connectingSessionId: string | undefined;
   private _jupyterReady = new Set<string>();
   private _jupyterOperations = new Map<string, IJupyterOperation>();
   private _lastAccessError: string | undefined;
-  private _accessBackoffMs = new Map<string, number>();
-  private _accessRetryAt = new Map<string, number>();
-  private _accessBackoffSeq = new Map<string, number>();
+  private _accessBackoff = new Map<string, IAccessBackoff>();
 
   constructor(
     private _api: ControlClient,
     private _hooks: ISessionActionsHooks,
   ) {}
 
-  get busySessionIds(): ReadonlyMap<string, "relaunch" | "action"> {
+  get busySessionIds(): ReadonlyMap<string, BusyKind> {
     return this._busySessionIds;
   }
 
@@ -91,7 +125,13 @@ export class SessionActions {
   }
 
   releaseSession(id: string): void {
-    this._cancelSelection(id);
+    if (
+      this._connectingSessionId === id ||
+      this._hooks.currentSessionId() === id
+    ) {
+      this._selection++;
+      this._connectingSessionId = undefined;
+    }
     this.releaseJupyter(id);
     clearSessionAccess(id);
   }
@@ -118,16 +158,6 @@ export class SessionActions {
     );
   }
 
-  private _cancelSelection(sessionId: string): void {
-    if (
-      this._connectingSessionId === sessionId ||
-      this._hooks.currentSessionId() === sessionId
-    ) {
-      this._selection++;
-      this._connectingSessionId = undefined;
-    }
-  }
-
   private _abortJupyter(sessionId: string): void {
     if (this._jupyterOperations.delete(sessionId)) {
       this._busySessionIds.delete(sessionId);
@@ -140,60 +170,64 @@ export class SessionActions {
     }
   }
 
-  private _finishJupyter(operation: IJupyterOperation): boolean {
-    if (this._jupyterOperations.get(operation.sessionId) !== operation) {
-      return false;
+  private _finishJupyter(operation: IJupyterOperation): void {
+    if (this._jupyterOperations.get(operation.sessionId) === operation) {
+      this._jupyterOperations.delete(operation.sessionId);
     }
-    this._jupyterOperations.delete(operation.sessionId);
-    return true;
   }
 
-  private async _overSsh<T>(
+  private _busy(sessionId: string, kind: BusyKind): () => void {
+    const token = (this._busyTokens.get(sessionId) ?? 0) + 1;
+    this._busyTokens.set(sessionId, token);
+    this._busySessionIds.set(sessionId, kind);
+    this._hooks.emitState();
+    return () => {
+      if (this._busyTokens.get(sessionId) !== token) return;
+      this._busyTokens.delete(sessionId);
+      this._busySessionIds.delete(sessionId);
+      this._hooks.emitState();
+    };
+  }
+
+  private async _recover<T>(
     alias: string,
     action: () => Promise<T>,
-    allowLogin = true,
+    login: boolean,
+    link: boolean,
   ): Promise<T> {
     try {
       return await action();
     } catch (error) {
-      if (!allowLogin || !needsSshLogin(error)) {
-        throw error;
+      if (login && needsSshLogin(error)) {
+        await this._hooks
+          .loginDock()
+          .login(alias, this._api.sshAuthWebSocket(alias));
+        return this._recover(alias, action, false, link);
       }
-      const loginDock = this._hooks.loginDock();
-      await loginDock.login(alias, this._api.sshAuthWebSocket(alias));
-      return action();
-    }
-  }
-
-  async withTunnelLink<T>(action: () => Promise<T>): Promise<T> {
-    try {
-      return await action();
-    } catch (error) {
-      if (!needsTunnelLink(error)) {
-        throw error;
+      if (link && needsTunnelLink(error)) {
+        await this._hooks.linkTunnel();
+        return this._recover(alias, action, login, false);
       }
-      await this._hooks.linkTunnel();
-      return action();
+      throw error;
     }
   }
 
   async refreshJupyter(sessionId: string): Promise<void> {
     const session = this._session(sessionId);
     if (!session || session.state !== "READY") {
-      this._resetAccessBackoff(sessionId);
+      this._accessBackoff.delete(sessionId);
       return;
     }
-    if (this._accessBackoffSeq.get(sessionId) !== session.seq) {
-      this._resetAccessBackoff(sessionId);
-    }
-    const retryAt = this._accessRetryAt.get(sessionId);
-    if (retryAt !== undefined && Date.now() < retryAt) {
+    const backoff = this._accessBackoff.get(sessionId);
+    if (backoff?.seq !== session.seq) {
+      this._accessBackoff.delete(sessionId);
+    } else if (Date.now() < backoff.retryAt) {
       return;
     }
     const operation = this._beginJupyter(session);
     try {
       await this._ensureAccess(session, operation);
-      this._resetAccessBackoff(sessionId);
+      this._accessBackoff.delete(sessionId);
       const hadError = this._lastAccessError !== undefined;
       this._lastAccessError = undefined;
       if (this._jupyterOperationCurrent(operation) && hadError) {
@@ -202,13 +236,15 @@ export class SessionActions {
       }
     } catch (error) {
       if (!this._jupyterOperationCurrent(operation)) return;
-      const nextBackoff = Math.min(
-        (this._accessBackoffMs.get(sessionId) ?? 500) * 2,
+      const ms = Math.min(
+        (this._accessBackoff.get(sessionId)?.ms ?? 500) * 2,
         30000,
       );
-      this._accessBackoffMs.set(sessionId, nextBackoff);
-      this._accessRetryAt.set(sessionId, Date.now() + nextBackoff);
-      this._accessBackoffSeq.set(sessionId, session.seq);
+      this._accessBackoff.set(sessionId, {
+        ms,
+        retryAt: Date.now() + ms,
+        seq: session.seq,
+      });
       const message = accessUnavailable(error) ? "" : errorMessage(error);
       this._lastAccessError = message || undefined;
       this._hooks.onError(message);
@@ -216,12 +252,6 @@ export class SessionActions {
     } finally {
       this._finishJupyter(operation);
     }
-  }
-
-  private _resetAccessBackoff(sessionId: string): void {
-    this._accessBackoffMs.delete(sessionId);
-    this._accessRetryAt.delete(sessionId);
-    this._accessBackoffSeq.delete(sessionId);
   }
 
   private async _ensureAccess(
@@ -241,25 +271,6 @@ export class SessionActions {
     this._hooks.emitState();
   }
 
-  private async _ensureJupyter(session: ISession): Promise<void> {
-    const operation = this._beginJupyter(session);
-    const token = (this._busyTokens.get(session.id) ?? 0) + 1;
-    this._busyTokens.set(session.id, token);
-    this._busySessionIds.set(session.id, "action");
-    this._hooks.emitState();
-    try {
-      await this._ensureAccess(session, operation);
-    } catch (error) {
-      if (this._jupyterOperations.get(session.id) === operation) {
-        clearSessionAccess(session.id);
-      }
-      throw error;
-    } finally {
-      this._finishJupyter(operation);
-      this._releaseBusy(session.id, token);
-    }
-  }
-
   async connect(sessionId: string): Promise<void> {
     const session = this._selectedSession(sessionId);
     if (!session) {
@@ -272,8 +283,20 @@ export class SessionActions {
     this._hooks.onError("");
     this._connectingSessionId = session.id;
     this._hooks.emitState();
+    const operation = this._beginJupyter(session);
+    const release = this._busy(session.id, "action");
     try {
-      await this._ensureJupyter(session);
+      try {
+        await this._ensureAccess(session, operation);
+      } catch (error) {
+        if (this._jupyterOperations.get(session.id) === operation) {
+          clearSessionAccess(session.id);
+        }
+        throw error;
+      } finally {
+        this._finishJupyter(operation);
+        release();
+      }
       if (current()) await this._hooks.select(session.id, current);
     } catch (error) {
       if (current()) {
@@ -294,10 +317,13 @@ export class SessionActions {
     if (this._busySessionIds.has(sessionId)) {
       return;
     }
-    await this._act(sessionId, (id) => this._api.startSession(id), {
-      kind: "relaunch",
-      allowTunnelLink: true,
-    });
+    const session = this._selectedSession(sessionId);
+    if (session) {
+      await this._act(session, (id) => this._api.startSession(id), {
+        kind: "relaunch",
+        allowTunnelLink: true,
+      });
+    }
   }
 
   async stop(sessionId: string): Promise<void> {
@@ -306,33 +332,27 @@ export class SessionActions {
       return;
     }
     this._hooks.rejectDetail();
-    const confirmed = await showDialog({
-      title: "Stop session",
-      body: `Cancels the Slurm job on ${session.sshHost}. Anything unsaved in this session's kernels and terminals is lost.`,
-      buttons: [
-        Dialog.cancelButton({ label: "Cancel" }),
-        Dialog.warnButton({ label: "Stop" }),
-      ],
-    });
-    if (!confirmed.button.accept || this._hooks.isDisposed()) {
+    const confirmed = await confirm(
+      "Stop session",
+      `Cancels the Slurm job on ${session.sshHost}. Anything unsaved in this session's kernels and terminals is lost.`,
+      "Stop",
+    );
+    if (!confirmed || this._hooks.isDisposed()) {
       return;
     }
-    await this._act(sessionId, (id) => this._api.stopSession(id), {
-      known: session,
-    });
+    await this._act(session, (id) => this._api.stopSession(id));
   }
 
   private async _act(
-    sessionId: string,
+    session: ISession,
     act: (id: string) => Promise<ISession>,
     options: {
       apply?: (acted: ISession) => ISession[];
       report?: (error: unknown) => boolean;
       allowLogin?: boolean;
       allowTunnelLink?: boolean;
-      known?: ISession;
       clearError?: boolean;
-      kind?: "relaunch" | "action";
+      kind?: BusyKind;
     } = {},
   ): Promise<{ ok: boolean; error?: unknown }> {
     const {
@@ -343,14 +363,9 @@ export class SessionActions {
       report = () => true,
       allowLogin = true,
       allowTunnelLink = false,
-      known,
       clearError = true,
       kind = "action",
     } = options;
-    const session = known ?? this._selectedSession(sessionId);
-    if (!session) {
-      return { ok: false };
-    }
     if (clearError) {
       this._hooks.onError("");
     }
@@ -358,18 +373,13 @@ export class SessionActions {
     const selection = this._selection;
     const current = (): boolean =>
       selection === this._selection && !this._hooks.isDisposed();
-    const token = (this._busyTokens.get(session.id) ?? 0) + 1;
-    this._busyTokens.set(session.id, token);
-    this._busySessionIds.set(session.id, kind);
-    this._hooks.emitState();
+    const release = this._busy(session.id, kind);
     try {
-      const acted = await this._overSsh(
+      const acted = await this._recover(
         session.sshHost,
-        () =>
-          allowTunnelLink
-            ? this.withTunnelLink(() => act(session.id))
-            : act(session.id),
+        () => act(session.id),
         allowLogin,
+        allowTunnelLink,
       );
       if (current()) {
         this._hooks.replaceSessions(apply(acted));
@@ -386,17 +396,8 @@ export class SessionActions {
       }
       return { ok: false, error };
     } finally {
-      this._releaseBusy(session.id, token);
+      release();
     }
-  }
-
-  private _releaseBusy(sessionId: string, token: number): void {
-    if (this._busyTokens.get(sessionId) !== token) {
-      return;
-    }
-    this._busyTokens.delete(sessionId);
-    this._busySessionIds.delete(sessionId);
-    this._hooks.emitState();
   }
 
   async remove(sessionId: string): Promise<void> {
@@ -406,68 +407,69 @@ export class SessionActions {
     }
     const live = !isTerminal(session.state);
     this._hooks.rejectDetail();
-    const confirmed = await showDialog({
-      title: "Delete session",
-      body: live
-        ? `${session.rootFolder} on ${session.sshHost} is ${session.state.toLowerCase()}. Deleting it cancels the Slurm job and removes the card.`
+    const confirmed = await confirm(
+      live ? "Stop and delete session" : "Delete session",
+      live
+        ? `${session.rootFolder} on ${session.sshHost} is ${session.state.toLowerCase()}. Its Slurm job will be stopped now and the session removed after it ends.`
         : `Remove ${session.rootFolder} on ${session.sshHost} from this list? It has already ended.`,
-      buttons: [
-        Dialog.cancelButton({ label: "Cancel" }),
-        Dialog.warnButton({ label: "Delete" }),
-      ],
-    });
-    if (!confirmed.button.accept || this._hooks.isDisposed()) {
+      live ? "Stop and delete" : "Delete",
+    );
+    if (!confirmed || this._hooks.isDisposed()) {
       return;
     }
-    if (
-      (await this._delete(sessionId, true, session)) === "pending" &&
-      this._hooks.sessions().some((each) => each.id === sessionId)
-    ) {
-      this._pendingDeletes.add(sessionId);
+    if (live) {
+      const { ok } = await this._act(session, (id) =>
+        this._api.stopSession(id),
+      );
+      if (ok && this._hooks.sessions().some((each) => each.id === sessionId)) {
+        this._pendingDeletes.add(sessionId);
+      }
+      return;
     }
+    await this._deleteTerminal(session, false);
   }
 
   async retryPendingDeletes(): Promise<void> {
     for (const sessionId of [...this._pendingDeletes]) {
-      const session = this._hooks
-        .sessions()
-        .find((each) => each.id === sessionId);
+      const session = this._session(sessionId);
       if (!session) {
         this._pendingDeletes.delete(sessionId);
-        continue;
-      }
-      if (!isTerminal(session.state)) {
-        continue;
-      }
-      if ((await this._delete(sessionId, false, session, true)) !== "pending") {
-        this._pendingDeletes.delete(sessionId);
+      } else if (isTerminal(session.state)) {
+        await this._deleteTerminal(session, true);
       }
     }
   }
 
-  private async _delete(
-    sessionId: string,
-    allowLogin = true,
-    known?: ISession,
-    retry = false,
-  ): Promise<"done" | "pending" | "failed"> {
-    const retryable = (error: unknown): boolean =>
-      (error instanceof ControlError && error.code === "session_not_stopped") ||
-      (!allowLogin && needsSshLogin(error));
+  private async _deleteTerminal(
+    session: ISession,
+    retry: boolean,
+  ): Promise<void> {
+    if (this._busySessionIds.has(session.id)) {
+      return;
+    }
     const { ok, error } = await this._act(
-      sessionId,
-      (id) => this._api.deleteSession(id),
+      session,
+      async (id) => {
+        await this._api.deleteSession(id).catch((error) => {
+          if (!deleteMissing(error)) {
+            throw error;
+          }
+        });
+        return session;
+      },
       {
-        apply: () =>
-          this._hooks.sessions().filter((each) => each.id !== sessionId),
-        report: (error) => !retryable(error),
-        allowLogin,
-        known,
         clearError: !retry,
+        allowLogin: false,
+        apply: () =>
+          this._hooks.sessions().filter((each) => each.id !== session.id),
+        report: (error) => !transientDeleteFailure(error),
       },
     );
-    if (ok) return "done";
-    return retryable(error) ? "pending" : "failed";
+    if (!ok && transientDeleteFailure(error)) {
+      this._pendingDeletes.add(session.id);
+    } else {
+      this._pendingDeletes.delete(session.id);
+    }
   }
 
   dispose(): void {

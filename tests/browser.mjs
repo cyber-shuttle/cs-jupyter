@@ -21,7 +21,6 @@ const restartId = "s-222222222222";
 const createdId = "s-333333333333";
 const seq = 1;
 const directOrigin = "https://31002.use.devtunnels.ms";
-const directBase = "/";
 const account = "user@example.edu";
 const jupyterToken = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const tunnelHandle = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -89,7 +88,8 @@ const controlServer = createServer((request, response) => {
     cors(response);
     response.writeHead(204, {
       "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
-      "access-control-allow-headers": "Authorization, Content-Type",
+      "access-control-allow-headers":
+        "Authorization, Content-Type, If-None-Match",
     });
     return response.end();
   }
@@ -140,10 +140,14 @@ const controlServer = createServer((request, response) => {
       response,
       { error: { code: "unauthorized", message: "unauthorized" } },
       401,
+      { "www-authenticate": "Bearer" },
     );
-  if (url.pathname === "/api/v1/tunnel/link" && request.method === "GET")
+  if (url.pathname === "/api/v1/tunnel" && request.method === "GET")
     return json(response, tunnelLinkStatus());
-  if (url.pathname === "/api/v1/tunnel/link/start" && request.method === "POST")
+  if (
+    url.pathname === "/api/v1/tunnel/authorizations" &&
+    request.method === "POST"
+  )
     return readRequestJSON(request).then((body) => {
       assert.equal(body.provider, "github");
       return json(response, {
@@ -155,7 +159,7 @@ const controlServer = createServer((request, response) => {
       });
     });
   if (
-    url.pathname === `/api/v1/tunnel/link/poll/${tunnelHandle}` &&
+    url.pathname === `/api/v1/tunnel/authorizations/${tunnelHandle}/poll` &&
     request.method === "POST"
   ) {
     tunnelPollCount++;
@@ -164,7 +168,7 @@ const controlServer = createServer((request, response) => {
     tunnelLinked = true;
     return json(response, tunnelLinkStatus());
   }
-  if (url.pathname === "/api/v1/ssh" && request.method === "GET")
+  if (url.pathname === "/api/v1/ssh/hosts" && request.method === "GET")
     return json(response, {
       hosts: [
         {
@@ -177,7 +181,7 @@ const controlServer = createServer((request, response) => {
       ],
     });
   if (
-    url.pathname === "/api/v1/ssh/cluster/slurm" &&
+    url.pathname === "/api/v1/ssh/hosts/cluster/slurm" &&
     request.method === "GET"
   ) {
     discoveryCount++;
@@ -234,21 +238,31 @@ const controlServer = createServer((request, response) => {
         sessions[0].state = "STOPPED";
         sessions.push(item);
       }
-      json(response, item, 201);
+      json(response, item, 201, {
+        location: `/api/v1/sessions/${item.id}`,
+      });
       setTimeout(() => {
         item.state = "READY";
       }, 25);
     });
   }
-  if (url.pathname === "/api/v1/sessions" && request.method === "GET")
-    return json(response, {
+  if (url.pathname === "/api/v1/sessions" && request.method === "GET") {
+    const body = {
       sessions,
       logs: [
         { sessionId, lines: sessionLog },
         { sessionId: restartId, lines: restartLog },
       ],
-    });
-  if (url.pathname === "/api/v1/sessions/history" && request.method === "GET")
+    };
+    const etag = `"${createHash("sha256").update(JSON.stringify(body)).digest("hex")}"`;
+    if (request.headers["if-none-match"] === etag) {
+      cors(response);
+      response.writeHead(304, { etag });
+      return response.end();
+    }
+    return json(response, body, 200, { etag });
+  }
+  if (url.pathname === "/api/v1/telemetry" && request.method === "GET")
     return json(response, { runs: [] });
   const metricsMatch = /^\/api\/v1\/sessions\/(s-[a-f0-9]{12})\/metrics$/.exec(
     url.pathname,
@@ -276,15 +290,46 @@ const controlServer = createServer((request, response) => {
     item.error = undefined;
     return json(response, item);
   }
+  const stopMatch = /^\/api\/v1\/sessions\/(s-[a-f0-9]{12})\/stop$/.exec(
+    url.pathname,
+  );
+  if (stopMatch && request.method === "POST") {
+    const item = sessions.find(({ id }) => id === stopMatch[1]);
+    item.state = "STOPPING";
+    return json(response, item);
+  }
   const sessionMatch = /^\/api\/v1\/sessions\/(s-[a-f0-9]{12})$/.exec(
     url.pathname,
   );
+  if (sessionMatch && request.method === "DELETE") {
+    const item = sessions.find(({ id }) => id === sessionMatch[1]);
+    if (item && item.state !== "STOPPED" && item.state !== "FAILED")
+      return json(
+        response,
+        {
+          error: {
+            code: "session_not_stopped",
+            message: "stop the session before deleting it",
+          },
+        },
+        409,
+      );
+    const index = sessions.findIndex(({ id }) => id === sessionMatch[1]);
+    if (index !== -1) sessions.splice(index, 1);
+    cors(response);
+    response.writeHead(204);
+    return response.end();
+  }
   if (sessionMatch)
     return json(
       response,
       sessions.find(({ id }) => id === sessionMatch[1]),
     );
-  return missing(response);
+  return json(
+    response,
+    { error: { code: "not_found", message: "Route not found." } },
+    404,
+  );
 });
 
 const webSockets = new WebSocketServer({
@@ -311,10 +356,9 @@ controlServer.on("upgrade", (request, socket, head) => {
 });
 webSockets.on("connection", (socket, request) => {
   const path = new URL(request.url, controlOrigin).pathname;
-  if (path.endsWith("/auth")) {
-    setTimeout(() => socket.send(Buffer.from("Password: ")), 10);
-    socket.on("message", () => socket.send(JSON.stringify({ type: "ready" })));
-  }
+  assert.equal(path, "/api/v1/ssh/hosts/cluster/auth");
+  setTimeout(() => socket.send(Buffer.from("Password: ")), 10);
+  socket.on("message", () => socket.send(JSON.stringify({ type: "ready" })));
 });
 
 await listen(staticServer);
@@ -747,8 +791,7 @@ try {
     directRequests
       .slice(contentsStart)
       .some(
-        ({ method, path }) =>
-          method === "POST" && path === `${directBase}api/contents`,
+        ({ method, path }) => method === "POST" && path === "/api/contents",
       ),
   );
   await page.getByRole("menuitem", { name: "File", exact: true }).click();
@@ -774,8 +817,7 @@ try {
     directRequests
       .slice(contentsStart)
       .some(
-        ({ method, path }) =>
-          method === "POST" && path === `${directBase}api/terminals`,
+        ({ method, path }) => method === "POST" && path === "/api/terminals",
       ),
   );
   await page.waitForTimeout(100);
@@ -783,15 +825,13 @@ try {
   const managerRequests = directRequests.slice(contentsStart);
   assert.ok(
     managerRequests.some(
-      ({ method, path }) =>
-        method === "POST" && path === `${directBase}api/contents`,
+      ({ method, path }) => method === "POST" && path === "/api/contents",
     ),
     "native Text File action did not use the direct ContentsManager",
   );
   assert.ok(
     managerRequests.some(
-      ({ method, path }) =>
-        method === "POST" && path === `${directBase}api/terminals`,
+      ({ method, path }) => method === "POST" && path === "/api/terminals",
     ),
     "native Terminal card did not use the direct TerminalManager",
   );
@@ -808,7 +848,7 @@ try {
     "direct manager requests omitted the Jupyter token or sent cookies",
   );
   assert.deepEqual(directWebSockets, [
-    `wss://31002.use.devtunnels.ms${directBase}terminals/websocket/1?token=${jupyterToken}`,
+    `wss://31002.use.devtunnels.ms/terminals/websocket/1?token=${jupyterToken}`,
   ]);
 
   const controlBeforeReload = controlRequests.length;
@@ -1010,29 +1050,22 @@ function session(id, rootFolder, state = "READY") {
     updatedAt: "2026-01-01T00:00:01Z",
   };
 }
-function readRequestJSON(request) {
-  return new Promise((resolveBody, reject) => {
-    const chunks = [];
-    request.on("data", (chunk) => chunks.push(chunk));
-    request.on("end", () => {
-      try {
-        resolveBody(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-      } catch (error) {
-        reject(error);
-      }
-    });
-    request.on("error", reject);
-  });
+async function readRequestJSON(request) {
+  const chunks = [];
+  for await (const chunk of request) chunks.push(chunk);
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 function cors(response) {
   response.setHeader("access-control-allow-origin", staticOrigin);
+  response.setHeader("access-control-expose-headers", "ETag, Location");
   response.setHeader("vary", "Origin");
 }
-function json(response, value, status = 200) {
+function json(response, value, status = 200, headers = {}) {
   cors(response);
   response.writeHead(status, {
     "content-type": "application/json",
     "cache-control": "no-store",
+    ...headers,
   });
   response.end(JSON.stringify(value));
 }

@@ -70,7 +70,7 @@ export class ReviewStep {
     this.cancel();
     const abort = new AbortController();
     this._abort = abort;
-    const live = (): boolean =>
+    const current = (): boolean =>
       !abort.signal.aborted && this._request === request && !hooks.isDisposed();
     this._validation = undefined;
     this._validationError = "";
@@ -81,15 +81,15 @@ export class ReviewStep {
         request,
         abort.signal,
       );
-      if (live()) {
+      if (current()) {
         this._validation = validation;
       }
     } catch (error) {
-      if (live()) {
+      if (current()) {
         this._validationError = errorMessage(error);
       }
     }
-    if (live()) {
+    if (current()) {
       this._validating = false;
       this._abort = undefined;
       hooks.onChange();

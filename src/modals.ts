@@ -27,12 +27,15 @@ function openDialog(title: string, widget: Widget): Dialog<unknown> {
   return new Dialog({ title, body: widget, buttons: [], hasClose: true });
 }
 
+const launch = (dialog: Dialog<unknown>): Promise<unknown> =>
+  dialog.launch().catch(() => undefined);
+
 export class SessionModals {
   private _detailDialogs = new Set<Dialog<unknown>>();
   private _dialogBody: Panel | undefined;
   private _loginDock: SshLoginDock | undefined;
   private _createForm: () => CreateSessionForm = () =>
-    new CreateSessionForm(this._api);
+    new CreateSessionForm(this._api, () => this.loginDock);
   private _sshHostsWidget: () => SshHosts = () => new SshHosts(this._api);
   private _loginDockWidget: () => SshLoginDock = () => new SshLoginDock();
   private _tunnelLinkWidget: () => TunnelLink = () => new TunnelLink(this._api);
@@ -71,7 +74,7 @@ export class SessionModals {
       }
     });
     try {
-      await dialog.launch().catch(() => undefined);
+      await launch(dialog);
     } finally {
       this._detailDialogs.delete(dialog);
     }
@@ -127,15 +130,11 @@ export class SessionModals {
     widget: RemoteListWidget,
   ): Promise<void> {
     void widget.refresh();
-    await openDialog(title, widget)
-      .launch()
-      .catch(() => undefined);
+    await launch(openDialog(title, widget));
   }
 
   async openRunHistory(open?: string): Promise<void> {
-    await openDialog("Run history", new RunHistory(this._panel, open))
-      .launch()
-      .catch(() => undefined);
+    await launch(openDialog("Run history", new RunHistory(this._panel, open)));
   }
 
   private async _createInDialog(

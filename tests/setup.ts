@@ -1,6 +1,7 @@
 // Vitest global setup: configures JupyterLab's PageConfig and patches jsdom APIs
-// the test environment lacks. jsdom 26 declares HTMLDialogElement but implements
-// neither showModal nor close, so both are stubbed here.
+// the test environment lacks: Vitest's jsdom leaves window.localStorage and
+// sessionStorage undefined, and jsdom 26 declares HTMLDialogElement but
+// implements neither showModal nor close.
 import { PageConfig } from "@jupyterlab/coreutils";
 
 PageConfig.setOption(

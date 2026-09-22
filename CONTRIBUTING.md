@@ -82,32 +82,33 @@ cs-jupyter
 │   ├── session-ui.ts          # Launcher integration
 │   ├── CyberShuttlePanel.ts   # the stateful controller: poll, list, sign-in/out, title row; composes actions and modals
 │   ├── session-actions.ts     # connect, run again, stop, delete and the Jupyter access they need
-│   ├── modals.ts              # the panel's dialogs: session detail, Add Session, hosts, history
+│   ├── modals.ts              # the panel's dialogs: session detail, Add Session, hosts, keys, Dev Tunnels, history
 │   ├── RebuildingWidget.ts    # shared full-rebuild render loop, focus restore and countdown redraw
 │   ├── SessionList.ts         # session cards and their actions
 │   ├── SessionDetail.ts       # one session's detail view and status log
 │   ├── SessionController.ts   # opening a session and guarding commands that need one
 │   ├── RunHistory.ts          # every run this account has made, live and finished
 │   ├── CreateSessionForm.ts   # the multi-step wizard shell, and the partition/GPU option and bounds logic
-│   ├── SlurmDiscovery.ts      # SSH host selection, Slurm discovery, SSH interactive login
+│   ├── SlurmDiscovery.ts      # SSH host selection and Slurm discovery, retried once after a dock login
 │   ├── ReviewStep.ts          # validation, script preview and submit
 │   ├── SshHosts.ts            # SSH host list, add, edit, test and remove
+│   ├── SshKeys.ts             # stored login keys: list, upload and remove
 │   ├── metrics.ts             # accounting and sample series to summaries, sparklines, usage plots and the status-bar countdown
 │   ├── Common.ts              # shared types, identifier/URL rules, JSON response builder
 │   └── dom.ts                 # element, grid, log-section and disclosure builders, plus walltime countdown arithmetic and the remaining-time badge
 ├── style/                    # CSS shipped with the extension
-├── tests/                    # Vitest units, distribution.mjs, browser.mjs and fixtures
+├── tests/                    # Vitest units, fakes.ts, distribution.mjs and browser.mjs
 ├── jupyter-lite.json         # PageConfig for the built site
 └── jupyter_lite_config.json  # JupyterLite build configuration
 ```
 
 Every cs-control response is validated in `ControlClient.ts` against the types and identifier rules in
-`Common.ts`; a change to the wire contract belongs there and in
-`tests/fixtures/cs-control-session-contract.json`, which `tests/session-contract.test.ts` pins.
+`Common.ts`; a change to the wire contract belongs there and in `tests/session-contract.test.ts`, which
+pins it.
 
 ## Releases
 
-There is no release process yet: no tags, and nothing published to npm or PyPI (`package.json` is `private`,
+There is no release process yet: nothing is published to npm or PyPI (`package.json` is `private`,
 `pyproject.toml` sets `package = false`). The artifact is the `dist/` directory a deployer builds, so a
 change reaches users when they rebuild and redeploy. Add user-visible changes to the `## [Unreleased]`
 section of [CHANGELOG.md](CHANGELOG.md) in the same pull request.

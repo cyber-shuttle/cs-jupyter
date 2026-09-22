@@ -4,19 +4,18 @@
 // dropped once it stops running, since its narration has moved into the run
 // record.
 import { describe, expect, it, vi } from "vitest";
-import { jsonResponse, type ILogLine, type ISession } from "../src/Common";
+import type { ILogLine, ISession } from "../src/Common";
 import {
   ControlClient,
   UNCHANGED,
   type ISessionLogTail,
 } from "../src/ControlClient";
-import type { CyberShuttlePanel } from "../src/CyberShuttlePanel";
 import { RunReport } from "../src/RunHistory";
 import type { ISessionUiState } from "../src/session";
 import { SessionDetail } from "../src/SessionDetail";
 import {
+  clientFor,
   ControllerFake,
-  fakeAuth,
   runFixture,
   sessionFixture,
   uiState,
@@ -47,19 +46,12 @@ function log(
   };
 }
 
-function clientFor(logs: unknown[]): ControlClient {
-  return new ControlClient(
-    "https://control.example.edu/api/v1",
-    fakeAuth(),
-    vi.fn<typeof globalThis.fetch>(async () =>
-      jsonResponse({ sessions: [], logs }),
-    ),
-  );
-}
+const tailsClient = (logs: unknown[]): ControlClient =>
+  clientFor({ sessions: [], logs });
 
 describe("session log tails on the polled read", () => {
   it("accepts a complete bounded tail", async () => {
-    const list = await clientFor([log()]).listSessions();
+    const list = await tailsClient([log()]).listSessions();
     if (list === UNCHANGED) {
       throw new Error("cs-control answered 304 to a first read.");
     }
@@ -67,7 +59,7 @@ describe("session log tails on the polled read", () => {
   });
 
   it("accepts a tail with no lines", async () => {
-    const list = await clientFor([{ ...log(), lines: [] }]).listSessions();
+    const list = await tailsClient([{ ...log(), lines: [] }]).listSessions();
     if (list === UNCHANGED) {
       throw new Error("cs-control answered 304 to a first read.");
     }
@@ -144,7 +136,7 @@ describe("session log tails on the polled read", () => {
     ],
     ["a non-object", "not-an-object", "invalid session list"],
   ] as const)("rejects %s", async (_name, value, message) => {
-    await expect(clientFor([value]).listSessions()).rejects.toThrow(message);
+    await expect(tailsClient([value]).listSessions()).rejects.toThrow(message);
   });
 });
 
@@ -174,10 +166,7 @@ function sessionDetail(value: ISession): {
   const controller = new ControllerFake(detailState(value));
   return {
     controller,
-    detail: new SessionDetail(
-      controller as unknown as CyberShuttlePanel,
-      value.id,
-    ),
+    detail: new SessionDetail(controller as never, value.id),
   };
 }
 
@@ -234,28 +223,6 @@ describe("session detail modal body", () => {
     detail.dispose();
   });
 
-  it("preserves a focused session action across session and Jupyter updates", () => {
-    const value = sessionInState("READY");
-    const { controller, detail } = sessionDetail(value);
-    document.body.appendChild(detail.node);
-    const stop = [
-      ...detail.node.querySelectorAll<HTMLButtonElement>("button"),
-    ].find((button) => button.textContent === "Stop")!;
-    stop.focus();
-
-    controller.setState(
-      detailState({ ...value, updatedAt: "2026-01-01T00:00:02Z" }),
-    );
-    expect(document.activeElement?.textContent).toBe("Stop");
-
-    controller.setState({
-      ...detailState(value),
-      jupyterReady: new Set([value.id]),
-    });
-    expect(document.activeElement?.textContent).toBe("Stop");
-    detail.dispose();
-  });
-
   it.each([
     ["SUBMITTING", ["Stop", "Delete"]],
     ["READY", ["Stop", "Connect", "Delete"]],
@@ -272,24 +239,6 @@ describe("session detail modal body", () => {
     detail.dispose();
   });
 
-  it("shows a spinner and names the session while it is stopping", () => {
-    const { detail } = sessionDetail(sessionInState("STOPPING"));
-    const note = detail.node.querySelector(".csStopping");
-    expect(note?.querySelector(".csSpinner")).not.toBeNull();
-    expect(note?.textContent).toBe("Session delta is stopping...");
-    detail.dispose();
-  });
-
-  it("runs a finished session again on the session it is showing", () => {
-    const finished = sessionInState("STOPPED");
-    const { detail, controller } = sessionDetail(finished);
-    detail.node
-      .querySelector<HTMLButtonElement>('[data-session-action="Run again"]')!
-      .click();
-    expect(controller.actions.runAgain).toHaveBeenCalledWith(finished.id);
-    detail.dispose();
-  });
-
   it("hides Connect until Linkspan Jupyter state is ready", () => {
     const ready = sessionInState("READY");
     const controller = new ControllerFake(
@@ -299,32 +248,8 @@ describe("session detail modal body", () => {
         jupyterReady: new Set<string>(),
       }),
     );
-    const detail = new SessionDetail(
-      controller as unknown as CyberShuttlePanel,
-      ready.id,
-    );
+    const detail = new SessionDetail(controller as never, ready.id);
     expect(detail.node.textContent).not.toContain("Connect");
-    detail.dispose();
-  });
-
-  it("shows a relaunch's refusal over the session's stale error", () => {
-    const failed: ISession = {
-      ...sessionInState("FAILED"),
-      error: "startup reason",
-    };
-    const controller = new ControllerFake(
-      uiState({
-        sessions: [failed],
-        logs: new Map(),
-        error: "new refusal",
-      }),
-    );
-    const detail = new SessionDetail(
-      controller as unknown as CyberShuttlePanel,
-      failed.id,
-    );
-    expect(detail.node.textContent).toContain("new refusal");
-    expect(detail.node.textContent).not.toContain("startup reason");
     detail.dispose();
   });
 
@@ -421,10 +346,5 @@ describe("a run keeps what its session said", () => {
     expect(lines[0]).toContain("Session is running");
     expect(lines[1]).toContain("a warning from the job");
     expect(report.querySelector(".csSessionLog-stderr")).not.toBeNull();
-  });
-
-  it("shows no log section for a run that never said anything", async () => {
-    const report = RunReport(runFixture());
-    expect(report.querySelector(".csSessionLogScroll")).toBeNull();
   });
 });

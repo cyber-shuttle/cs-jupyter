@@ -15,13 +15,11 @@ import {
 } from "./dom";
 
 export class SshKeys extends RemoteListWidget {
-  private _api: ControlClient;
   private _keys: ISshKey[] = [];
   private _form: { name: string; file: File | undefined } | undefined;
 
-  constructor(api: ControlClient) {
+  constructor(private _api: ControlClient) {
     super();
-    this._api = api;
     this.id = "cybershuttle-ssh-keys";
     this.addClass("csSessionPanel");
     this._render();
@@ -38,10 +36,6 @@ export class SshKeys extends RemoteListWidget {
       await this._api.addSshKey(name.trim(), await readText(file));
       this._form = undefined;
     });
-  }
-
-  private async _remove(key: ISshKey): Promise<void> {
-    await this._removeItem(() => this._api.removeSshKey(key.name));
   }
 
   protected _rebuild(): void {
@@ -69,7 +63,7 @@ export class SshKeys extends RemoteListWidget {
       () => {
         this._form = this._form ? undefined : { name: "", file: undefined };
         this._formError = "";
-        this._render();
+        this._sync();
       },
     );
   }
@@ -111,7 +105,7 @@ export class SshKeys extends RemoteListWidget {
       if (!form.reportValidity() || this._saving) return;
       if (!draft.file) {
         this._formError = "Choose the private key file to upload.";
-        this._render();
+        this._sync();
         return;
       }
       void this._upload(draft.name, draft.file);
@@ -130,19 +124,15 @@ export class SshKeys extends RemoteListWidget {
         ...confirmDelete(
           "Delete this key and unassign it?",
           `key-${key.name}`,
-          () => {
-            this._confirming = "";
-            this._render();
-          },
-          () => void this._remove(key),
+          () => this._confirm(""),
+          () => void this._removeItem(() => this._api.removeSshKey(key.name)),
         ),
       );
       return row;
     }
-    const remove = button("Delete", "csDangerButton", () => {
-      this._confirming = key.name;
-      this._render();
-    });
+    const remove = button("Delete", "csDangerButton", () =>
+      this._confirm(key.name),
+    );
     remove.dataset.sessionAction = `delete-key-${key.name}`;
     row.appendChild(remove);
     return row;

@@ -9,7 +9,7 @@ import { IStatusBar } from "@jupyterlab/statusbar";
 import { Widget } from "@lumino/widgets";
 import type { IMetricSample, IRun, IRunStats, ISession } from "./Common";
 import { isTerminal } from "./Common";
-import { ControlClient } from "./ControlClient";
+import { ControlClient, IControlClient } from "./ControlClient";
 import {
   Clock,
   CLOCK_GLYPH,
@@ -287,8 +287,8 @@ export const walltimeStatusPlugin: JupyterFrontEndPlugin<void> = {
   description:
     "Count the selected session's remaining walltime down in the status bar.",
   autoStart: true,
-  requires: [IStatusBar],
-  activate: (_app, statusBar: IStatusBar) => {
+  requires: [IStatusBar, IControlClient],
+  activate: (_app, statusBar: IStatusBar, api: ControlClient) => {
     const selected = selectedSession();
     if (!selected) {
       return;
@@ -296,7 +296,7 @@ export const walltimeStatusPlugin: JupyterFrontEndPlugin<void> = {
     statusBar.registerStatusItem("@cybershuttle/jupyter:walltime-status", {
       align: "right",
       rank: 100,
-      item: new WalltimeStatus(new ControlClient(), selected.sessionId),
+      item: new WalltimeStatus(api, selected.sessionId),
     });
   },
 };

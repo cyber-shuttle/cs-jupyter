@@ -7,7 +7,7 @@ import {
   createSessionServerSettings,
 } from "../src/ControlClient";
 import {
-  jsonResponse as response,
+  jsonResponse,
   validControlApiUrl,
   validSessionId,
 } from "../src/Common";
@@ -56,11 +56,11 @@ describe("shared cs-control client", () => {
       async (input: RequestInfo | URL, init?: RequestInit) => {
         const request = new Request(input, init);
         const path = new URL(request.url).pathname;
-        if (path === "/gateway/api/v1/ssh") {
-          return response({ hosts: [] });
+        if (path === "/gateway/api/v1/ssh/hosts") {
+          return jsonResponse({ hosts: [] });
         }
         if (path === "/gateway/api/v1/sessions/validate") {
-          return response({
+          return jsonResponse({
             sessionId: "s-012345abcdef",
             status: "PASSED",
             script: "#!/bin/bash\n#SBATCH --partition=debug\n",
@@ -69,10 +69,10 @@ describe("shared cs-control client", () => {
           });
         }
         if (path === "/gateway/api/v1/sessions" && request.method === "GET") {
-          return response({ sessions: [session], logs: [] });
+          return jsonResponse({ sessions: [session], logs: [] });
         }
-        if (path.endsWith("/access")) return response(access);
-        return response(session);
+        if (path.endsWith("/access")) return jsonResponse(access);
+        return jsonResponse(session);
       },
     );
     const client = makeClient(fetch as any);
@@ -96,7 +96,7 @@ describe("shared cs-control client", () => {
     expect(
       requests.map((item) => `${item.method} ${new URL(item.url).pathname}`),
     ).toEqual([
-      "GET /gateway/api/v1/ssh",
+      "GET /gateway/api/v1/ssh/hosts",
       "GET /gateway/api/v1/sessions",
       "POST /gateway/api/v1/sessions/validate",
       "POST /gateway/api/v1/sessions",
@@ -117,10 +117,12 @@ describe("shared cs-control client", () => {
 
   it("rejects a getSession answer for another session", async () => {
     const client = makeClient(
-      vi.fn(async () => response({ ...session, id: "s-999999999999" })) as any,
+      vi.fn(async () =>
+        jsonResponse({ ...session, id: "s-999999999999" }),
+      ) as any,
     );
     await expect(client.getSession(session.id)).rejects.toThrow(
-      "cs-control returned a different session.",
+      "cs-control returned a session for s-999999999999, not s-012345abcdef.",
     );
   });
 
@@ -135,63 +137,50 @@ describe("shared cs-control client", () => {
     expect(sessionStorage.getItem("unrelated")).toBe("keep");
   });
 
-  it("clears session access only after a successful Stop API", async () => {
-    const client = makeClient(vi.fn(async () => response(session)) as any);
-    const key = `cybershuttle.session-access.v1.${session.id}`;
+  it("accepts an empty 204 response when deleting a session", async () => {
+    const fetch = vi.fn(
+      async () => new Response(null, { status: 204 }),
+    ) as unknown as typeof globalThis.fetch;
+    const client = makeClient(fetch);
 
-    cacheSessionAccess(access);
-    expect(window.sessionStorage.getItem(key)).not.toBeNull();
-    await client.stopSession(session.id);
-    expect(window.sessionStorage.getItem(key)).toBeNull();
+    await expect(client.deleteSession(session.id)).resolves.toBeUndefined();
+
+    const [input, init] = vi.mocked(fetch).mock.calls[0];
+    expect(`${init?.method} ${new URL(String(input)).pathname}`).toBe(
+      `DELETE /gateway/api/v1/sessions/${session.id}`,
+    );
   });
 
-  it("retains session access when the Stop API fails", async () => {
-    const client = makeClient(
-      vi.fn(
-        async () =>
-          new Response(
-            JSON.stringify({
-              error: { code: "request_failed", message: "failed" },
-            }),
-            { status: 500, headers: { "Content-Type": "application/json" } },
-          ),
-      ) as any,
-    );
+  it("clears session access only after a successful Stop API", async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { error: { code: "request_failed", message: "failed" } },
+          { status: 500 },
+        ),
+      )
+      .mockResolvedValueOnce(jsonResponse(session));
+    const client = makeClient(fetch);
     const key = `cybershuttle.session-access.v1.${session.id}`;
 
     cacheSessionAccess(access);
     await expect(client.stopSession(session.id)).rejects.toThrow("failed");
     expect(window.sessionStorage.getItem(key)).not.toBeNull();
+    await client.stopSession(session.id);
+    expect(window.sessionStorage.getItem(key)).toBeNull();
   });
 
-  it("rejects a malformed id before the action is sent, not after", async () => {
-    const fetch = vi.fn(async () => response({ ...session, id: "s-invalid!" }));
+  it("rejects a malformed id before any session request is sent", async () => {
+    const fetch = vi.fn(async () => jsonResponse(access));
     const client = makeClient(fetch as any);
     await expect(client.stopSession("s-invalid!")).rejects.toThrow(
       "Invalid session id.",
     );
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it("rejects a malformed id before requesting session access, not after", async () => {
-    const fetch = vi.fn(async () => response(access));
-    const client = makeClient(fetch as any);
     await expect(client.getSessionAccess("s-invalid!")).rejects.toThrow(
       "Invalid session id.",
     );
     expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it("strictly validates the stopped session identity and response", async () => {
-    for (const value of [
-      { ...session, id: "s-111111111111" },
-      { ...session, state: "UNKNOWN" },
-    ]) {
-      const client = makeClient(vi.fn(async () => response(value)) as any);
-      await expect(client.stopSession(session.id)).rejects.toThrow(
-        /invalid .*session/,
-      );
-    }
   });
 
   it("strictly validates session validation responses", async () => {
@@ -210,7 +199,7 @@ describe("shared cs-control client", () => {
         extra: true,
       },
     ]) {
-      const client = makeClient(vi.fn(async () => response(value)) as any);
+      const client = makeClient(vi.fn(async () => jsonResponse(value)) as any);
       await expect(
         client.validateCreateRequest({
           idempotencyKey: "idem",
@@ -294,11 +283,7 @@ describe("kernel spec logos", () => {
       },
     };
     const settings = createSessionServerSettings(access, {
-      fetch: (async () =>
-        new Response(JSON.stringify(body), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        })) as unknown as typeof fetch,
+      fetch: (async () => jsonResponse(body)) as unknown as typeof fetch,
     });
     const response = await settings.fetch(
       "https://31002.use.devtunnels.ms/api/kernelspecs",

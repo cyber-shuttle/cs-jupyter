@@ -21,6 +21,7 @@ import {
   accessFixture,
   acceptDialog,
   controlFake,
+  ControllerFake,
   fakeCommandApp,
   pollPanel,
   sessionFixture,
@@ -50,12 +51,20 @@ const hiddenLog: ISessionLogTail = {
   ],
 };
 
+function boundList(state: ISessionUiState = uiState()): {
+  controller: ControllerFake;
+  list: SessionList;
+} {
+  const controller = new ControllerFake(state);
+  return { controller, list: new SessionList(controller as never) };
+}
+
 function setSessions(
-  list: SessionList,
+  controller: ControllerFake,
   sessions: ISession[],
   logs: ISessionUiState["logs"] = new Map(),
 ): void {
-  list.setState(
+  controller.setState(
     uiState({
       sessions,
       logs,
@@ -172,19 +181,19 @@ describe("serialized session selection", () => {
   });
 
   it("emits session, Add Session, and SSH Hosts card actions once", () => {
-    const list = new SessionList();
+    const { controller, list } = boundList();
     const sessionRequested = vi.fn();
     const createRequested = vi.fn();
     const sshHostsRequested = vi.fn();
     list.sessionRequested.connect((_sender, id) => sessionRequested(id));
     list.createRequested.connect(createRequested);
     list.sshHostsRequested.connect(sshHostsRequested);
-    list.setCanCreate(true);
-    setSessions(list, [first], new Map([[first.id, hiddenLog]]));
+    list.setCreateBlocked("");
+    setSessions(controller, [first], new Map([[first.id, hiddenLog]]));
     expect(list.node.textContent).not.toContain("Preparing session");
     document.body.appendChild(list.node);
     list.node.querySelector<HTMLButtonElement>(".csSessionCard")!.focus();
-    setSessions(list, [{ ...first }]);
+    setSessions(controller, [{ ...first }]);
     expect(document.activeElement?.getAttribute("aria-label")).toContain(
       "delta",
     );
@@ -386,9 +395,9 @@ describe("serialized session selection", () => {
 describe("current session pill", () => {
   it("marks only the session this page is attached to", () => {
     setActiveSessionId(first.id);
-    const list = new SessionList();
+    const { controller, list } = boundList();
     const other = { ...first, id: "s-999999999999" };
-    setSessions(list, [first, other]);
+    setSessions(controller, [first, other]);
     const cards = [
       ...list.node.querySelectorAll<HTMLElement>(".csSessionCard"),
     ];
@@ -411,12 +420,12 @@ describe("current session pill", () => {
 
 describe("session card contract", () => {
   it("shows host, resources, and state only, leaving the rest to the dialog", () => {
-    const list = new SessionList();
+    const { controller, list } = boundList();
     const gpu = {
       ...first,
       resources: { ...first.resources, cores: 8, memoryMb: 32768, gpuCount: 2 },
     };
-    setSessions(list, [gpu]);
+    setSessions(controller, [gpu]);
     const card = list.node.querySelector<HTMLElement>(".csSessionCard")!;
     expect(card.querySelector(".csSessionCardTitle")?.textContent).toBe(
       gpu.sshHost,
@@ -447,8 +456,7 @@ describe("session card contract", () => {
     expect(card.querySelector(".csSessionCardIcon svg")).not.toBeNull();
     expect(card.querySelector(".csSessionCardIconGpu")).not.toBeNull();
     expect(card.querySelector(".csSessionCardIcon-ready")).not.toBeNull();
-    const cpuList = new SessionList();
-    cpuList.setState({
+    const { list: cpuList } = boundList({
       ...uiState({
         sessions: [{ ...gpu, resources: { ...gpu.resources, gpuCount: 0 } }],
       }),
@@ -463,13 +471,14 @@ describe("session card contract", () => {
 
 describe("identity control", () => {
   it("offers a single sign-in button when signed out and hides the session cards behind a reason", () => {
-    const list = new SessionList();
-    const header = new CyberShuttleHeader();
+    const controller = new ControllerFake({
+      ...uiState({ sessions: [first] }),
+      signedIn: false,
+    });
+    const list = new SessionList(controller as never);
+    const header = new CyberShuttleHeader(controller as never);
     const signIn = vi.fn();
     header.signInRequested.connect(signIn);
-    const state = { ...uiState({ sessions: [first] }), signedIn: false };
-    list.setState(state);
-    header.setState(state);
     expect(list.node.textContent).toContain(
       "Sign in to see your sessions and SSH hosts.",
     );
@@ -486,16 +495,17 @@ describe("identity control", () => {
   });
 
   it("names the account and keeps Dev Tunnels, SSH Keys, and sign out behind its menu", () => {
-    const header = new CyberShuttleHeader();
+    const header = new CyberShuttleHeader(
+      new ControllerFake({
+        ...uiState({ sessions: [first] }),
+        signedIn: true,
+        account: "someone@gatech.edu",
+      }) as never,
+    );
     const signOut = vi.fn();
     const tunnelLink = vi.fn();
     header.signOutRequested.connect(signOut);
     header.tunnelLinkRequested.connect(tunnelLink);
-    header.setState({
-      ...uiState({ sessions: [first] }),
-      signedIn: true,
-      account: "someone@gatech.edu",
-    });
     const trigger =
       header.node.querySelector<HTMLButtonElement>(".csAccountButton")!;
     expect(trigger.textContent).toBe("someone@gatech.edu");

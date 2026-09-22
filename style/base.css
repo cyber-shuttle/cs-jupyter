@@ -190,7 +190,8 @@
 .csMeta {
   color: var(--jp-ui-font-color2);
 }
-.csStopping {
+.csStopping,
+.csValidationStatusBusy {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -732,11 +733,6 @@
   border-left: 4px solid var(--jp-border-color1);
   background: var(--jp-layout-color2);
   font-weight: 700;
-}
-.csValidationStatusBusy {
-  display: flex;
-  align-items: center;
-  gap: 8px;
 }
 .csValidationPassed {
   border-color: var(--jp-success-color1);

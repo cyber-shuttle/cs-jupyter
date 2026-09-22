@@ -46,7 +46,10 @@ function harness(initialHosts: ISshHost[] = [alpha]) {
   const hostWidgets: SshHosts[] = [];
   const hostRenders: ReturnType<typeof vi.spyOn>[] = [];
   (panel as any)._modals._createForm = () => {
-    const form = new CreateSessionForm(api as any);
+    const form = new CreateSessionForm(
+      api as any,
+      () => (panel as any)._modals.loginDock,
+    );
     forms.push(form);
     return form;
   };
@@ -118,7 +121,10 @@ describe("host refresh while the session wizard is active", () => {
         seq: number;
       }>();
       state.api.createSession.mockReturnValueOnce(completion.promise);
-      const form = new CreateSessionForm(state.api as any);
+      const form = new CreateSessionForm(
+        state.api as any,
+        () => (state.panel as any)._modals.loginDock,
+      );
       const body = new StackedPanel();
       body.addWidget(form);
       const show = vi.fn();

@@ -30,10 +30,11 @@ without a renewal it is dropped and **Sign in** is offered again.
 
 Sessions run over the user's own Dev Tunnels account, linked once. When session creation answers
 `409 tunnel_link_required`, the Add Session dialog hosts the link step in place: a Microsoft or GitHub
-device-code authorization started at `POST /api/v1/tunnel/link/start`, shown as a verification URI and one-time
-code with explicit copy, open and cancel actions, and polled at `POST /api/v1/tunnel/link/poll/{handle}` until
-linked, after which the create is retried. The credential never reaches this client; cs-control seals it.
-The account menu's **Dev Tunnels** dialog reads and unlinks it through `GET` and `DELETE /api/v1/tunnel/link`.
+device-code authorization started at `POST /api/v1/tunnel/authorizations`, shown as a verification URI and one-time
+code with explicit copy, open and cancel actions, and polled at
+`POST /api/v1/tunnel/authorizations/{handle}/poll` until linked, after which the create is retried. The credential
+never reaches this client; cs-control seals it. The account menu's **Dev Tunnels** dialog reads and unlinks it
+through `GET` and `DELETE /api/v1/tunnel`.
 
 ## Trust boundaries
 
@@ -43,7 +44,7 @@ Every credential this app carries, and where it goes:
 | ------------------ | --------------------------------------------------------------------------------------- | ----------------------------------------------- |
 | Sign-in relay      | `GET /api/v1/oauth/config`, `POST /api/v1/oauth/exchange`, `POST /api/v1/oauth/refresh` | none (`credentials: omit`, `redirect: "error"`) |
 | Control API        | `/api/v1/*`                                                                             | `Authorization: Bearer <ID token>`              |
-| SSH authentication | `WS /api/v1/ssh/{alias}/auth`                                                           | the ID token as the `bearer.` subprotocol       |
+| SSH authentication | `WS /api/v1/ssh/hosts/{alias}/auth`                                                     | the ID token as the `bearer.` subprotocol       |
 | Jupyter            | the session's Dev Tunnel origin                                                         | the seq-bound Jupyter token                     |
 
 The control API uses no cookies, XSRF header or same-origin proxy. The SSH socket offers exactly

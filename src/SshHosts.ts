@@ -31,16 +31,14 @@ interface IHostTest {
 }
 
 export class SshHosts extends RemoteListWidget {
-  private _api: ControlClient;
   private _hosts: ISshHost[] = [];
   private _keys: ISshKey[] = [];
   private _form: IHostDraft | undefined;
   private _open = new Set<string>();
   private _tests = new Map<string, IHostTest>();
 
-  constructor(api: ControlClient) {
+  constructor(private _api: ControlClient) {
     super();
-    this._api = api;
     this.id = "cybershuttle-ssh-hosts";
     this.addClass("csSessionPanel");
     this._render();
@@ -71,11 +69,7 @@ export class SshHosts extends RemoteListWidget {
   private _openForm(form: IHostDraft | undefined): void {
     this._form = form;
     this._formError = "";
-    this._render();
-  }
-
-  private async _remove(host: ISshHost): Promise<void> {
-    await this._removeItem(() => this._api.removeSshHost(host.name));
+    this._sync();
   }
 
   private async _test(host: ISshHost): Promise<void> {
@@ -197,8 +191,7 @@ export class SshHosts extends RemoteListWidget {
     remove.disabled = !host.managed;
     remove.onclick = (event) => {
       event.preventDefault();
-      this._confirming = host.name;
-      this._render();
+      this._confirm(host.name);
     };
     const { entry, body } = disclosure(host.name, this._open, [
       element("span", host.name, "csCardTitle"),
@@ -230,11 +223,8 @@ export class SshHosts extends RemoteListWidget {
         ...confirmDelete(
           "Remove this entry from ~/.ssh/config?",
           host.name,
-          () => {
-            this._confirming = "";
-            this._render();
-          },
-          () => void this._remove(host),
+          () => this._confirm(""),
+          () => void this._removeItem(() => this._api.removeSshHost(host.name)),
         ),
       );
       body.appendChild(actions);

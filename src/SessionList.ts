@@ -3,15 +3,10 @@
 // countdown is the one figure that changes on its own, driven by a shared clock.
 import { caretLeftIcon } from "@jupyterlab/ui-components";
 import { Signal } from "@lumino/signaling";
-import { RebuildingWidget } from "./RebuildingWidget";
+import { PanelBoundWidget } from "./RebuildingWidget";
 import type { SessionState, ISession } from "./Common";
-import {
-  displayState,
-  emptyState,
-  getActiveSessionId,
-  sessionHomeUrl,
-  type ISessionUiState,
-} from "./session";
+import type { CyberShuttlePanel } from "./CyberShuttlePanel";
+import { displayState, getActiveSessionId, sessionHomeUrl } from "./session";
 import {
   button,
   CLOCK_GLYPH,
@@ -22,31 +17,23 @@ import {
   statePill,
 } from "./dom";
 
-export class SessionList extends RebuildingWidget {
+export class SessionList extends PanelBoundWidget {
   readonly sessionRequested = new Signal<this, string>(this);
   readonly createRequested = new Signal<this, void>(this);
   readonly sshHostsRequested = new Signal<this, void>(this);
   readonly runHistoryRequested = new Signal<this, void>(this);
 
-  private _state = emptyState();
-  private _canCreate = false;
-  private _createUnavailableReason = "";
+  private _createBlocked = "Add an SSH host before creating a session.";
 
-  constructor() {
-    super();
+  constructor(panel: CyberShuttlePanel) {
+    super(panel);
     this.id = "cybershuttle-session-list";
     this.addClass("csSessionPanel");
     this._render();
   }
 
-  setState(state: ISessionUiState): void {
-    this._state = state;
-    this._render();
-  }
-
-  setCanCreate(canCreate: boolean, unavailableReason = ""): void {
-    this._canCreate = canCreate;
-    this._createUnavailableReason = unavailableReason;
+  setCreateBlocked(reason: string): void {
+    this._createBlocked = reason;
     this._render();
   }
 
@@ -67,14 +54,20 @@ export class SessionList extends RebuildingWidget {
     );
     const sectionHeader = element("header", "", "jp-Launcher-sectionHeader");
     const sectionTitle = element("h2", "Sessions", "jp-Launcher-sectionTitle");
-    const sshHosts = button("SSH Hosts", "csTextButton csSectionHeaderButton");
+    const sshHosts = button(
+      "SSH Hosts",
+      "csTextButton csSectionHeaderButton",
+      () => this.sshHostsRequested.emit(undefined),
+    );
     sshHosts.dataset.sessionAction = "ssh-hosts";
     sshHosts.disabled = !this._state.signedIn;
-    sshHosts.onclick = () => this.sshHostsRequested.emit(undefined);
-    const history = button("Run history", "csTextButton csSectionHeaderButton");
+    const history = button(
+      "Run history",
+      "csTextButton csSectionHeaderButton",
+      () => this.runHistoryRequested.emit(undefined),
+    );
     history.dataset.sessionAction = "run-history";
     history.disabled = !this._state.signedIn;
-    history.onclick = () => this.runHistoryRequested.emit(undefined);
     const back = element("a", "", "jp-Launcher-sectionIcon csSessionBack", {
       href: sessionHomeUrl(),
       "aria-label": "Back to sessions",
@@ -92,7 +85,7 @@ export class SessionList extends RebuildingWidget {
 
     section.append(
       ...notes([
-        [this._createUnavailableReason, "csStatus"],
+        [this._createBlocked, "csStatus"],
         [this._state.error, "csError"],
         [this._state.updatesStatus, "csStatus"],
       ]),
@@ -117,16 +110,17 @@ export class SessionList extends RebuildingWidget {
     for (const session of this._state.sessions) {
       cards.appendChild(this._sessionCard(session));
     }
-    const add = button("", "jp-LauncherCard csSessionAddCard");
-    add.ariaLabel = "Add Session";
+    const add = button("", "jp-LauncherCard csSessionAddCard", () =>
+      this.createRequested.emit(undefined),
+    );
+    add.setAttribute("aria-label", "Add Session");
     add.dataset.sessionAction = "add-session";
-    add.disabled = !this._canCreate || this._state.loading;
-    add.title = this._createUnavailableReason || "Add Session";
+    add.disabled = !!this._createBlocked || this._state.loading;
+    add.title = this._createBlocked || "Add Session";
     add.append(
       element("div", "+", "jp-LauncherCard-icon csSessionAddIcon"),
       element("div", "Add Session", "jp-LauncherCard-label"),
     );
-    add.onclick = () => this.createRequested.emit(undefined);
     cards.appendChild(add);
     section.appendChild(cards);
     return section;
@@ -138,12 +132,13 @@ export class SessionList extends RebuildingWidget {
     const card = button(
       "",
       `jp-LauncherCard csSessionCard${current ? " csSessionCardCurrent" : ""}`,
+      () => this.sessionRequested.emit(session.id),
     );
-    card.ariaLabel = `${session.sshHost}, ${state}${current ? ", current session" : ""}`;
-    card.title = card.ariaLabel;
+    const caption = `${session.sshHost}, ${state}${current ? ", current session" : ""}`;
+    card.setAttribute("aria-label", caption);
+    card.title = caption;
     card.dataset.category = "CyberShuttle Sessions";
     card.dataset.sessionAction = session.id;
-    card.onclick = () => this.sessionRequested.emit(session.id);
     const label = element(
       "div",
       "",
@@ -202,13 +197,15 @@ function sessionResourceRow(session: ISession): HTMLElement {
   const row = element("span", "", "csSessionCardMeta");
   const measures: Array<[string, string, string]> = [
     [RESOURCE_GLYPHS.cpu, String(cores), `${cores} CPU`],
-    ...(gpuCount
-      ? ([[RESOURCE_GLYPHS.gpu, String(gpuCount), `${gpuCount} GPU`]] as Array<
-          [string, string, string]
-        >)
-      : []),
     [RESOURCE_GLYPHS.mem, gigabytes(memoryMb), `${gigabytes(memoryMb)} memory`],
   ];
+  if (gpuCount) {
+    measures.splice(1, 0, [
+      RESOURCE_GLYPHS.gpu,
+      String(gpuCount),
+      `${gpuCount} GPU`,
+    ]);
+  }
   measures.forEach(([glyph, value, title], index) => {
     if (index > 0) {
       row.appendChild(element("span", "·", "csResourceSeparator"));
@@ -234,9 +231,7 @@ function sessionIcon(session: ISession, state: SessionState): HTMLElement {
   return icon;
 }
 
-function serverRackIcon(
-  className = "jp-LauncherCard-icon csSessionCardIcon",
-): HTMLElement {
+function serverRackIcon(className: string): HTMLElement {
   const icon = element("div", "", className);
   icon.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
   <g fill="none" stroke="currentColor" stroke-width="1.1">

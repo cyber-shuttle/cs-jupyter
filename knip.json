@@ -1,7 +1,0 @@
-{
-  "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": ["tests/*.test.ts", "tests/*.mjs"],
-  "project": ["src/**/*.ts", "tests/**/*.ts", "tests/**/*.mjs"],
-  "ignoreDependencies": ["@jupyter/builder"],
-  "ignoreBinaries": ["uv"]
-}
