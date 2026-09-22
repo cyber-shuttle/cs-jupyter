@@ -1,17 +1,17 @@
 # Architecture
 
 The distribution is a static JupyterLite site plus one federated extension (`src/index.ts`). It speaks to two
-parties: the cs-control API configured at deployment time, and the Jupyter server inside a Slurm session,
-reached directly over that session's Dev Tunnel. cs-control serves neither this application nor session
+parties: the cs-plane API configured at deployment time, and the Jupyter server inside a Slurm session,
+reached directly over that session's Dev Tunnel. cs-plane serves neither this application nor session
 traffic, so every control call is cross-origin and pinned to the configured origin.
 
 ## Configuration
 
-One `PageConfig` option, `cybershuttleControlApiUrl`, points a deployment at its cs-control API. It must be an
-absolute URL using HTTPS or loopback HTTP — relative and implicit same-origin values are rejected. cs-control
-listens on loopback, so a deployment normally names a loopback URL, and the cs-control each user runs must
-list this site's own origin under `--allowed-origin`. The OIDC issuer, client and Custos URL are configured
-only on cs-control; this client reads the authorization endpoint from `GET /api/v1/oauth/config` and holds no
+One `PageConfig` option, `cybershuttleControlApiUrl`, points a deployment at its cs-plane API. It must be an
+absolute URL using HTTPS or loopback HTTP — relative and implicit same-origin values are rejected. A deployment
+names the cs-plane it is served with, and that cs-plane must list this site's own origin under
+`--allowed-origin`. The OIDC issuer, client and Custos URL are configured
+only on cs-plane; this client reads the authorization endpoint from `GET /api/v1/oauth/config` and holds no
 client secret.
 [DEPLOYING.md](DEPLOYING.md) covers where the option goes.
 
@@ -33,7 +33,7 @@ Sessions run over the user's own Dev Tunnels account, linked once. When session 
 device-code authorization started at `POST /api/v1/tunnel/authorizations`, shown as a verification URI and one-time
 code with explicit copy, open and cancel actions, and polled at
 `POST /api/v1/tunnel/authorizations/{handle}/poll` until linked, after which the create is retried. The credential
-never reaches this client; cs-control seals it. The account menu's **Dev Tunnels** dialog reads and unlinks it
+never reaches this client; cs-plane seals it. The account menu's **Dev Tunnels** dialog reads and unlinks it
 through `GET` and `DELETE /api/v1/tunnel`.
 
 ## Trust boundaries
@@ -50,16 +50,16 @@ Every credential this app carries, and where it goes:
 The control API uses no cookies, XSRF header or same-origin proxy. The SSH socket offers exactly
 `cybershuttle.v1` plus the credential subprotocol and fails closed unless the server negotiates
 `cybershuttle.v1`; tokens never appear in a WebSocket URL. The routes and their trust boundaries are
-cs-control's, and [cyber-shuttle/cs-control](https://github.com/cyber-shuttle/cs-control) is the canonical
+cs-plane's, and [cyber-shuttle/cs-plane](https://github.com/cyber-shuttle/cs-plane) is the canonical
 description of them.
 
 Every response is checked against a shared `Validator` vocabulary in `src/Common.ts` before `src/ControlClient.ts`
 hands it to the rest of the app: an object validator rejects a field it does not list as well as one it is
-missing or of the wrong type, so an unexpected cs-control shape fails closed instead of passing through.
+missing or of the wrong type, so an unexpected cs-plane shape fails closed instead of passing through.
 
 ## Session flow
 
-1. The native Launcher manages SSH hosts and sessions through the configured cross-origin cs-control API.
+1. The native Launcher manages SSH hosts and sessions through the configured cross-origin cs-plane API.
 2. One authenticated read of `GET /api/v1/sessions`, polled once a second, supplies the session state
    (`SUBMITTING`, `QUEUED`, `STARTING`, `READY`, `STOPPING`, `STOPPED`, `FAILED`) and the startup tails.
 3. A `STOPPED` or `FAILED` session is gone. "Run again" submits a new one under the same card and settings
@@ -76,8 +76,8 @@ missing or of the wrong type, so an unexpected cs-control shape fails closed ins
 
 Each session's JupyterLab layout is kept in the session's own home at `.cybershuttle/workspaces/<id>.json`
 through its contents API, in place of JupyterLite's browser-local workspace, so switching back to a session
-restores its tabs. cs-control asks Linkspan, the session's main process, for the Jupyter server; Linkspan builds the Python
-environment on the compute host and starts the server on the port cs-control declared. Nothing in this
+restores its tabs. cs-plane asks Linkspan, the session's main process, for the Jupyter server; Linkspan builds the Python
+environment on the compute host and starts the server on the port cs-plane declared. Nothing in this
 repository runs there.
 
 ## Countdown, usage and history
@@ -87,7 +87,7 @@ Two reads sit beside the poll, each separate from it for a reason, plus the stat
 The countdown is not a read at all. `startedAt` is when Slurm was first seen running the session, so with
 `resources.wallMinutes` it is an absolute deadline the client ticks down against its own clock. That matters
 because the poll goes quiet: a queued session is answered `304` and emits no state for minutes at a time,
-so each surface showing the figure runs a one-second clock of its own. The status-bar item reads cs-control
+so each surface showing the figure runs a one-second clock of its own. The status-bar item reads cs-plane
 directly, on its own 30-second `getSession` poll, rather than borrowing the Launcher's state, because
 JupyterLab disposes the Launcher the moment anything is opened from it, and the countdown has to outlive
 that. Below ten minutes every surface warns, on one threshold.
@@ -104,7 +104,7 @@ a run read back out of the history, because they are the same record.
 
 ## Session access
 
-Each session landing requests fresh access from cs-control. Grants live only in sessionStorage, and sign-out
+Each session landing requests fresh access from cs-plane. Grants live only in sessionStorage, and sign-out
 clears them before returning to the homepage.
 
 ## Fail-closed compute

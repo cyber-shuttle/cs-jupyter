@@ -1,8 +1,8 @@
-// Runs CILogon's authorization-code flow with PKCE, finished by cs-control
+// Runs CILogon's authorization-code flow with PKCE, finished by cs-plane
 // because only it holds the client secret. Sign-in navigates the top window
 // away; the callback exchange happens on the next load, from the `code` and
 // `state` the redirect carries. The credential is held in per-tab
-// sessionStorage so it survives that navigation. Every cs-control response is
+// sessionStorage so it survives that navigation. Every cs-plane response is
 // validated strictly against its expected shape.
 import {
   isPlainObject,
@@ -303,11 +303,11 @@ export class AuthClient {
       signal,
     }).catch((error: unknown) => {
       throw signal.aborted
-        ? new Error("cs-control sign-in request timed out.")
+        ? new Error("cs-plane sign-in request timed out.")
         : error;
     });
     const value: unknown = await response.json().catch(() => {
-      throw new Error("cs-control returned invalid JSON.");
+      throw new Error("cs-plane returned invalid JSON.");
     });
     if (!response.ok) {
       const error =
@@ -315,11 +315,11 @@ export class AuthClient {
       throw new Error(
         typeof error.message === "string"
           ? error.message
-          : `cs-control sign-in failed (${response.status}${typeof error.code === "string" ? `: ${error.code}` : ""}).`,
+          : `cs-plane sign-in failed (${response.status}${typeof error.code === "string" ? `: ${error.code}` : ""}).`,
       );
     }
     if (!shape(value)) {
-      throw new Error("cs-control returned an invalid sign-in response.");
+      throw new Error("cs-plane returned an invalid sign-in response.");
     }
     return value;
   }

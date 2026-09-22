@@ -204,7 +204,7 @@ describe("host refresh while the session wizard is active", () => {
       listSessions: vi.fn(async () => sessionListFixture()),
       listSshHosts: vi.fn(async () => {
         if (fail) {
-          throw new Error("cs-control returned 401");
+          throw new Error("cs-plane returned 401");
         }
         return [alpha];
       }),

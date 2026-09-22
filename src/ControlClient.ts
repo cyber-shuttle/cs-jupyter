@@ -1,6 +1,6 @@
-// The typed client for cs-control's REST and WebSocket API. Every response is
-// validated against a Common.ts vObject shape covering every field cs-control's
-// response may carry, per docs/API.md in cs-control, rejecting any other key;
+// The typed client for cs-plane's REST and WebSocket API. Every response is
+// validated against a Common.ts vObject shape covering every field cs-plane's
+// response may carry, per docs/API.md in cs-plane, rejecting any other key;
 // expect() turns a shape into a throwing parser for one call site. UNCHANGED
 // marks a 304 Not Modified response, meaning the caller's cached copy is still
 // current. accessUnavailable marks the 409 a session answers while leaving
@@ -63,7 +63,7 @@ export interface ISessionLogTail {
   lines: ILogLine[];
 }
 
-export const UNCHANGED = Symbol("cs-control session list unchanged");
+export const UNCHANGED = Symbol("cs-plane session list unchanged");
 
 export interface ISessionList {
   sessions: ISession[];
@@ -104,7 +104,7 @@ const encoded = encodeURIComponent;
 
 function owned<T>(value: T, id: string, expected: string, what: string): T {
   if (id !== expected) {
-    throw new Error(`cs-control returned ${what} for ${id}, not ${expected}.`);
+    throw new Error(`cs-plane returned ${what} for ${id}, not ${expected}.`);
   }
   return value;
 }
@@ -143,7 +143,7 @@ export function safeControlFetch(
 
 export const IControlClient = new Token<ControlClient>(
   "@cybershuttle/jupyter:IControlClient",
-  "The shared cs-control API client.",
+  "The shared cs-plane API client.",
 );
 
 export class ControlClient {
@@ -369,7 +369,7 @@ export class ControlClient {
   private async _send(path: string, init: RequestInit = {}): Promise<Response> {
     const response = await this._fetch(URLExt.join(this._base, path), init);
     if (!response.ok && response.status !== 304) {
-      let message = `cs-control returned ${response.status}`;
+      let message = `cs-plane returned ${response.status}`;
       let code = "request_failed";
       try {
         const value = await response.json();
@@ -398,7 +398,7 @@ async function parseJson(response: Response): Promise<unknown> {
   try {
     return await response.json();
   } catch {
-    throw new Error("cs-control returned invalid JSON.");
+    throw new Error("cs-plane returned invalid JSON.");
   }
 }
 
@@ -451,12 +451,12 @@ function checkLogBudget(lines: ILogLine[]): void {
   const encoder = new TextEncoder();
   for (const line of lines) {
     if (SESSION_LOG_CONTROL.test(line.text)) {
-      throw new Error("cs-control returned an invalid session log line.");
+      throw new Error("cs-plane returned an invalid session log line.");
     }
     const size = encoder.encode(line.text).byteLength;
     bytes += size;
     if (size > 4096 || bytes > 64 * 1024) {
-      throw new Error("cs-control returned an oversized session log event.");
+      throw new Error("cs-plane returned an oversized session log event.");
     }
   }
 }

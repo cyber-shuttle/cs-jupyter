@@ -15,4 +15,4 @@ What you ran and what it reported. `bun run build` must precede `bun run test:di
 
 - [ ] `bun run lint` passes
 - [ ] New behaviour is covered by a test
-- [ ] Documentation updated, if this changes deployment, configuration or the cs-control wire contract
+- [ ] Documentation updated, if this changes deployment, configuration or the cs-plane wire contract

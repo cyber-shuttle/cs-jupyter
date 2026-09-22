@@ -53,7 +53,7 @@ beforeEach(() => {
 });
 
 describe("AuthClient interactive sign-in", () => {
-  it("builds the authorize URL from cs-control's config and stores state and verifier", async () => {
+  it("builds the authorize URL from cs-plane's config and stores state and verifier", async () => {
     const navigate = vi.fn();
     const auth = new AuthClient(controlApiUrl, {
       fetch: fetchSequence([{ body: config }]),

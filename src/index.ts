@@ -1,6 +1,6 @@
 // The extension's entry point: JupyterLab service-manager plugins that point
 // every service at the active session's server. It fails closed rather than
-// falling back to an unauthenticated default server. cs-control issues access
+// falling back to an unauthenticated default server. cs-plane issues access
 // only once a session is up, so a response from it is the readiness signal.
 import type { JupyterFrontEndPlugin } from "@jupyterlab/application";
 import { PageConfig } from "@jupyterlab/coreutils";
@@ -62,7 +62,7 @@ const IRemoteServerSettings = new Token<ServerConnection.ISettings>(
 
 const controlClientPlugin: JupyterFrontEndPlugin<ControlClient> = {
   id: "@cybershuttle/jupyter:control-client",
-  description: "Provide the shared cs-control API client.",
+  description: "Provide the shared cs-plane API client.",
   autoStart: true,
   provides: IControlClient,
   activate: () => new ControlClient(),
@@ -118,7 +118,7 @@ const remoteServerSettingsPlugin: ServiceManagerPlugin<
 > = {
   id: "@cybershuttle/jupyter:remote-server-settings",
   description:
-    "Provide a READY cs-control session or the fail-closed controller bootstrap to compute managers.",
+    "Provide a READY cs-plane session or the fail-closed controller bootstrap to compute managers.",
   autoStart: true,
   provides: IRemoteServerSettings,
   requires: [IControlClient],

@@ -306,7 +306,7 @@ describe("polling an unchanged list", () => {
     jupyter: { uri: "https://31002.use.devtunnels.ms/", token: "A".repeat(43) },
   });
 
-  it("retries an access read that failed while cs-control reports no change", async () => {
+  it("retries an access read that failed while cs-plane reports no change", async () => {
     const now = vi.spyOn(Date, "now").mockReturnValue(0);
     try {
       const api = controlFake({

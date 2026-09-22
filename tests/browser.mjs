@@ -1,5 +1,5 @@
 // Playwright end-to-end run against dist, driving real Chromium against a
-// fake cs-control, a fake OAuth issuer, and a fake Jupyter server. It exercises
+// fake cs-plane, a fake OAuth issuer, and a fake Jupyter server. It exercises
 // PKCE sign-in, the Dev Tunnels device-link flow gating session create, and
 // the session lifecycle through the real built extension. Two console
 // messages are expected noise: the on-purpose 409 tunnel-link handshake and

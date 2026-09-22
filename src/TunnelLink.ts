@@ -1,7 +1,7 @@
 // Dev Tunnels link dialog: one box per provider, the linked one a ticked card
 // naming the account with Unlink inside it, the other a button that starts and
-// polls the device flow through cs-control. Session create and run-again reopen this same
-// widget when cs-control refuses for want of a link, and `onLinked` tells the
+// polls the device flow through cs-plane. Session create and run-again reopen this same
+// widget when cs-plane refuses for want of a link, and `onLinked` tells the
 // caller to retry once linking succeeds. Polling paces itself by the server's
 // intervalSeconds alone; server-side backoff is the upgrade if 429s appear.
 import { RemoteListWidget } from "./RebuildingWidget";
@@ -93,7 +93,7 @@ export class TunnelLink extends RemoteListWidget {
   protected _rebuild(): void {
     this.node.textContent = "";
     const { root, scroll, card } = dialogBody(
-      "Sessions run over your own Dev Tunnels account, linked once and kept by cs-control.",
+      "Sessions run over your own Dev Tunnels account, linked once and kept by cs-plane.",
       this._error,
     );
     if (!this._busy) {
