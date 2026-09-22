@@ -1,7 +1,7 @@
 // Turns raw metric samples and run accounting into series, summaries,
-// CPU/MEM/GPU usage plots (USAGE_SLOTS wide, mirroring cs-control's window)
+// CPU/MEM/GPU usage plots (USAGE_SLOTS wide, mirroring cs-plane's window)
 // and the status-bar walltime countdown for the session this page is
-// attached to. It reads cs-control directly since the launcher panel is
+// attached to. It reads cs-plane directly since the launcher panel is
 // disposed once anything opens, and hides for a queued, stopping or
 // finished session.
 import type { JupyterFrontEndPlugin } from "@jupyterlab/application";

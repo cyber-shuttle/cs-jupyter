@@ -19,6 +19,6 @@ body:
     id: alternatives
     attributes:
       label: Alternatives considered
-      description: Including anything that would have to change in cs-control instead.
+      description: Including anything that would have to change in cs-plane instead.
     validations:
       required: false

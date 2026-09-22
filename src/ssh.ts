@@ -210,7 +210,7 @@ export class SshOperationConsole implements ISshOperationConsole {
               "CyberShuttle WebSocket protocol negotiation failed",
             );
             this._fail(
-              "cs-control did not negotiate the required CyberShuttle WebSocket protocol.",
+              "cs-plane did not negotiate the required CyberShuttle WebSocket protocol.",
             );
             return;
           }
@@ -252,14 +252,14 @@ export class SshOperationConsole implements ISshOperationConsole {
       return;
     }
     if (typeof raw !== "string") {
-      this._fail("cs-control returned an invalid SSH operation frame.");
+      this._fail("cs-plane returned an invalid SSH operation frame.");
       return;
     }
     let frame: ServerFrame;
     try {
       frame = JSON.parse(raw) as ServerFrame;
     } catch {
-      this._fail("cs-control returned an invalid SSH operation frame.");
+      this._fail("cs-plane returned an invalid SSH operation frame.");
       return;
     }
     switch (frame.type) {
@@ -277,7 +277,7 @@ export class SshOperationConsole implements ISshOperationConsole {
         );
         break;
       default:
-        this._fail("cs-control returned an unknown SSH operation frame.");
+        this._fail("cs-plane returned an unknown SSH operation frame.");
     }
   }
 

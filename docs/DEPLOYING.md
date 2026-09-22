@@ -1,17 +1,17 @@
 # Deploying
 
 A deployment is the built `dist/` directory served as static files, plus one configuration key. There is no
-server-side component here, but cs-control is a per-user daemon: each user installs and runs `csctl` on their
+server-side component here, but cs-plane is a per-user daemon: each user installs and runs `cs` on their
 own machine before they can sign in.
 
 ## Before you start
 
 - Somewhere to serve static files over HTTPS. Any path works; the build uses relative URLs
   (`base_url` is empty in `jupyter_lite_config.json`).
-- Each user runs [cs-control](https://github.com/cyber-shuttle/cs-control) (`csctl serve`) on their own
+- Each user runs [cs-plane](https://github.com/cyber-shuttle/cs-plane) (`cs serve`) on their own
   machine; it listens on loopback only. They pass this site's origin as `--allowed-origin`; the CILogon client and
   the Custos URL are configured there rather than here.
-- cs-control must be able to hand out `*.devtunnels.ms` Jupyter origins for the sessions it creates. This
+- cs-plane must be able to hand out `*.devtunnels.ms` Jupyter origins for the sessions it creates. This
   client rejects anything else, and the rule is not configurable.
 
 ## 1. Build
@@ -35,7 +35,7 @@ Set `cybershuttleControlApiUrl` in the `jupyter-config-data` object of the **ser
 "cybershuttleControlApiUrl": "http://127.0.0.1:8045/api/v1"
 ```
 
-That is `csctl serve`'s default listen address; change it only if your users run it elsewhere. The value must
+That is `cs serve`'s default listen address; change it only if your users run it elsewhere. The value must
 be an absolute URL with no credentials, query or fragment, using HTTPS or loopback HTTP. Relative and implicit
 same-origin values are rejected at startup.
 
@@ -45,13 +45,13 @@ and rewrites the file. Patch the served copy after each build.
 
 ## 3. Tell users the origin to allow
 
-The browser calls each user's cs-control from this site's origin, so their daemon has to be told that origin.
+The browser calls each user's cs-plane from this site's origin, so their daemon has to be told that origin.
 `--allowed-origin` takes an exact origin (scheme, host and port, no path), is repeatable, requires at least
 one entry and rejects `*`. Without a matching entry the browser blocks sign-in and every control request. The
 command they run:
 
 ```bash
-CSCTL_OIDC_CLIENT_SECRET=... csctl serve \
+CS_OIDC_CLIENT_SECRET=... cs serve \
   --oidc-client-id cilogon:/client_id/<id> \
   --custos-url https://custos.example.edu \
   --allowed-origin https://jupyter.example.edu
@@ -59,7 +59,7 @@ CSCTL_OIDC_CLIENT_SECRET=... csctl serve \
 
 ## 4. Verify
 
-With `csctl serve` running, open the site. The title row shows **Sign in**; completing CILogon sign-in
-lists the sessions cs-control holds for that account. Until a `READY` session
+With `cs serve` running, open the site. The title row shows **Sign in**; completing CILogon sign-in
+lists the sessions cs-plane holds for that account. Until a `READY` session
 is selected the file browser, kernels and terminals stay empty by design — see
 [ARCHITECTURE.md](ARCHITECTURE.md).

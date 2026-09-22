@@ -1,4 +1,4 @@
-// Locks the cs-control wire shapes this client trusts. An upstream field
+// Locks the cs-plane wire shapes this client trusts. An upstream field
 // rename or removal is caught here, not rendered as undefined in the UI.
 import { clientFor, sessionFixture } from "./fakes";
 import { describe, expect, it } from "vitest";
@@ -9,14 +9,14 @@ const providerFixture = sessionFixture({
   startedAt: "2030-01-01T00:00:30Z",
 });
 
-describe("checked narrow cs-control session JSON contract", () => {
+describe("checked narrow cs-plane session JSON contract", () => {
   it("accepts only session state and rejects removed private/application fields", async () => {
     const list = await clientFor({
       sessions: [providerFixture],
       logs: [],
     }).listSessions();
     if (list === UNCHANGED) {
-      throw new Error("cs-control answered 304 to a client with no list");
+      throw new Error("cs-plane answered 304 to a client with no list");
     }
     expect(list.sessions[0]).toEqual(providerFixture);
     await expect(
@@ -68,7 +68,7 @@ describe("checked narrow cs-control session JSON contract", () => {
   });
 });
 
-describe("checked narrow cs-control metric sample JSON contract", () => {
+describe("checked narrow cs-plane metric sample JSON contract", () => {
   const at = "2026-01-01T00:00:00Z";
 
   it.each([
@@ -109,7 +109,7 @@ describe("checked narrow cs-control metric sample JSON contract", () => {
   });
 });
 
-describe("checked narrow cs-control SSH host JSON contract", () => {
+describe("checked narrow cs-plane SSH host JSON contract", () => {
   const host = { name: "delta", extraDirectives: [], managed: true };
 
   it("accepts a well-formed host", async () => {
@@ -127,7 +127,7 @@ describe("checked narrow cs-control SSH host JSON contract", () => {
   });
 });
 
-describe("checked narrow cs-control Slurm discovery JSON contract", () => {
+describe("checked narrow cs-plane Slurm discovery JSON contract", () => {
   const discovery = {
     host: "delta",
     accounts: ["project-a"],
@@ -155,7 +155,7 @@ describe("checked narrow cs-control Slurm discovery JSON contract", () => {
   });
 });
 
-describe("checked narrow cs-control run history JSON contract", () => {
+describe("checked narrow cs-plane run history JSON contract", () => {
   const run = {
     sessionId: providerFixture.id,
     seq: providerFixture.seq,

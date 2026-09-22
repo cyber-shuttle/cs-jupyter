@@ -1,7 +1,7 @@
 // The Add Session wizard shell: step navigation, shared error and busy state,
 // and the partition/GPU model that turns discovered Slurm partitions into
 // configuration-step choices, with MIN_CORES, MIN_MEMORY_MB and
-// MAX_WALL_MINUTES mirroring the bounds cs-control enforces in
+// MAX_WALL_MINUTES mirroring the bounds cs-plane enforces in
 // validateCreate. Host discovery and the final submit step live in their own
 // modules. A document-level keydown listener retakes Enter so the dialog
 // chrome cannot swallow it before submit.

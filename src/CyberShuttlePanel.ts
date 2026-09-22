@@ -1,4 +1,4 @@
-// The stateful controller behind the launcher panel: polls cs-control, holds
+// The stateful controller behind the launcher panel: polls cs-plane, holds
 // session/run/log state and the sign-in state machine, and renders the title
 // row's sign-in status. It composes actions and modals rather than owning
 // their logic, and replaces log tails wholly each poll rather than merging.

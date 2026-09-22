@@ -89,8 +89,8 @@ function registryFor(path: string): PluginRegistry<null> {
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe("shared cs-control service", () => {
-  it("provides one client to every plugin that reaches cs-control", () => {
+describe("shared cs-plane service", () => {
+  it("provides one client to every plugin that reaches cs-plane", () => {
     const providers = plugins.filter(
       (plugin) => plugin.provides === IControlClient,
     );

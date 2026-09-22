@@ -1,7 +1,7 @@
 // Types, identifier and URL validation, and the Validator vocabulary
-// (vString, vNumber, vObject, ...) cs-control response shapes are built from;
+// (vString, vNumber, vObject, ...) cs-plane response shapes are built from;
 // vObject matches iff every listed field validates and no other key is
-// present. Nothing here depends on the DOM or on cs-control, so other modules
+// present. Nothing here depends on the DOM or on cs-plane, so other modules
 // can import freely. Optional fields mean not observed or not yet, never a
 // stand-in for false or zero.
 
@@ -320,7 +320,7 @@ export function expect<T>(
 ): (value: unknown) => T {
   return (value) => {
     if (!shape(value)) {
-      throw new Error(`cs-control returned an invalid ${what}.`);
+      throw new Error(`cs-plane returned an invalid ${what}.`);
     }
     return value;
   };

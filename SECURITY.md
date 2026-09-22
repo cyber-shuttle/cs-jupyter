@@ -16,7 +16,7 @@ published.
 
 ## Scope
 
-This repository is the browser client. It authenticates nothing itself: cs-control validates every request,
+This repository is the browser client. It authenticates nothing itself: cs-plane validates every request,
 finishes CILogon sign-in and decides who may reach a session, so a finding about those
 decisions belongs to that project rather than here.
 
@@ -34,4 +34,4 @@ The invariants this client is responsible for; the mechanisms behind them are in
   (`src/index.ts`).
 
 A report that assumes the attacker already holds the signed-in account's tokens, or already controls the
-configured cs-control deployment, describes these boundaries rather than a way through them.
+configured cs-plane deployment, describes these boundaries rather than a way through them.

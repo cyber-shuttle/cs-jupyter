@@ -1,7 +1,7 @@
 // Opens the JupyterLite page for a chosen session. It guards file-open and
 // kernel commands so they refuse to run outside an active session. Switching
 // sessions saves all open documents first, then re-reads the session from
-// cs-control.
+// cs-plane.
 import type { JupyterFrontEnd } from "@jupyterlab/application";
 import type { Widget } from "@lumino/widgets";
 import { ControlClient } from "./ControlClient";

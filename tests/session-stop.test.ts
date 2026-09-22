@@ -1,6 +1,6 @@
 // Stop, relaunch and delete actions on a session, the launch and connection to
 // a Jupyter server through Linkspan. A relaunch's busy state is driven by the
-// click that started it, not the next poll. cs-control can refuse a delete
+// click that started it, not the next poll. cs-plane can refuse a delete
 // repeatedly, and each refusal must leave it pending for the next poll. Stop
 // and Delete from the post-create detail reach their own confirmation even
 // while Add Session is open; that confirmation once queued behind the wizard.
@@ -228,7 +228,7 @@ describe("session stop action", () => {
     panel.dispose();
   });
 
-  it("keeps retrying a delete cs-control refuses more than once", async () => {
+  it("keeps retrying a delete cs-plane refuses more than once", async () => {
     const deleteSession = vi
       .fn()
       .mockRejectedValueOnce(

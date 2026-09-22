@@ -1,4 +1,4 @@
-// The review step: cs-control validates the generated Slurm script before
+// The review step: cs-plane validates the generated Slurm script before
 // submission. The script is shown only when validation fails. The busy flag is
 // passed in from the composing form's submission state, not mirrored here.
 import {
@@ -152,7 +152,7 @@ export class ReviewStep {
     const heading = element("h2", "Review Slurm job", "csStepHeading");
     const description = element(
       "p",
-      "cs-control validates the generated Slurm script before submission; the script appears only if validation fails.",
+      "cs-plane validates the generated Slurm script before submission; the script appears only if validation fails.",
       "csMeta",
     );
     const scriptHeader = element("div", "", "csScriptHeader");

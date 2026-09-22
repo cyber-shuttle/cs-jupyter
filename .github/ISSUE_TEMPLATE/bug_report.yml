@@ -40,10 +40,10 @@ body:
     validations:
       required: true
   - type: input
-    id: cs-control
+    id: cs-plane
     attributes:
-      label: cs-control version
-      description: Output of `csctl version` for the deployment you are using.
+      label: cs-plane version
+      description: Output of `cs version` for the deployment you are using.
     validations:
       required: true
   - type: input

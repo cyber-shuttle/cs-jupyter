@@ -6,7 +6,7 @@
 CyberShuttle Jupyter is a browser-based JupyterLab distribution, built with
 [JupyterLite](https://github.com/jupyterlite/jupyterlite), that runs notebooks and terminals on a
 high-performance computing (HPC) compute node rather than on the machine in front of you. You sign in, ask a
-[cs-control](https://github.com/cyber-shuttle/cs-control) daemon for a [Slurm](https://slurm.schedmd.com/)
+[cs-plane](https://github.com/cyber-shuttle/cs-plane) daemon for a [Slurm](https://slurm.schedmd.com/)
 session, and the file browser, kernels and terminals talk directly to the Jupyter server running inside
 that job.
 
@@ -21,9 +21,9 @@ can change without notice. [CHANGELOG.md](CHANGELOG.md) records what has landed 
 
 ## Requirements
 
-- **cs-control running on your own machine.** It owns every API this client calls and listens on loopback
+- **cs-plane running on your own machine.** It owns every API this client calls and listens on loopback
   only, so each user runs their own.
-- **CILogon sign-in.** An authorization-code flow with PKCE, finished by cs-control, is the only
+- **CILogon sign-in.** An authorization-code flow with PKCE, finished by cs-plane, is the only
   authentication path; this client has no other login.
 - **A linked Dev Tunnels account.** Sessions run over your own [Microsoft or GitHub Dev
   Tunnels](https://learn.microsoft.com/en-us/azure/developer/dev-tunnels/) account, linked once from the
@@ -34,7 +34,7 @@ can change without notice. [CHANGELOG.md](CHANGELOG.md) records what has landed 
 
 ## Using it
 
-Start `csctl serve` on your machine, then open the site. **Sign in** is on the CyberShuttle title row and
+Start `cs serve` on your machine, then open the site. **Sign in** is on the CyberShuttle title row and
 sends you to CILogon. The Launcher's **Sessions** section offers **Add Session**, which
 submits a Slurm job and creates a session, and its card tracks the job's state: host, account, state, resources, and a remaining
 walltime countdown. Open that card and choose **Connect** once it reads `READY`; notebooks and terminals then
@@ -45,7 +45,7 @@ deleted.
 ## Deploy
 
 Build `dist/` and host it as static files over HTTPS, set `cybershuttleControlApiUrl` in the served
-`jupyter-lite.json`, and tell users the origin to allow in their own cs-control.
+`jupyter-lite.json`, and tell users the origin to allow in their own cs-plane.
 [docs/DEPLOYING.md](docs/DEPLOYING.md) has the commands and configuration.
 
 ## Documentation
@@ -57,10 +57,10 @@ Build `dist/` and host it as static files over HTTPS, set `cybershuttleControlAp
 
 ## Related projects
 
-cs-control brokers sign-in, creates and tracks Slurm sessions, and issues the per-session access this
+cs-plane brokers sign-in, creates and tracks Slurm sessions, and issues the per-session access this
 client connects with. It serves neither this application nor its session traffic. What this client does with
 those routes is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); the routes themselves are defined by
-[cyber-shuttle/cs-control](https://github.com/cyber-shuttle/cs-control).
+[cyber-shuttle/cs-plane](https://github.com/cyber-shuttle/cs-plane).
 
 ## Support
 

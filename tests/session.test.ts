@@ -42,7 +42,7 @@ beforeEach(() => {
   window.localStorage.clear();
 });
 
-describe("shared cs-control client", () => {
+describe("shared cs-plane client", () => {
   function makeClient(browserFetch: typeof globalThis.fetch) {
     return new ControlClient(
       "http://localhost:3000/gateway/api/v1",
@@ -122,7 +122,7 @@ describe("shared cs-control client", () => {
       ) as any,
     );
     await expect(client.getSession(session.id)).rejects.toThrow(
-      "cs-control returned a session for s-999999999999, not s-012345abcdef.",
+      "cs-plane returned a session for s-999999999999, not s-012345abcdef.",
     );
   });
 

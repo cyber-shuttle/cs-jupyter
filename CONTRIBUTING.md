@@ -30,7 +30,7 @@ bun run dev
 ```
 
 `bun run dev` compiles the extension and serves the site locally. It reads the same `jupyter-lite.json` a
-deployment does, so set `cybershuttleControlApiUrl` to a `csctl serve` you are running — loopback HTTP is
+deployment does, so set `cybershuttleControlApiUrl` to a `cs serve` you are running — loopback HTTP is
 accepted. See [docs/DEPLOYING.md](docs/DEPLOYING.md).
 
 ## Scripts
@@ -52,7 +52,7 @@ accepted. See [docs/DEPLOYING.md](docs/DEPLOYING.md).
 
 `test:dist` and `test:browser` read the build output and fail immediately if `dist/` is missing, so
 `bun run build` must precede them and `bun run test:all`. `test:browser` drives real Chromium against fake
-cs-control and Jupyter servers on separate origins, so it also needs the Playwright browser install above.
+cs-plane and Jupyter servers on separate origins, so it also needs the Playwright browser install above.
 
 ## What CI enforces
 
@@ -72,11 +72,11 @@ formatted and green; `lefthook install` wires it once per clone.
 cs-jupyter
 ├── src/
 │   ├── index.ts               # extension entry: service-manager plugins, fail-closed server settings
-│   ├── AuthClient.ts          # CILogon sign-in with PKCE through cs-control's relay, sessionStorage credentials
+│   ├── AuthClient.ts          # CILogon sign-in with PKCE through cs-plane's relay, sessionStorage credentials
 │   ├── DeviceCodeDialog.ts    # the accessible device-code modal the Dev Tunnels link uses
 │   ├── TunnelLink.ts          # the Dev Tunnels link: status, unlink, and the Microsoft or GitHub device flow
 │   ├── workspaces.ts          # per-session JupyterLab layout kept in the session's own home
-│   ├── ControlClient.ts       # typed cs-control REST/WebSocket client and response validation
+│   ├── ControlClient.ts       # typed cs-plane REST/WebSocket client and response validation
 │   ├── ssh.ts                 # OAuth WebSocket subprotocols, the SSH terminal console and its login dock
 │   ├── session.ts             # session identity/selection, the UI state shape, and the seq-bound access cache
 │   ├── session-ui.ts          # Launcher integration
@@ -102,7 +102,7 @@ cs-jupyter
 └── jupyter_lite_config.json  # JupyterLite build configuration
 ```
 
-Every cs-control response is validated in `ControlClient.ts` against the types and identifier rules in
+Every cs-plane response is validated in `ControlClient.ts` against the types and identifier rules in
 `Common.ts`; a change to the wire contract belongs there and in `tests/session-contract.test.ts`, which
 pins it.
 
