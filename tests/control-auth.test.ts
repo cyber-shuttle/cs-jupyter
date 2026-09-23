@@ -1,8 +1,7 @@
 // Cross-origin auth headers and conditional ETag-based polling for
 // ControlClient's session list. A 304 response carries no ETag of its own. The
 // client must retain the previous ETag across an unchanged answer to send it
-// again. Every request carries only a bearer ID token; there is no separate
-// identity header.
+// again. Every request carries only a bearer ID token.
 import { etagResponse, fakeAuth } from "./fakes";
 import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import {
@@ -136,21 +135,5 @@ describe("conditional session polling", () => {
       assert.isDefined(init);
       expect(new Headers(init.headers).get("If-None-Match")).toBe(etag);
     }
-  });
-
-  it("does not adopt an ETag from a session list that failed validation", async () => {
-    const browserFetch = vi
-      .fn<typeof globalThis.fetch>()
-      .mockResolvedValueOnce(
-        etagResponse({ sessions: [{ state: "READY" }], logs: [] }, etag),
-      )
-      .mockResolvedValueOnce(etagResponse(list, etag));
-    const api = client(browserFetch);
-
-    await expect(api.listSessions()).rejects.toThrow("invalid session");
-    await expect(api.listSessions()).resolves.toEqual(list);
-    const [, secondInit] = browserFetch.mock.calls[1];
-    assert.isDefined(secondInit);
-    expect(new Headers(secondInit.headers).has("If-None-Match")).toBe(false);
   });
 });

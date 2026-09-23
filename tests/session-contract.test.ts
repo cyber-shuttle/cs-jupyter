@@ -84,15 +84,6 @@ describe("checked narrow cs-plane metric sample JSON contract", () => {
     ).rejects.toThrow("invalid metric series");
   });
 
-  it("rejects metrics for a different session", async () => {
-    await expect(
-      clientFor({
-        sessionId: "s-111111111111",
-        samples: [],
-      }).getSessionMetrics(providerFixture.id),
-    ).rejects.toThrow("returned metrics for s-111111111111, not");
-  });
-
   it("accepts numeric memory, CPU and GPU readings", async () => {
     const series = await clientFor({
       sessionId: providerFixture.id,

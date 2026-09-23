@@ -1,25 +1,20 @@
 // The Dev Tunnels link dialog: showing the current link, starting and polling
-// a device flow to completion, and unlinking. Run-again is exercised end to
-// end through the panel, the same retry path a 409 tunnel_link_required
-// session create takes.
+// a device flow to completion, and unlinking.
 import { describe, expect, it, vi } from "vitest";
-import { Dialog } from "@jupyterlab/apputils";
-import { Widget } from "@lumino/widgets";
-import { ControlClient, ControlError } from "../src/ControlClient";
+import { ControlClient } from "../src/ControlClient";
 import { TunnelLink } from "../src/TunnelLink";
-import {
-  controlFake,
-  panelFake,
-  sessionFixture,
-  sessionListFixture,
-} from "./fakes";
 
 describe("TunnelLink dialog", () => {
   it("starts and polls a Microsoft link to completion and reports it linked", async () => {
     const pollTunnelLink = vi
       .fn()
-      .mockResolvedValueOnce({ status: "pending", intervalSeconds: 1 })
       .mockResolvedValueOnce({
+        status: "pending",
+        intervalSeconds: 1,
+        linked: false,
+      })
+      .mockResolvedValueOnce({
+        status: "linked",
         linked: true,
         provider: "microsoft",
         account: "person@example.com",
@@ -37,8 +32,6 @@ describe("TunnelLink dialog", () => {
       pollTunnelLink,
     } as unknown as ControlClient;
     const widget = new TunnelLink(api);
-    const onLinked = vi.fn();
-    widget.onLinked = onLinked;
     document.body.appendChild(widget.node);
     await widget.refresh();
 
@@ -53,8 +46,7 @@ describe("TunnelLink dialog", () => {
     await vi.waitFor(() => expect(pollTunnelLink).toHaveBeenCalledTimes(2), {
       timeout: 5000,
     });
-    await vi.waitFor(() => expect(onLinked).toHaveBeenCalledTimes(1));
-    expect(document.querySelector("dialog")).toBeNull();
+    await vi.waitFor(() => expect(document.querySelector("dialog")).toBeNull());
     expect(widget.node.textContent).toContain("person@example.com");
     widget.dispose();
   });
@@ -104,43 +96,3 @@ describe("TunnelLink dialog", () => {
     widget.dispose();
   });
 });
-
-describe("run-again retried after linking Dev Tunnels", () => {
-  it("reopens the link dialog on a 409 and retries run-again once it reports linked", async () => {
-    const base = sessionFixture({
-      id: "s-111111111111",
-      state: "STOPPED",
-      sshHost: "nexus",
-    });
-    const startSession = vi
-      .fn()
-      .mockRejectedValueOnce(
-        new ControlError("tunnel_link_required", "Link Dev Tunnels first"),
-      )
-      .mockResolvedValueOnce({ ...base, state: "QUEUED" as const });
-    const api = controlFake({
-      listSessions: vi.fn(async () => sessionListFixture([base])),
-      startSession,
-    });
-    const panel = panelFake(api);
-    (panel as any)._modals._tunnelLinkWidget = () => new FakeTunnelLinkWidget();
-    await panel.signIn();
-    await vi.waitFor(() => expect(panel.state.sessions.length).toBe(1));
-
-    const running = panel.actions.runAgain(base.id);
-    await vi.waitFor(() => expect(Dialog.tracker.size).toBe(1));
-    Dialog.tracker.currentWidget!.reject();
-    await running;
-
-    expect(startSession).toHaveBeenCalledTimes(2);
-    expect(panel.state.sessions[0].state).toBe("QUEUED");
-    panel.dispose();
-  });
-});
-
-class FakeTunnelLinkWidget extends Widget {
-  onLinked: (() => void) | undefined;
-  async refresh(): Promise<void> {
-    this.onLinked?.();
-  }
-}

@@ -23,17 +23,34 @@ assert.equal(
   "",
   "control endpoint must be deployment-configured",
 );
-assert.ok(
-  !config.disabledExtensions.includes(
-    "@jupyterlab/services-extension:server-settings",
-  ),
-  "local shell server settings must remain enabled",
-);
 for (const plugin of [
-  "@jupyterlab/services-extension:service-manager",
+  "@jupyterlab/services-extension:server-settings",
+  "@jupyterlite/services-extension:event-manager",
+  "@jupyterlite/services-extension:nbconvert-manager",
+  "@jupyterlite/services-extension:settings",
+  "@jupyterlite/services-extension:user-manager",
+]) {
+  assert.ok(
+    !config.disabledExtensions.includes(plugin),
+    `local shell service must remain enabled: ${plugin}`,
+  );
+}
+for (const plugin of [
+  "@jupyterlab/services-extension:default-drive",
   "@jupyterlab/services-extension:contents-manager",
+  "@jupyterlab/services-extension:kernel-manager",
+  "@jupyterlab/services-extension:kernel-spec-manager",
+  "@jupyterlab/services-extension:session-manager",
+  "@jupyterlab/services-extension:service-manager",
   "@jupyterlab/terminal-extension:open-folder-in-terminal",
   "@jupyterlite/services-extension:workspace-manager",
+  "@jupyterlite/services-extension:default-drive",
+  "@jupyterlite/services-extension:kernel-client",
+  "@jupyterlite/services-extension:kernel-manager",
+  "@jupyterlite/services-extension:kernel-spec-client",
+  "@jupyterlite/services-extension:kernel-spec-manager",
+  "@jupyterlite/services-extension:kernel-specs",
+  "@jupyterlite/services-extension:session-manager",
 ]) {
   assert.ok(
     config.disabledExtensions.includes(plugin),

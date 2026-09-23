@@ -15,7 +15,6 @@ import {
   clearSessionAccess,
   type ISessionAccess,
   validateSessionAccess,
-  validDevTunnelRoot,
 } from "./session";
 import {
   IGres,
@@ -91,7 +90,6 @@ const failsWith =
     error instanceof ControlError && error.code === code;
 
 export const needsSshLogin = failsWith("ssh_authentication_required");
-export const needsTunnelLink = failsWith("tunnel_link_required");
 export const accessUnavailable = failsWith("session_access_unavailable");
 
 const json = (body: unknown, method = "POST"): RequestInit => ({
@@ -345,6 +343,12 @@ export class ControlClient {
     const access = validateSessionAccess(
       await this._request(`sessions/${encoded(sessionId)}/access`),
     );
+    if (
+      access.jupyter.uri !==
+      URLExt.join(this._base, `sessions/${encoded(sessionId)}/jupyter/`)
+    ) {
+      throw new Error("cs-plane named a Jupyter proxy outside its own API.");
+    }
     return owned(access, access.sessionId, sessionId, "access");
   }
 
@@ -424,7 +428,7 @@ export function createSessionServerSettings(
   options: { fetch?: typeof globalThis.fetch } = {},
 ): ServerConnection.ISettings {
   const access = validateSessionAccess(descriptor);
-  const baseUrl = validDevTunnelRoot(access.jupyter.uri).origin + "/";
+  const baseUrl = access.jupyter.uri;
   const browserFetch = options.fetch ?? globalThis.fetch.bind(globalThis);
   const invalidatingFetch: typeof globalThis.fetch = async (input, init) => {
     const response = await browserFetch(input, init);
@@ -442,7 +446,7 @@ export function createSessionServerSettings(
     baseUrl,
     fetch: invalidatingFetch,
     token: access.jupyter.token,
-    wsUrl: baseUrl.replace(/^https:/, "wss:"),
+    wsUrl: baseUrl.replace(/^http/, "ws"),
   });
 }
 
@@ -484,8 +488,7 @@ const sessionLogTailShape = vObject<ISessionLogTail>({
   lines: vArray(logLineShape, 100),
 });
 
-const seqAndJobSpecFields = {
-  seq: vPositiveInt,
+const jobSpecFields = {
   sshHost: vString(),
   account: vOptional(vString()),
   partition: vString(),
@@ -501,7 +504,7 @@ const seqAndJobSpecFields = {
 
 const sessionShape = vObject<ISession>({
   id: vString(SESSION_ID),
-  ...seqAndJobSpecFields,
+  ...jobSpecFields,
   seq: vBoundedInt(0, Number.MAX_SAFE_INTEGER),
   state: vOneOf(SESSION_STATES),
   error: vOptional(vString()),
@@ -548,7 +551,8 @@ const validateRunList = expect(
     runs: vArray(
       vObject<IRun>({
         sessionId: vString(SESSION_ID),
-        ...seqAndJobSpecFields,
+        ...jobSpecFields,
+        seq: vPositiveInt,
         finalState: vOneOf(SESSION_STATES),
         error: vOptional(vString()),
         startedAt: vOptional(vString()),
@@ -637,22 +641,23 @@ interface ITunnelLinkStart {
 }
 
 type ITunnelLinkPoll =
-  | { status: "pending"; intervalSeconds: number }
-  | ITunnelLinkStatus;
+  | { status: "pending"; intervalSeconds: number; linked: false }
+  | ({ status: "linked" } & Extract<ITunnelLinkStatus, { linked: true }>);
 
-const tunnelLinkStatusShape = vEither<ITunnelLinkStatus>(
-  vObject<Extract<ITunnelLinkStatus, { linked: true }>>({
-    linked: vOneOf([true] as const),
-    provider: vOneOf(["microsoft", "github"] as const),
-    account: vOptional(vString()),
-    linkedAt: vString(),
-  }),
-  vObject<Extract<ITunnelLinkStatus, { linked: false }>>({
-    linked: vOneOf([false] as const),
-  }),
-);
+const tunnelLinkedFields = {
+  linked: vOneOf([true] as const),
+  provider: vOneOf(["microsoft", "github"] as const),
+  account: vOptional(vString()),
+  linkedAt: vString(),
+};
+
 const validateTunnelLinkStatus = expect(
-  tunnelLinkStatusShape,
+  vEither<ITunnelLinkStatus>(
+    vObject<Extract<ITunnelLinkStatus, { linked: true }>>(tunnelLinkedFields),
+    vObject<Extract<ITunnelLinkStatus, { linked: false }>>({
+      linked: vOneOf([false] as const),
+    }),
+  ),
   "Dev Tunnels link",
 );
 
@@ -672,8 +677,12 @@ const validateTunnelLinkPoll = expect(
     vObject<Extract<ITunnelLinkPoll, { status: "pending" }>>({
       status: vOneOf(["pending"] as const),
       intervalSeconds: vBoundedInt(1, 60),
+      linked: vOneOf([false] as const),
     }),
-    tunnelLinkStatusShape,
+    vObject<Extract<ITunnelLinkPoll, { status: "linked" }>>({
+      status: vOneOf(["linked"] as const),
+      ...tunnelLinkedFields,
+    }),
   ),
   "Dev Tunnels link poll",
 );

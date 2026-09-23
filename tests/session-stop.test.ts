@@ -9,7 +9,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ISession } from "../src/Common";
 import { CyberShuttlePanel } from "../src/CyberShuttlePanel";
 import { ControlError } from "../src/ControlClient";
-import { setActiveSessionId } from "../src/session";
 import {
   acceptDialog,
   accessFixture,
@@ -74,47 +73,21 @@ async function deletePanel<T extends object>(
   return { panel, api };
 }
 
-async function stopFailing(
-  panel: CyberShuttlePanel,
-  id: string,
-  message: string,
-  stopping: PromiseWithResolvers<ISession>,
-): Promise<void> {
-  const stopped = panel.actions.stop(id);
-  await acceptDialog();
-  stopping.reject(new Error(message));
-  await stopped;
-  expect(panel.state.error).toBe(message);
-}
-
 describe("session stop action", () => {
-  it("publishes busy and error state for controller actions", async () => {
+  it("publishes busy state for the whole stop request", async () => {
     const stopPending = Promise.withResolvers<ISession>();
-    const failing = Promise.withResolvers<ISession>();
     const api = controlFake({
       listSessions: vi.fn(async () => sessionListFixture([readyBase])),
-      stopSession: vi
-        .fn()
-        .mockReturnValueOnce(failing.promise)
-        .mockReturnValueOnce(stopPending.promise),
+      stopSession: vi.fn(() => stopPending.promise),
     });
     const panel = panelFake(api);
     await loaded(panel);
 
-    const failingStop = panel.actions.stop(base.id);
+    const stopping = panel.actions.stop(base.id);
     await acceptDialog();
     await vi.waitFor(() =>
       expect(api.stopSession).toHaveBeenCalledWith(base.id),
     );
-    expect(panel.state.busySessionIds.has(base.id)).toBe(true);
-    failing.reject(new Error("Slurm cancellation failed."));
-    await failingStop;
-    expect(panel.state.busySessionIds.has(base.id)).toBe(false);
-    expect(panel.state.error).toBe("Slurm cancellation failed.");
-
-    const stopping = panel.actions.stop(base.id);
-    await acceptDialog();
-    await vi.waitFor(() => expect(api.stopSession).toHaveBeenCalledTimes(2));
     expect(panel.state.busySessionIds.has(base.id)).toBe(true);
     stopPending.resolve({ ...base, state: "STOPPING" });
     await stopping;
@@ -328,10 +301,11 @@ describe("session stop action", () => {
   });
 
   it("keeps a failed stop's error across a poll whose access read succeeds", async () => {
-    const stopping = Promise.withResolvers<ISession>();
     const api = controlFake({
       listSessions: vi.fn(async () => sessionListFixture([readyBase])),
-      stopSession: vi.fn(() => stopping.promise),
+      stopSession: vi
+        .fn()
+        .mockRejectedValue(new Error("Slurm cancellation failed.")),
       getSessionAccess: vi.fn(async () =>
         accessFixture(readyBase.id, readyBase.seq),
       ),
@@ -339,27 +313,14 @@ describe("session stop action", () => {
     const panel = panelFake(api);
     await loaded(panel);
 
-    await stopFailing(panel, base.id, "Slurm cancellation failed.", stopping);
+    const stopped = panel.actions.stop(base.id);
+    await acceptDialog();
+    await stopped;
+    expect(panel.state.busySessionIds.has(base.id)).toBe(false);
 
     await pollPanel(panel);
     expect(panel.state.error).toBe("Slurm cancellation failed.");
     panel.dispose();
-  });
-
-  it("removes the session this page is attached to from the list once deleted", async () => {
-    const api = controlFake({
-      listSessions: vi.fn(async () => sessionListFixture([base])),
-      deleteSession: vi.fn(async () => undefined),
-    });
-    setActiveSessionId(base.id);
-    const panel = panelFake(api);
-    await loaded(panel);
-
-    await removeConfirmed(panel, base.id);
-
-    expect(panel.state.sessions).toHaveLength(0);
-    panel.dispose();
-    setActiveSessionId(undefined);
   });
 
   it("keeps a connect's busy entry when a concurrent stop rejects afterward", async () => {

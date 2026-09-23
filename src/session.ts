@@ -3,14 +3,13 @@
 // and arrives with the session record. displayState is the one place that
 // overlays a relaunching terminal session with SUBMITTING for display. Cached
 // Jupyter access carries the seq it was granted for, so a caller that knows
-// the live seq can refuse a stale grant, and a valid Jupyter URI is a Dev
-// Tunnel forwarding root only, with no path, port or query.
+// the live seq can refuse a stale grant, and its Jupyter URI is that
+// session's cs-plane proxy path.
 import type { IMetricSample, IRun, ISession, SessionState } from "./Common";
 import {
   SESSION_ID,
   TOKEN_43,
   isTerminal,
-  parseUrl,
   vObject,
   vPositiveInt,
   vString,
@@ -115,24 +114,6 @@ export interface ISessionAccess {
   jupyter: { uri: string; token: string };
 }
 
-export function validDevTunnelRoot(value: string): URL {
-  const invalid = "Jupyter URI is invalid.";
-  const url = parseUrl(value, invalid);
-  if (
-    url.protocol !== "https:" ||
-    url.username ||
-    url.password ||
-    url.port ||
-    (url.pathname !== "" && url.pathname !== "/") ||
-    url.search ||
-    url.hash ||
-    !/^(?:[a-z0-9-]+\.)+[a-z0-9-]+\.devtunnels\.ms$/i.test(url.hostname)
-  ) {
-    throw new Error(invalid);
-  }
-  return url;
-}
-
 const accessShape = vObject<ISessionAccess>({
   sessionId: vString(SESSION_ID),
   seq: vPositiveInt,
@@ -144,7 +125,6 @@ export function validateSessionAccess(value: unknown): ISessionAccess {
   if (!accessShape(value) || !(Date.parse(value.expiresAt) > Date.now())) {
     throw new Error("Session access is invalid or expired.");
   }
-  validDevTunnelRoot(value.jupyter.uri);
   return value;
 }
 

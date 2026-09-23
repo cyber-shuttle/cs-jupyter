@@ -2,36 +2,28 @@
 
 ## Supported Versions
 
-Nothing is tagged or published yet. Fixes land on `main`, and a deployment takes them by rebuilding and
-redeploying `dist/`. Report against current `main`.
+Nothing is published; fixes land on `main` and deployments take them by rebuilding `dist/`. Report against
+current `main`.
 
 ## Reporting a Vulnerability
 
-Report vulnerabilities privately through GitHub: open the repository's **Security** tab and choose **Report a
-vulnerability**. Please do not use a public issue, pull request or discussion for a security problem.
-
-Include what an attacker can reach, the steps to reproduce it, the browser you reproduced it in, and the
-commit you were on. We will acknowledge the report and say whether we can reproduce it before any fix is
-published.
+Use the repository's **Security** tab, **Report a vulnerability**; never a public issue, pull request or
+discussion. Include what an attacker can reach, reproduction steps, the browser and the commit. We acknowledge
+the report and state whether we reproduced it before publishing a fix.
 
 ## Scope
 
-This repository is the browser client. It authenticates nothing itself: cs-plane validates every request,
-finishes CILogon sign-in and decides who may reach a session, so a finding about those
-decisions belongs to that project rather than here.
+This repository is the browser client. cs-plane authenticates every request, finishes sign-in and decides who
+may reach a session; findings about those decisions belong to
+[cs-plane](https://github.com/cyber-shuttle/cs-plane). Properties this client guarantees (mechanisms in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)):
 
-The invariants this client is responsible for; the mechanisms behind them are in
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+| Property                                                                                                                                        | Code                                    |
+| ----------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| Sign-in tokens and session grants live only in per-tab `sessionStorage`, never `localStorage`                                                   | `src/AuthClient.ts`, `src/session.ts`   |
+| Control calls are pinned to the configured origin; the ID token never enters a URL, log or error; the SSH WebSocket carries it as a subprotocol | `src/ControlClient.ts`, `src/ssh.ts`    |
+| A session's Jupyter URI must be `sessions/<id>/jupyter/` under the configured control API URL                                                   | `src/ControlClient.ts`                  |
+| Responses are validated; an unknown field fails like a missing or mistyped one                                                                  | `src/ControlClient.ts`, `src/Common.ts` |
+| No kernels, terminals or contents without a `READY` session                                                                                     | `src/index.ts`                          |
 
-- Credentials stay in per-tab `sessionStorage` — never `localStorage`, a URL, a log or an error
-  (`src/AuthClient.ts`, `src/session.ts`).
-- Every control call is pinned to the configured origin, and tokens travel as WebSocket subprotocols rather
-  than in a URL (`src/ControlClient.ts`, `src/ssh.ts`).
-- A session's Jupyter origin must be a bare `*.devtunnels.ms` host (`src/session.ts`).
-- Responses are validated before use, and an unrecognized field fails the same way a missing or mistyped one
-  does (`src/ControlClient.ts`, `src/Common.ts`).
-- Compute is fail-closed: no kernels, terminals or contents without a valid `READY` seq
-  (`src/index.ts`).
-
-A report that assumes the attacker already holds the signed-in account's tokens, or already controls the
-configured cs-plane deployment, describes these boundaries rather than a way through them.
+Attacks that presuppose the signed-in account's tokens or control of the configured cs-plane are out of scope.

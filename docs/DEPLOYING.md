@@ -1,51 +1,38 @@
 # Deploying
 
-A deployment is the built `dist/` directory served as static files, plus one configuration key naming the
-cs-plane it talks to. cs-plane is deployed on its own, for example by
-[cs-infra](https://github.com/cyber-shuttle/cs-infra).
-
-## Before you start
-
-- Somewhere to serve static files over HTTPS. Any path works; the build uses relative URLs
-  (`base_url` is empty in `jupyter_lite_config.json`).
-- A running [cs-plane](https://github.com/cyber-shuttle/cs-plane) reachable over HTTPS. The CILogon client and
-  the Custos URL are configured there rather than here.
-- cs-plane must be able to hand out `*.devtunnels.ms` Jupyter origins for the sessions it creates. This
-  client rejects anything else, and the rule is not configurable.
+A deployment is the built `dist/` served as static files over HTTPS, plus one configuration key naming its
+cs-plane. cs-plane is deployed separately, for example by [cs-infra](https://github.com/cyber-shuttle/cs-infra);
+the CILogon client and Custos URL are configured there. Any path works: the build uses relative URLs
+(`base_url` is empty in `jupyter_lite_config.json`).
 
 ## 1. Build
 
-Requires [Bun](https://bun.com/), [uv](https://docs.astral.sh/uv/) and Python 3.11 or newer.
+Requires the tools in [CONTRIBUTING.md](../CONTRIBUTING.md#setup), without Chromium.
 
 ```bash
 bun install --frozen-lockfile
 uv sync --frozen
-bun run build
+bun run build   # deletes and rewrites dist/
 ```
 
-`dist/` is the deployable site.
+## 2. Set `cybershuttleControlApiUrl`
 
-## 2. Configure the control endpoint
-
-Set `cybershuttleControlApiUrl` in the `jupyter-config-data` object of the **served**
-`dist/jupyter-lite.json`, including the API base path:
+In the `jupyter-config-data` object of the served `dist/jupyter-lite.json`:
 
 ```json
 "cybershuttleControlApiUrl": "https://jupyterapi.example.edu/api/v1"
 ```
 
-That is where your cs-plane serves its API. The value must be an absolute URL with no credentials, query or fragment, using HTTPS or loopback HTTP. Relative and implicit
-same-origin values are rejected at startup.
-
-The key ships empty on purpose — the build is deployment-neutral and `tests/distribution.mjs` fails if a
-control endpoint is baked into it — so this edit is a deployment step, and `bun run build` removes `dist/`
-and rewrites the file. Patch the served copy after each build.
+| Rule                                                             | Reason                                                                      |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Equals cs-plane's `--public-url` plus `/api/v1`                  | Session Jupyter URIs are accepted only as `sessions/<id>/jupyter/` under it |
+| Absolute HTTPS or loopback HTTP; no credentials, query, fragment | Otherwise rejected at startup                                               |
+| Patched after every build                                        | Ships empty; `tests/distribution.mjs` fails if a value is baked in          |
 
 ## 3. Allow this site's origin on cs-plane
 
-The browser calls cs-plane from this site's origin, so cs-plane has to be started with that origin in
-`--allowed-origin`. The flag takes an exact origin (scheme, host and port, no path), is repeatable, requires at
-least one entry and rejects `*`. Without a matching entry the browser blocks sign-in and every control request:
+cs-plane must list the site's exact origin (scheme, host, port; no path) in `--allowed-origin`, which is
+repeatable, requires one entry and rejects `*`. Otherwise the browser blocks sign-in and every control request.
 
 ```bash
 cs serve ... --allowed-origin https://jupyter.example.edu
@@ -53,7 +40,5 @@ cs serve ... --allowed-origin https://jupyter.example.edu
 
 ## 4. Verify
 
-With cs-plane running, open the site. The title row shows **Sign in**; completing CILogon sign-in
-lists the sessions cs-plane holds for that account. Until a `READY` session
-is selected the file browser, kernels and terminals stay empty by design — see
-[ARCHITECTURE.md](ARCHITECTURE.md).
+Open the site, **Sign in** through CILogon, and confirm the account's sessions are listed. File browser, kernels
+and terminals stay empty until a `READY` session is selected.

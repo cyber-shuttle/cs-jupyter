@@ -302,9 +302,7 @@ describe("sign-out during an in-flight poll", () => {
 
 describe("polling an unchanged list", () => {
   const ready = sessionFixture();
-  const access = accessFixture(ready.id, ready.seq, {
-    jupyter: { uri: "https://31002.use.devtunnels.ms/", token: "A".repeat(43) },
-  });
+  const access = accessFixture(ready.id, ready.seq);
 
   it("retries an access read that failed while cs-plane reports no change", async () => {
     const now = vi.spyOn(Date, "now").mockReturnValue(0);

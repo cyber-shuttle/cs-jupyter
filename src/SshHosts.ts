@@ -71,16 +71,10 @@ export class SshHosts extends RemoteListWidget {
   private async _checkHealth(host: ISshHost): Promise<void> {
     this._health.set(host.name, { busy: true });
     this._sync();
-    try {
-      const result = await this._api.hostHealth(host.name);
-      this._health.set(host.name, { busy: false, ...result });
-    } catch (error) {
-      this._health.set(host.name, {
-        busy: false,
-        ok: false,
-        message: errorMessage(error),
-      });
-    }
+    const result = await this._api
+      .hostHealth(host.name)
+      .catch((error) => ({ ok: false, message: errorMessage(error) }));
+    this._health.set(host.name, { busy: false, ...result });
     this._sync();
   }
 
@@ -276,7 +270,6 @@ function hostArguments(host: ISshHost): Array<[string, string]> {
   if (host.keyId) rows.push(["Login key", host.keyId]);
   for (const directive of host.extraDirectives) {
     const [key, ...rest] = directive.trim().split(/\s+/);
-    if (host.keyId && key === "IdentitiesOnly") continue;
     rows.push([key, rest.join(" ")]);
   }
   return rows;

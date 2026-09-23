@@ -1,118 +1,88 @@
 # Architecture
 
-The distribution is a static JupyterLite site plus one federated extension (`src/index.ts`). It speaks to two
-parties: the cs-plane API configured at deployment time, and the Jupyter server inside a Slurm session,
-reached directly over that session's Dev Tunnel. cs-plane serves neither this application nor session
-traffic, so every control call is cross-origin and pinned to the configured origin.
+A static JupyterLite site plus one federated extension (`src/index.ts`). It talks to one origin, the cs-plane
+API named by `cybershuttleControlApiUrl` ([DEPLOYING.md](DEPLOYING.md)), which also proxies each session's
+Jupyter server. cs-plane does not serve this site, so every call is cross-origin. The routes are defined by
+[cs-plane](https://github.com/cyber-shuttle/cs-plane); this file records what the client relies on.
 
-## Configuration
+## Routes and credentials
 
-One `PageConfig` option, `cybershuttleControlApiUrl`, points a deployment at its cs-plane API. It must be an
-absolute URL using HTTPS or loopback HTTP — relative and implicit same-origin values are rejected. A deployment
-names the cs-plane it is served with, and that cs-plane must list this site's own origin under
-`--allowed-origin`. The OIDC issuer, client and Custos URL are configured
-only on cs-plane; this client reads the authorization endpoint from `GET /api/v1/oauth/config` and holds no
-client secret.
-[DEPLOYING.md](DEPLOYING.md) covers where the option goes.
+Paths are relative to `cybershuttleControlApiUrl` (`…/api/v1`).
+
+| Route                                                                                    | Use                             | Credential                                        |
+| ---------------------------------------------------------------------------------------- | ------------------------------- | ------------------------------------------------- |
+| `GET oauth/config`, `POST oauth/exchange`, `POST oauth/refresh`                          | Sign-in relay                   | none (`credentials: "omit"`, `redirect: "error"`) |
+| `GET`, `POST sessions`; `POST sessions/validate`                                         | List (`ETag`/`304`), create     | `Authorization: Bearer <ID token>`                |
+| `GET`, `DELETE sessions/{id}`; `POST sessions/{id}/start`, `/stop`                       | Status, run again, stop, delete | Bearer                                            |
+| `GET sessions/{id}/metrics`, `GET telemetry`                                             | Usage samples, run history      | Bearer                                            |
+| `GET sessions/{id}/access`                                                               | Seq-bound Jupyter URI and token | Bearer                                            |
+| `GET`, `POST hosts`; `PUT`, `DELETE hosts/{alias}`; `GET hosts/{alias}/health`, `/slurm` | SSH hosts, Slurm discovery      | Bearer                                            |
+| `WS hosts/{alias}/ssh`                                                                   | Interactive SSH login           | ID token as the `bearer.` subprotocol             |
+| `GET`, `POST keys/ssh`; `DELETE keys/ssh/{id}`                                           | SSH keys                        | Bearer                                            |
+| `GET`, `DELETE tunnel`; `POST tunnel/authorizations`, `/{handle}/poll`                   | Dev Tunnels link                | Bearer                                            |
+| `sessions/{id}/jupyter/`                                                                 | Jupyter REST and WebSocket      | Jupyter token (`Authorization: token`, `?token=`) |
+
+- Control requests go through `safeControlFetch`: same origin as the configured URL, `credentials: "omit"`,
+  `redirect: "error"`, `cache: "no-store"`; no cookies or XSRF header. A `401` drops the ID token.
+- The SSH socket offers `cybershuttle.v1` plus the bearer subprotocol and fails unless the server selects
+  `cybershuttle.v1`.
+- Errors are `{"error": {"code", "message"}}`. The client acts on `ssh_authentication_required` (opens the
+  login console, retries once) and `session_access_unavailable` (`409` while a session leaves `READY`).
+- Every response passes a `Validator` from `src/Common.ts`; an object validator rejects unknown keys, so an
+  unexpected shape fails closed.
 
 ## Sign-in
 
-Only after the user clicks **Sign in** does the browser fetch `GET /api/v1/oauth/config`, store a PKCE
-verifier, a `state` and the page to return to under `cybershuttle.oauth.pkce.v1`, and navigate to CILogon's
-authorization endpoint. CILogon redirects back to the same page with `code` and `state`; the next load posts
-them with the verifier to `POST /api/v1/oauth/exchange`, which holds the client secret, and restores the
-original URL. App restore, panel construction, cached session access and polling never start sign-in.
+Clicking **Sign in** is the only trigger. The client reads the authorization endpoint from `oauth/config`,
+stores a PKCE verifier, `state` and return URL under `sessionStorage` key `cybershuttle.oauth.pkce.v1`, and
+navigates to CILogon. On return, the next load posts `code`, `state` and the verifier to `oauth/exchange`
+(cs-plane holds the client secret) and restores the URL. Tokens live under `cybershuttle.oauth.v1`, are refreshed
+through `oauth/refresh` a minute before expiry, and are dropped once expired.
 
-The ID token and refresh token live in per-tab `sessionStorage` under `cybershuttle.oauth.v1`, so the reload
-that opens a session does not repeat the redirect. They are never written to `localStorage`, a URL, a log or
-an error. A minute before expiry the token is renewed through `POST /api/v1/oauth/refresh`; once expired
-without a renewal it is dropped and **Sign in** is offered again.
+A linked Dev Tunnels account is optional; cs-plane delegates a Dev Tunnel to each session as a fallback route.
+The client drives the device-code flow and shows the verification URI and code; cs-plane keeps the credential.
 
-Sessions run over the user's own Dev Tunnels account, linked once. When session creation answers
-`409 tunnel_link_required`, the Add Session dialog hosts the link step in place: a Microsoft or GitHub
-device-code authorization started at `POST /api/v1/tunnel/authorizations`, shown as a verification URI and one-time
-code with explicit copy, open and cancel actions, and polled at
-`POST /api/v1/tunnel/authorizations/{handle}/poll` until linked, after which the create is retried. The credential
-never reaches this client; cs-plane seals it. The account menu's **Dev Tunnels** dialog reads and unlinks it
-through `GET` and `DELETE /api/v1/tunnel`.
+## Session lifecycle
 
-## Trust boundaries
+| State                              | Client behaviour                                                                                 |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `SUBMITTING`, `QUEUED`, `STARTING` | Polled; startup log shown                                                                        |
+| `READY`                            | Access fetched; **Connect** enabled                                                              |
+| `STOPPING`                         | Polled                                                                                           |
+| `STOPPED`, `FAILED`                | Terminal. **Run again** submits a new job under the same card, shown `SUBMITTING` until answered |
 
-Every credential this app carries, and where it goes:
+Every second the Launcher reads `sessions`, then `sessions/{id}/metrics` for each live session and `telemetry`.
 
-| Hop                | Route                                                                                   | Credential                                      |
-| ------------------ | --------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| Sign-in relay      | `GET /api/v1/oauth/config`, `POST /api/v1/oauth/exchange`, `POST /api/v1/oauth/refresh` | none (`credentials: omit`, `redirect: "error"`) |
-| Control API        | `/api/v1/*`                                                                             | `Authorization: Bearer <ID token>`              |
-| SSH authentication | `WS /api/v1/hosts/{alias}/ssh`                                                          | the ID token as the `bearer.` subprotocol       |
-| Jupyter            | the session's Dev Tunnel origin                                                         | the seq-bound Jupyter token                     |
+Once a session is `READY`, the Launcher caches its access response, with the seq it was granted for, in
+`sessionStorage`. **Connect** reloads with `?session=<id>&workspace=<id>`; only the session ID enters the URL.
+On load `src/index.ts` requests fresh access, requires its Jupyter URI to equal
+`sessions/<id>/jupyter/` under the control API URL, and points JupyterLab's contents, kernels, kernelspecs,
+sessions and terminals managers at it. A `401` or `403` from Jupyter drops the grant; sign-out clears all grants
+and leaves the session page.
 
-The control API uses no cookies, XSRF header or same-origin proxy. The SSH socket offers exactly
-`cybershuttle.v1` plus the credential subprotocol and fails closed unless the server negotiates
-`cybershuttle.v1`; tokens never appear in a WebSocket URL. The routes and their trust boundaries are
-cs-plane's, and [cyber-shuttle/cs-plane](https://github.com/cyber-shuttle/cs-plane) is the canonical
-description of them.
+The JupyterLab layout is stored in the session's home at `.cybershuttle/workspaces/<id>.json`, replacing
+JupyterLite's browser-local workspace. Linkspan, launched by cs-plane, builds the Python environment and starts
+Jupyter on the compute node; nothing from this repository runs there.
 
-Every response is checked against a shared `Validator` vocabulary in `src/Common.ts` before `src/ControlClient.ts`
-hands it to the rest of the app: an object validator rejects a field it does not list as well as one it is
-missing or of the wrong type, so an unexpected cs-plane shape fails closed instead of passing through.
+## Countdown and usage
 
-## Session flow
-
-1. The native Launcher manages SSH hosts and sessions through the configured cross-origin cs-plane API.
-2. One authenticated read of `GET /api/v1/sessions`, polled once a second, supplies the session state
-   (`SUBMITTING`, `QUEUED`, `STARTING`, `READY`, `STOPPING`, `STOPPED`, `FAILED`) and the startup tails.
-3. A `STOPPED` or `FAILED` session is gone. "Run again" submits a new one under the same card and settings
-   rather than resuming a dead job, and the card reads `SUBMITTING` from the click until that request
-   answers, so it never offers a second run over one already in flight.
-4. Connect is available once the session state is `READY` and an access response has been fetched for it. The
-   client directly requests the separate owner-authenticated session-access response; no Dev Tunnel popup or
-   cookie bootstrap is used.
-5. The client stores that exact seq-bound access response only in `sessionStorage`, reloads with the
-   nonsecret session ID as `session` and `workspace` in its static query, and points JupyterLab's Contents, `api/kernels`,
-   `api/kernelspecs`, `api/sessions`, and `api/terminals` managers directly at the Jupyter HTTPS/WSS Dev
-   Tunnel URI. Those managers use JupyterLab's own `ServerConnection` token handling: `Authorization: token
-<token>` on REST and `?token=` on the Jupyter WebSocket URLs.
-
-Each session's JupyterLab layout is kept in the session's own home at `.cybershuttle/workspaces/<id>.json`
-through its contents API, in place of JupyterLite's browser-local workspace, so switching back to a session
-restores its tabs. cs-plane asks Linkspan, the session's main process, for the Jupyter server; Linkspan builds the Python
-environment on the compute host and starts the server on the port cs-plane declared. Nothing in this
-repository runs there.
-
-## Countdown, usage and history
-
-Two reads sit beside the poll, each separate from it for a reason, plus the status bar's own 30-second read.
-
-The countdown is not a read at all. `startedAt` is when Slurm was first seen running the session, so with
-`resources.wallMinutes` it is an absolute deadline the client ticks down against its own clock. That matters
-because the poll goes quiet: a queued session is answered `304` and emits no state for minutes at a time,
-so each surface showing the figure runs a one-second clock of its own. The status-bar item reads cs-plane
-directly, on its own 30-second `getSession` poll, rather than borrowing the Launcher's state, because
-JupyterLab disposes the Launcher the moment anything is opened from it, and the countdown has to outlive
-that. Below ten minutes every surface warns, on one threshold.
-
-Usage samples are their own route because they change on every tick, and folding them into the poll would
-defeat the `ETag` that makes watching a queued job cheap. Every live session is read, whether or not its detail
-dialog is open, because the run history shows the same figures for a session that is still going. Each series
-is drawn against Slurm's allocated cores when sacct has reported them, falling back to what the job spec
-requested, rather than against its own maximum, so an idle job cannot look busy.
-
-Run history is its own collection rather than a view of the session list, because it outlives it: a run whose
-card was deleted is still the caller's. The same report renders for a card whose session just ended and for
-a run read back out of the history, because they are the same record.
-
-## Session access
-
-Each session landing requests fresh access from cs-plane. Grants live only in sessionStorage, and sign-out
-clears them before returning to the homepage.
+- Deadline = `startedAt` + `resources.wallMinutes`, ticked locally each second, since a queued session's poll
+  returns `304` for minutes.
+- The status-bar countdown polls `GET sessions/{id}` every 30 s itself, because JupyterLab disposes the Launcher
+  once anything opens from it.
+- Every surface warns below ten minutes.
+- CPU usage is plotted against Slurm's allocated cores when reported, else the requested cores.
 
 ## Fail-closed compute
 
-There is no local kernel fallback; the Launcher and all compute managers remain fail-closed until a valid
-`READY` seq is selected. Without one, `src/index.ts` substitutes server settings that answer
-`api/contents` with an empty read-only directory, `api/kernels`, `api/sessions` and `api/terminals` with an
-empty list, `api/kernelspecs` with no specification, and everything else with `503`. Terminals are a
-`NoopManager` and `terminalsAvailable` is `false`, so the terminal UI never activates. The build carries no
-in-browser kernel to fall back to: `tests/distribution.mjs` fails if a Pyodide, xeus or JavaScript-kernel
-asset appears in `dist/`.
+Without a `READY` session, `src/index.ts` installs server settings that answer:
+
+| Request                                        | Response                  |
+| ---------------------------------------------- | ------------------------- |
+| `api/contents`                                 | Empty read-only directory |
+| `api/kernels`, `api/sessions`, `api/terminals` | `[]`                      |
+| `api/kernelspecs`                              | No specifications         |
+| anything else                                  | `503`                     |
+
+Terminals use `NoopManager` with `terminalsAvailable` `false`. `tests/distribution.mjs` fails if a Pyodide, xeus
+or JavaScript-kernel asset appears in `dist/`.

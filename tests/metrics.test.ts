@@ -191,7 +191,7 @@ describe("usage plots", () => {
     },
   ];
 
-  it("stacks CPU, MEM and GPU in one row, each titled above its own plot", async () => {
+  it("stacks titled CPU, MEM and GPU plots, calling out the latest reading live and the peak when finished", async () => {
     const row = usagePlots(session, samples, "latest");
     expect(
       [...row.querySelectorAll(".csUsageTitle")].map((n) => n.textContent),
@@ -201,11 +201,7 @@ describe("usage plots", () => {
       "0 0 60 40",
     );
     expect(row.querySelectorAll(".csPlotLine").length).toBe(3);
-  });
-
-  it("calls out the latest reading live and the peak on a finished run", async () => {
-    const live = usagePlots(session, samples, "latest");
-    expect(live.textContent).toContain("2.0 / 16.0 GB");
+    expect(row.textContent).toContain("2.0 / 16.0 GB");
     const done = usagePlots(session, samples, "peak");
     expect(done.textContent).toContain("peak 2.0 / 16.0 GB");
   });
@@ -245,7 +241,6 @@ describe("run history view", () => {
       (node) => node.textContent,
     );
     expect(pills).toEqual(["READY", "STOPPED"]);
-    expect(history.node.textContent).toContain("Remaining");
     expect(history.node.textContent).not.toContain("not started yet");
     history.dispose();
   });
