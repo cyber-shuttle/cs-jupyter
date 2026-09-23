@@ -1,9 +1,9 @@
-// SSH host management dialog: list, add, edit, test and remove entries from
+// SSH host management dialog: list, add, edit, check and remove entries from
 // ~/.ssh/config. Only entries CyberShuttle itself wrote can be edited or
 // removed. Removal confirms inline, since JupyterLab would otherwise queue a
 // second dialog behind the one already open.
 import { RemoteListWidget } from "./RebuildingWidget";
-import { errorMessage, ISshHost, ISshKey } from "./Common";
+import { errorMessage, IHostHealth, ISshHost, ISshKey } from "./Common";
 import { ControlClient } from "./ControlClient";
 import {
   addSection,
@@ -21,21 +21,17 @@ interface IHostDraft {
   alias: string;
   name: string;
   command: string;
-  key: string;
+  keyId: string;
 }
 
-interface IHostTest {
-  busy: boolean;
-  ok?: boolean;
-  message?: string;
-}
+type IHostHealthCheck = Partial<IHostHealth> & { busy: boolean };
 
 export class SshHosts extends RemoteListWidget {
   private _hosts: ISshHost[] = [];
   private _keys: ISshKey[] = [];
   private _form: IHostDraft | undefined;
   private _open = new Set<string>();
-  private _tests = new Map<string, IHostTest>();
+  private _health = new Map<string, IHostHealthCheck>();
 
   constructor(private _api: ControlClient) {
     super();
@@ -56,11 +52,11 @@ export class SshHosts extends RemoteListWidget {
   private async _save(form: IHostDraft): Promise<void> {
     await this._submitForm(async () => {
       await (form.alias
-        ? this._api.updateSshHost(form.alias, form.command.trim(), form.key)
+        ? this._api.updateSshHost(form.alias, form.command.trim(), form.keyId)
         : this._api.addSshHost(
             form.name.trim(),
             form.command.trim(),
-            form.key,
+            form.keyId,
           ));
       this._form = undefined;
     });
@@ -72,14 +68,14 @@ export class SshHosts extends RemoteListWidget {
     this._sync();
   }
 
-  private async _test(host: ISshHost): Promise<void> {
-    this._tests.set(host.name, { busy: true });
+  private async _checkHealth(host: ISshHost): Promise<void> {
+    this._health.set(host.name, { busy: true });
     this._sync();
     try {
-      const result = await this._api.testSshHost(host.name);
-      this._tests.set(host.name, { busy: false, ...result });
+      const result = await this._api.hostHealth(host.name);
+      this._health.set(host.name, { busy: false, ...result });
     } catch (error) {
-      this._tests.set(host.name, {
+      this._health.set(host.name, {
         busy: false,
         ok: false,
         message: errorMessage(error),
@@ -115,7 +111,7 @@ export class SshHosts extends RemoteListWidget {
       adding && this._form ? this._pasteForm(this._form) : undefined,
       () =>
         this._openForm(
-          adding ? undefined : { alias: "", name: "", command: "", key: "" },
+          adding ? undefined : { alias: "", name: "", command: "", keyId: "" },
         ),
     );
   }
@@ -138,16 +134,13 @@ export class SshHosts extends RemoteListWidget {
       "sshHostKey",
       [
         ["", "None"],
-        ...this._keys.map((stored): [string, string] => [
-          stored.name,
-          stored.name,
-        ]),
+        ...this._keys.map((stored): [string, string] => [stored.id, stored.id]),
       ],
       false,
     );
     key.dataset.sessionAction = "ssh-host-key";
-    key.value = draft.key;
-    key.onchange = () => (draft.key = key.value);
+    key.value = draft.keyId;
+    key.onchange = () => (draft.keyId = key.value);
     const keyHelp = element(
       "div",
       "A stored login key signs in to this host in place of any -i identity.",
@@ -206,13 +199,13 @@ export class SshHosts extends RemoteListWidget {
       );
       body.appendChild(row);
     }
-    const test = this._tests.get(host.name);
-    if (test) {
+    const health = this._health.get(host.name);
+    if (health) {
       body.appendChild(
         element(
           "div",
-          test.busy ? "Connecting…" : (test.message ?? ""),
-          `csSshHostStatus${test.busy ? "" : test.ok ? " csValidationPassed" : " csValidationFailed"}`,
+          health.busy ? "Connecting…" : (health.message ?? ""),
+          `csSshHostStatus${health.busy ? "" : health.ok ? " csValidationPassed" : " csValidationFailed"}`,
           { role: "status" },
         ),
       );
@@ -231,13 +224,13 @@ export class SshHosts extends RemoteListWidget {
       return entry;
     }
     const editing = this._form?.alias === host.name;
-    const testButton = button(
-      "Test connection",
+    const healthButton = button(
+      "Check health",
       "csSecondaryButton",
-      () => void this._test(host),
+      () => void this._checkHealth(host),
     );
-    testButton.dataset.sessionAction = `test-${host.name}`;
-    testButton.disabled = test?.busy ?? false;
+    healthButton.dataset.sessionAction = `health-${host.name}`;
+    healthButton.disabled = health?.busy ?? false;
     const edit = button(editing ? "Cancel" : "Edit", "csSecondaryButton", () =>
       this._openForm(
         editing
@@ -246,7 +239,7 @@ export class SshHosts extends RemoteListWidget {
               alias: host.name,
               name: host.name,
               command: hostCommand(host),
-              key: host.key ?? "",
+              keyId: host.keyId ?? "",
             },
       ),
     );
@@ -257,7 +250,7 @@ export class SshHosts extends RemoteListWidget {
       edit.title = own;
       remove.title = own;
     }
-    actions.append(edit, testButton);
+    actions.append(edit, healthButton);
     body.appendChild(actions);
     if (this._form && editing) {
       body.appendChild(this._pasteForm(this._form));
@@ -280,11 +273,10 @@ function hostArguments(host: ISshHost): Array<[string, string]> {
   if (host.port && host.port !== 22) {
     rows.push(["Port", String(host.port)]);
   }
-  if (host.key) rows.push(["Login key", host.key]);
-  else if (host.identityFile) rows.push(["IdentityFile", host.identityFile]);
+  if (host.keyId) rows.push(["Login key", host.keyId]);
   for (const directive of host.extraDirectives) {
     const [key, ...rest] = directive.trim().split(/\s+/);
-    if (host.key && key === "IdentitiesOnly") continue;
+    if (host.keyId && key === "IdentitiesOnly") continue;
     rows.push([key, rest.join(" ")]);
   }
   return rows;
@@ -293,10 +285,8 @@ function hostArguments(host: ISshHost): Array<[string, string]> {
 function hostCommand(host: ISshHost): string {
   const parts = ["ssh"];
   if (host.port && host.port !== 22) parts.push("-p", String(host.port));
-  if (host.identityFile && !host.key) parts.push("-i", host.identityFile);
   for (const [key, value] of hostArguments(host)) {
-    if (["HostName", "User", "Port", "IdentityFile", "Login key"].includes(key))
-      continue;
+    if (["HostName", "User", "Port", "Login key"].includes(key)) continue;
     parts.push(
       ...(key === "ProxyJump" ? ["-J", value] : ["-o", `${key}=${value}`]),
     );

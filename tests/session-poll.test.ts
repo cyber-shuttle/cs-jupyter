@@ -375,7 +375,7 @@ describe("conditional polling across sessions", () => {
       "https://control.example.edu/api/v1",
       auth as any,
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        if (new URL(String(input)).pathname.endsWith("/ssh/hosts")) {
+        if (new URL(String(input)).pathname.endsWith("/hosts")) {
           return jsonResponse({ hosts: [] });
         }
         if (new Headers(init?.headers).get("If-None-Match") === etag) {

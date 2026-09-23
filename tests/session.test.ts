@@ -56,7 +56,7 @@ describe("shared cs-plane client", () => {
       async (input: RequestInfo | URL, init?: RequestInit) => {
         const request = new Request(input, init);
         const path = new URL(request.url).pathname;
-        if (path === "/gateway/api/v1/ssh/hosts") {
+        if (path === "/gateway/api/v1/hosts") {
           return jsonResponse({ hosts: [] });
         }
         if (path === "/gateway/api/v1/sessions/validate") {
@@ -96,7 +96,7 @@ describe("shared cs-plane client", () => {
     expect(
       requests.map((item) => `${item.method} ${new URL(item.url).pathname}`),
     ).toEqual([
-      "GET /gateway/api/v1/ssh/hosts",
+      "GET /gateway/api/v1/hosts",
       "GET /gateway/api/v1/sessions",
       "POST /gateway/api/v1/sessions/validate",
       "POST /gateway/api/v1/sessions",

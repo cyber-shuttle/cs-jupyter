@@ -32,7 +32,7 @@ describe("OAuth cross-origin control client", () => {
     await expect(client.listSshHosts()).resolves.toEqual([]);
     const [input, init] = browserFetch.mock.calls[0];
     assert.isDefined(init);
-    expect(String(input)).toBe("https://control.example.edu/api/v1/ssh/hosts");
+    expect(String(input)).toBe("https://control.example.edu/api/v1/hosts");
     const headers = new Headers(init.headers);
     expect(headers.get("Authorization")).toBe("Bearer delegated-token");
     expect(headers.has("X-CyberShuttle-Identity")).toBe(false);
@@ -89,7 +89,7 @@ describe("OAuth cross-origin control client", () => {
 
     expect(browserFetch.mock.calls.map(([input]) => String(input))).toEqual([
       "https://custom-control.example.edu/custom/api/v1/oauth/refresh",
-      "https://custom-control.example.edu/custom/api/v1/ssh/hosts",
+      "https://custom-control.example.edu/custom/api/v1/hosts",
     ]);
   });
 

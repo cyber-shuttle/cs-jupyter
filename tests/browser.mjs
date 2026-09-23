@@ -168,7 +168,7 @@ const controlServer = createServer((request, response) => {
     tunnelLinked = true;
     return json(response, tunnelLinkStatus());
   }
-  if (url.pathname === "/api/v1/ssh/hosts" && request.method === "GET")
+  if (url.pathname === "/api/v1/hosts" && request.method === "GET")
     return json(response, {
       hosts: [
         {
@@ -181,7 +181,7 @@ const controlServer = createServer((request, response) => {
       ],
     });
   if (
-    url.pathname === "/api/v1/ssh/hosts/cluster/slurm" &&
+    url.pathname === "/api/v1/hosts/cluster/slurm" &&
     request.method === "GET"
   ) {
     discoveryCount++;
@@ -219,31 +219,17 @@ const controlServer = createServer((request, response) => {
     });
   }
   if (url.pathname === "/api/v1/sessions" && request.method === "POST") {
-    if (!tunnelLinked)
-      return json(
-        response,
-        {
-          error: {
-            code: "tunnel_link_required",
-            message: "Link your Dev Tunnels account to create a session.",
-          },
-        },
-        409,
-      );
     return readRequestJSON(request).then((body) => {
       assert.equal(body.rootFolder, "projects/browser-created");
       let item = sessions.find(({ id }) => id === createdId);
       if (!item) {
-        item = session(createdId, body.rootFolder, "QUEUED");
+        item = { ...session(createdId, body.rootFolder, "STOPPED"), seq: 0 };
         sessions[0].state = "STOPPED";
         sessions.push(item);
       }
       json(response, item, 201, {
         location: `/api/v1/sessions/${item.id}`,
       });
-      setTimeout(() => {
-        item.state = "READY";
-      }, 25);
     });
   }
   if (url.pathname === "/api/v1/sessions" && request.method === "GET") {
@@ -285,9 +271,24 @@ const controlServer = createServer((request, response) => {
   );
   if (startMatch && request.method === "POST") {
     const item = sessions.find(({ id }) => id === startMatch[1]);
+    if (!tunnelLinked && item.seq === 0)
+      return json(
+        response,
+        {
+          error: {
+            code: "tunnel_link_required",
+            message: "Link your Dev Tunnels account to start a session.",
+          },
+        },
+        409,
+      );
     item.state = "QUEUED";
-    item.seq = 2;
+    item.seq += 1;
     item.error = undefined;
+    if (item.id === createdId)
+      setTimeout(() => {
+        item.state = "READY";
+      }, 25);
     return json(response, item);
   }
   const stopMatch = /^\/api\/v1\/sessions\/(s-[a-f0-9]{12})\/stop$/.exec(
@@ -356,7 +357,7 @@ controlServer.on("upgrade", (request, socket, head) => {
 });
 webSockets.on("connection", (socket, request) => {
   const path = new URL(request.url, controlOrigin).pathname;
-  assert.equal(path, "/api/v1/ssh/hosts/cluster/auth");
+  assert.equal(path, "/api/v1/hosts/cluster/ssh");
   setTimeout(() => socket.send(Buffer.from("Password: ")), 10);
   socket.on("message", () => socket.send(JSON.stringify({ type: "ready" })));
 });

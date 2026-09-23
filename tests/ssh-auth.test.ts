@@ -97,7 +97,7 @@ describe("SSH operation console protocol", () => {
     async (protocol) => {
       const error = vi.fn();
       const console = new SshOperationConsole();
-      console.start(connect("ws://localhost/ssh/delta/auth"), {
+      console.start(connect("ws://localhost/hosts/delta/ssh"), {
         failed: error,
       });
       await Promise.resolve();
@@ -116,7 +116,7 @@ describe("SSH operation console protocol", () => {
     const ready = vi.fn();
     const exit = vi.fn();
     const console = new SshOperationConsole();
-    console.start(connect("ws://localhost/ssh/delta/auth"), {
+    console.start(connect("ws://localhost/hosts/delta/ssh"), {
       ready,
       failed: exit,
     });
@@ -146,7 +146,7 @@ describe("SSH operation console protocol", () => {
   it("delivers Enter that the hosting dialog would otherwise take", async () => {
     const console = new SshOperationConsole();
     document.body.appendChild(console.node);
-    console.start(connect("ws://localhost/ssh/delta/auth"), {
+    console.start(connect("ws://localhost/hosts/delta/ssh"), {
       failed: vi.fn(),
     });
     await Promise.resolve();

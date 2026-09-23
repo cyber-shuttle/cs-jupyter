@@ -44,7 +44,7 @@ Every credential this app carries, and where it goes:
 | ------------------ | --------------------------------------------------------------------------------------- | ----------------------------------------------- |
 | Sign-in relay      | `GET /api/v1/oauth/config`, `POST /api/v1/oauth/exchange`, `POST /api/v1/oauth/refresh` | none (`credentials: omit`, `redirect: "error"`) |
 | Control API        | `/api/v1/*`                                                                             | `Authorization: Bearer <ID token>`              |
-| SSH authentication | `WS /api/v1/ssh/hosts/{alias}/auth`                                                     | the ID token as the `bearer.` subprotocol       |
+| SSH authentication | `WS /api/v1/hosts/{alias}/ssh`                                                          | the ID token as the `bearer.` subprotocol       |
 | Jupyter            | the session's Dev Tunnel origin                                                         | the seq-bound Jupyter token                     |
 
 The control API uses no cookies, XSRF header or same-origin proxy. The SSH socket offers exactly

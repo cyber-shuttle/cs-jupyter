@@ -676,7 +676,7 @@ describe("SSH hosts modal chrome", () => {
         },
         { name: "theirs", hostname: "own.example.edu", extraDirectives: [] },
       ]),
-      testSshHost: vi.fn(async () => ({ ok: true, message: "Connected." })),
+      hostHealth: vi.fn(async () => ({ ok: true, message: "Listening." })),
     };
     const hosts = new SshHosts(controlFake(api) as any);
     await hosts.refresh();
@@ -702,11 +702,11 @@ describe("SSH hosts modal chrome", () => {
     expect(action(entries[0], "Delete").disabled).toBe(false);
     expect(action(entries[1], "Edit").disabled).toBe(true);
     expect(action(entries[1], "Delete").disabled).toBe(true);
-    action(entries[0], "Test connection").click();
+    action(entries[0], "Check health").click();
     await vi.waitFor(() =>
-      expect(hosts.node.textContent).toContain("Connected."),
+      expect(hosts.node.textContent).toContain("Listening."),
     );
-    expect(api.testSshHost).toHaveBeenCalledWith("delta");
+    expect(api.hostHealth).toHaveBeenCalledWith("delta");
     hosts.dispose();
   });
 
@@ -718,7 +718,6 @@ describe("SSH hosts modal chrome", () => {
           hostname: "login.example.edu",
           user: "me",
           port: 2222,
-          identityFile: "~/.ssh/id_ed25519",
           extraDirectives: ["ProxyJump bastion", "ForwardAgent yes"],
           managed: true,
         },
@@ -739,7 +738,7 @@ describe("SSH hosts modal chrome", () => {
       'input[name="sshHostCommand"]',
     )!;
     expect(command.value).toBe(
-      "ssh -p 2222 -i ~/.ssh/id_ed25519 -J bastion -o ForwardAgent=yes me@login.example.edu",
+      "ssh -p 2222 -J bastion -o ForwardAgent=yes me@login.example.edu",
     );
     expect(hosts.node.querySelector('input[name="sshHostName"]')).toBeNull();
     command.value = "ssh -p 22 me@login2.example.edu";
@@ -791,14 +790,13 @@ describe("SSH hosts modal chrome", () => {
         {
           name: "delta",
           hostname: "login.example.edu",
-          identityFile: "/state/hosts/x/keys/delta-key",
-          key: "delta-key",
+          keyId: "delta-key",
           extraDirectives: ["IdentitiesOnly yes", "ProxyJump bastion"],
           managed: true,
         },
       ]),
       listSshKeys: vi.fn(async () => [
-        { name: "delta-key", type: "ssh-ed25519", fingerprint: "SHA256:abc" },
+        { id: "delta-key", type: "ssh-ed25519", fingerprint: "SHA256:abc" },
       ]),
       updateSshHost: vi.fn(async () => ({
         name: "delta",
@@ -845,10 +843,10 @@ describe("SSH keys modal", () => {
   it("uploads a private key file under a name and confirms before deleting one", async () => {
     const api = controlFake({
       listSshKeys: vi.fn(async () => [
-        { name: "old", type: "ssh-rsa", fingerprint: "SHA256:old" },
+        { id: "old", type: "ssh-rsa", fingerprint: "SHA256:old" },
       ]),
       addSshKey: vi.fn(async () => ({
-        name: "delta-key",
+        id: "delta-key",
         type: "ssh-ed25519",
         fingerprint: "SHA256:new",
       })),

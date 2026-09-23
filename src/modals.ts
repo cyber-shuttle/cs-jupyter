@@ -146,14 +146,13 @@ export class SessionModals {
     form.setError("");
     form.setBusy(true);
     try {
-      const session = await this._api
-        .createSession(request)
-        .catch(async (error) => {
-          if (!needsTunnelLink(error)) throw error;
-          await this._linkInDialog(body, show);
-          show(form);
-          return this._api.createSession(request);
-        });
+      const session = await this._api.createSession(request);
+      await this._api.startSession(session.id).catch(async (error) => {
+        if (!needsTunnelLink(error)) throw error;
+        await this._linkInDialog(body, show);
+        show(form);
+        return this._api.startSession(session.id);
+      });
       if (body.isDisposed || form.isDisposed) {
         return;
       }
