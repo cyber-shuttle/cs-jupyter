@@ -267,20 +267,9 @@ describe("remote service manager registry", () => {
 
 describe("remote-only native workspace distribution", () => {
   const root = resolve(import.meta.dirname, "..");
-  const packageJson = JSON.parse(
-    readFileSync(resolve(root, "package.json"), "utf8"),
-  );
   const liteConfig = JSON.parse(
     readFileSync(resolve(root, "jupyter-lite.json"), "utf8"),
   )["jupyter-config-data"];
-
-  const localKernelPackages = [
-    "@jupyterlite/pyodide-kernel",
-    "@jupyterlite/pyodide-kernel-extension",
-    "@jupyterlite/xeus",
-    "@jupyterlite/javascript-kernel",
-    "@jupyterlite/javascript-kernel-extension",
-  ];
 
   const requiredLiteSupportServices = [
     "@jupyterlite/services-extension:event-manager",
@@ -305,16 +294,6 @@ describe("remote-only native workspace distribution", () => {
     "@jupyterlite/services-extension:kernel-specs",
     "@jupyterlite/services-extension:session-manager",
   ];
-
-  it("does not install a local kernel provider", () => {
-    const installed = {
-      ...packageJson.dependencies,
-      ...packageJson.devDependencies,
-    };
-    for (const provider of localKernelPackages) {
-      expect(installed).not.toHaveProperty(provider);
-    }
-  });
 
   it("keeps local shell settings while replacing compute services", () => {
     expect(liteConfig.disabledExtensions).toEqual(

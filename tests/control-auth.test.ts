@@ -34,8 +34,7 @@ describe("OAuth cross-origin control client", () => {
     assert.isDefined(init);
     expect(String(input)).toBe("https://control.example.edu/api/v1/hosts");
     const headers = new Headers(init.headers);
-    expect(headers.get("Authorization")).toBe("Bearer delegated-token");
-    expect(headers.has("X-CyberShuttle-Identity")).toBe(false);
+    expect([...headers]).toEqual([["authorization", "Bearer delegated-token"]]);
     expect(init.cache).toBe("no-store");
     expect(init.credentials).toBe("omit");
     expect(init.redirect).toBe("error");

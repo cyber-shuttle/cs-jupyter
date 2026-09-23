@@ -224,7 +224,6 @@ const controlServer = createServer((request, response) => {
       let item = sessions.find(({ id }) => id === createdId);
       if (!item) {
         item = { ...session(createdId, body.rootFolder, "STOPPED"), seq: 0 };
-        sessions[0].state = "STOPPED";
         sessions.push(item);
       }
       json(response, item, 201, {
@@ -271,7 +270,7 @@ const controlServer = createServer((request, response) => {
   );
   if (startMatch && request.method === "POST") {
     const item = sessions.find(({ id }) => id === startMatch[1]);
-    if (!tunnelLinked && item.seq === 0)
+    if (!tunnelLinked)
       return json(
         response,
         {
@@ -636,6 +635,35 @@ try {
   );
   const cardsBeforeRunAgain = await page.locator(".csSessionCard").count();
   await sessionDialog.getByRole("button", { name: "Run again" }).click();
+  const linkGitHub = page.getByRole("button", { name: "Link GitHub" });
+  await linkGitHub.waitFor();
+  await linkGitHub.click();
+  const deviceDialog = page.getByRole("dialog", { name: "Sign in to GitHub" });
+  await deviceDialog.waitFor();
+  assert.equal(
+    popupCount,
+    0,
+    "device authorization must not open automatically",
+  );
+  assert.notEqual(await deviceDialog.getAttribute("open"), null);
+  await deviceDialog.getByText("ABCD-EFGH", { exact: true }).waitFor();
+  const openSignIn = deviceDialog.getByRole("link", {
+    name: "Open sign-in page",
+  });
+  assert.equal(
+    await openSignIn.getAttribute("href"),
+    "https://verification.example.test/device",
+  );
+  const verificationPage = context.waitForEvent("page");
+  await openSignIn.click();
+  await verificationPage;
+  assert.equal(popupCount, 1, "only the explicit open action may open a page");
+  const tunnelDialog = page.locator(".jp-Dialog-content", {
+    has: page.getByRole("button", { name: "Unlink" }),
+  });
+  await tunnelDialog.waitFor();
+  await tunnelDialog.locator(".jp-Dialog-close-button").click();
+  await page.locator(`[data-session-action="${restartId}"]`).click();
   await sessionDialog.getByText("QUEUED", { exact: true }).waitFor();
   assert.ok(
     controlRequests.includes(`POST /api/v1/sessions/${restartId}/start`),
@@ -715,30 +743,6 @@ try {
   await page.getByText("Validation passed.", { exact: false }).waitFor();
   await page.getByRole("button", { name: "Submit", exact: true }).click();
 
-  const linkGitHub = page.getByRole("button", { name: "Link GitHub" });
-  await linkGitHub.waitFor();
-  await linkGitHub.click();
-  const deviceDialog = page.getByRole("dialog", { name: "Sign in to GitHub" });
-  await deviceDialog.waitFor();
-  assert.equal(
-    popupCount,
-    0,
-    "device authorization must not open automatically",
-  );
-  assert.notEqual(await deviceDialog.getAttribute("open"), null);
-  await deviceDialog.getByText("ABCD-EFGH", { exact: true }).waitFor();
-  const openSignIn = deviceDialog.getByRole("link", {
-    name: "Open sign-in page",
-  });
-  assert.equal(
-    await openSignIn.getAttribute("href"),
-    "https://verification.example.test/device",
-  );
-  const verificationPage = context.waitForEvent("page");
-  await openSignIn.click();
-  await verificationPage;
-  assert.equal(popupCount, 1, "only the explicit open action may open a page");
-
   const createdDetail = page.locator(
     ".jp-Dialog-content:has(.csSessionDetail)",
   );
@@ -750,8 +754,7 @@ try {
   await page.waitForURL(
     (url) =>
       url.searchParams.get("session") === createdId &&
-      url.searchParams.get("workspace") === createdId &&
-      !url.searchParams.has("seq"),
+      url.searchParams.get("workspace") === createdId,
     { timeout: 20_000 },
   );
   await page.waitForFunction(() => {

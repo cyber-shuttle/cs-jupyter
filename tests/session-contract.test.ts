@@ -10,7 +10,7 @@ const providerFixture = sessionFixture({
 });
 
 describe("checked narrow cs-plane session JSON contract", () => {
-  it("accepts only session state and rejects removed private/application fields", async () => {
+  it("rejects unknown fields and non-canonical state values", async () => {
     const list = await clientFor({
       sessions: [providerFixture],
       logs: [],

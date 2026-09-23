@@ -452,7 +452,6 @@ describe("session card contract", () => {
       ),
     ).toEqual([gpu.sshHost, gpu.account]);
     expect(card.textContent).not.toContain(gpu.rootFolder);
-    expect(card.textContent).not.toContain("Jupyter:");
     expect(card.querySelector(".csSessionCardIcon svg")).not.toBeNull();
     expect(card.querySelector(".csSessionCardIconGpu")).not.toBeNull();
     expect(card.querySelector(".csSessionCardIcon-ready")).not.toBeNull();

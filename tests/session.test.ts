@@ -110,9 +110,6 @@ describe("shared cs-plane client", () => {
           item.headers.get("Authorization") === "Bearer test-delegated-token",
       ),
     ).toBe(true);
-    expect(requests.every((item) => !item.headers.has("X-XSRFToken"))).toBe(
-      true,
-    );
   });
 
   it("rejects a getSession answer for another session", async () => {

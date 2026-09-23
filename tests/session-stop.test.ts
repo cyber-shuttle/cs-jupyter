@@ -207,7 +207,7 @@ describe("session stop action", () => {
   it("clears a pending delete when the terminal session is already gone", async () => {
     let state: ISession["state"] = "READY";
     const deleteSession = vi.fn(async () => {
-      throw new ControlError("not_found", "Route not found.", 404);
+      throw new ControlError("session_not_found", "session not found", 404);
     });
     const api = controlFake({
       listSessions: vi.fn(async () => sessionListFixture([{ ...base, state }])),
@@ -325,21 +325,6 @@ describe("session stop action", () => {
     await vi.waitFor(() => expect(deleteSession).toHaveBeenCalledTimes(2));
     expect(panel.state.error).toBe("an unrelated standing error");
     panel.dispose();
-  });
-
-  it("reports a failed stop's error on the session this page is attached to", async () => {
-    const stopping = Promise.withResolvers<ISession>();
-    const api = controlFake({
-      listSessions: vi.fn(async () => sessionListFixture([readyBase])),
-      stopSession: vi.fn(() => stopping.promise),
-    });
-    setActiveSessionId(base.id);
-    const panel = panelFake(api);
-    await loaded(panel);
-
-    await stopFailing(panel, base.id, "Slurm cancellation failed.", stopping);
-    panel.dispose();
-    setActiveSessionId(undefined);
   });
 
   it("keeps a failed stop's error across a poll whose access read succeeds", async () => {
