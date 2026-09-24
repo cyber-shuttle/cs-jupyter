@@ -137,19 +137,18 @@ export interface ISshHost {
   hostname?: string;
   user?: string;
   port?: number;
-  identityFile?: string;
-  key?: string;
+  keyId?: string;
   extraDirectives: string[];
   managed?: boolean;
 }
 
 export interface ISshKey {
-  name: string;
+  id: string;
   type: string;
   fingerprint: string;
 }
 
-export interface ISshHostTest {
+export interface IHostHealth {
   host: string;
   ok: boolean;
   message: string;

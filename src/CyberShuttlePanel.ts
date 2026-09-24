@@ -175,12 +175,6 @@ export class CyberShuttlePanel extends StackedPanel {
         this._controller.select(sessionId, current),
       loginDock: () => this._modals.loginDock,
       rejectDetail: () => this._modals.rejectDetail(),
-      linkTunnel: async () => {
-        this._modals.rejectDetail();
-        if (!(await this._modals.openTunnelLink())) {
-          throw new Error("Dev Tunnels is not linked.");
-        }
-      },
     });
     this._modals = new SessionModals(this, _api);
     this.header = new CyberShuttleHeader(this);

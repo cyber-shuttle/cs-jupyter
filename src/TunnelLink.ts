@@ -1,9 +1,9 @@
 // Dev Tunnels link dialog: one box per provider, the linked one a ticked card
 // naming the account with Unlink inside it, the other a button that starts and
-// polls the device flow through cs-plane. Session create and run-again reopen this same
-// widget when cs-plane refuses for want of a link, and `onLinked` tells the
-// caller to retry once linking succeeds. Polling paces itself by the server's
-// intervalSeconds alone; server-side backoff is the upgrade if 429s appear.
+// polls the device flow through cs-plane. A link is optional: it delegates a
+// Dev Tunnel to each session as a fallback to cs-plane's own WebSocket link.
+// Polling paces itself by the server's intervalSeconds alone; server-side
+// backoff is the upgrade if 429s appear.
 import { RemoteListWidget } from "./RebuildingWidget";
 import { errorMessage, type TunnelProvider } from "./Common";
 import { ControlClient, type ITunnelLinkStatus } from "./ControlClient";
@@ -24,7 +24,6 @@ const sleep = (milliseconds: number): Promise<void> =>
   new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 
 export class TunnelLink extends RemoteListWidget {
-  onLinked: (() => void) | undefined;
   private _status: ITunnelLinkStatus | undefined;
   private _linking: TunnelProvider | undefined;
 
@@ -70,14 +69,13 @@ export class TunnelLink extends RemoteListWidget {
         await sleep(interval);
         if (this._linking !== provider) return;
         const poll = await this._api.pollTunnelLink(start.handle);
-        if ("status" in poll) {
+        if (poll.status === "pending") {
           interval = poll.intervalSeconds * 1000;
           continue;
         }
         this._status = poll;
         this._linking = undefined;
         this._sync();
-        this.onLinked?.();
         return;
       }
     } catch (error) {
@@ -93,7 +91,7 @@ export class TunnelLink extends RemoteListWidget {
   protected _rebuild(): void {
     this.node.textContent = "";
     const { root, scroll, card } = dialogBody(
-      "Sessions run over your own Dev Tunnels account, linked once and kept by cs-plane.",
+      "Optional: a linked account gives each session a Dev Tunnel fallback route, kept by cs-plane.",
       this._error,
     );
     if (!this._busy) {

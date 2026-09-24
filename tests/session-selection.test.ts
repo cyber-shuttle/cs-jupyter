@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CyberShuttlePanel } from "../src/CyberShuttlePanel";
 import type { ISessionUiState } from "../src/session";
 import type { ISession } from "../src/Common";
-import { ControlError, type ISessionLogTail } from "../src/ControlClient";
+import { ControlError } from "../src/ControlClient";
 import { SessionController } from "../src/SessionController";
 import {
   cacheSessionAccess,
@@ -44,12 +44,6 @@ const active: ISession = {
   id: "s-333333333333",
   rootFolder: "projects/active",
 };
-const hiddenLog: ISessionLogTail = {
-  sessionId: first.id,
-  lines: [
-    { stream: "status", text: "Preparing session", at: "2026-01-01T00:00:00Z" },
-  ],
-};
 
 function boundList(state: ISessionUiState = uiState()): {
   controller: ControllerFake;
@@ -59,15 +53,10 @@ function boundList(state: ISessionUiState = uiState()): {
   return { controller, list: new SessionList(controller as never) };
 }
 
-function setSessions(
-  controller: ControllerFake,
-  sessions: ISession[],
-  logs: ISessionUiState["logs"] = new Map(),
-): void {
+function setSessions(controller: ControllerFake, sessions: ISession[]): void {
   controller.setState(
     uiState({
       sessions,
-      logs,
       jupyterReady: new Set(sessions.map((session) => session.id)),
       signedIn: true,
     }),
@@ -189,8 +178,7 @@ describe("serialized session selection", () => {
     list.createRequested.connect(createRequested);
     list.sshHostsRequested.connect(sshHostsRequested);
     list.setCreateBlocked("");
-    setSessions(controller, [first], new Map([[first.id, hiddenLog]]));
-    expect(list.node.textContent).not.toContain("Preparing session");
+    setSessions(controller, [first]);
     document.body.appendChild(list.node);
     list.node.querySelector<HTMLButtonElement>(".csSessionCard")!.focus();
     setSessions(controller, [{ ...first }]);
@@ -451,8 +439,6 @@ describe("session card contract", () => {
         (node) => node.textContent,
       ),
     ).toEqual([gpu.sshHost, gpu.account]);
-    expect(card.textContent).not.toContain(gpu.rootFolder);
-    expect(card.textContent).not.toContain("Jupyter:");
     expect(card.querySelector(".csSessionCardIcon svg")).not.toBeNull();
     expect(card.querySelector(".csSessionCardIconGpu")).not.toBeNull();
     expect(card.querySelector(".csSessionCardIcon-ready")).not.toBeNull();

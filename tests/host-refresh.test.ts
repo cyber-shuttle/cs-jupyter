@@ -39,6 +39,7 @@ function harness(initialHosts: ISshHost[] = [alpha]) {
     listSessions: vi.fn(async () => sessionListFixture()),
     listSshHosts: vi.fn(async (): Promise<ISshHost[]> => initialHosts),
     createSession: vi.fn(),
+    startSession: vi.fn(async () => undefined),
   };
   const panel = panelFake(api);
   void panel.signIn();
@@ -86,6 +87,7 @@ describe("host refresh while the session wizard is active", () => {
     await vi.waitFor(() =>
       expect(state.api.createSession).toHaveBeenCalledOnce(),
     );
+    expect(state.api.startSession).toHaveBeenCalledWith("s-111111111111");
     await vi.waitFor(() =>
       expect(document.body.textContent).toContain(
         "Waiting for live session state…",

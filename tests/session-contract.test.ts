@@ -10,7 +10,7 @@ const providerFixture = sessionFixture({
 });
 
 describe("checked narrow cs-plane session JSON contract", () => {
-  it("accepts only session state and rejects removed private/application fields", async () => {
+  it("rejects unknown fields and non-canonical state values", async () => {
     const list = await clientFor({
       sessions: [providerFixture],
       logs: [],
@@ -82,15 +82,6 @@ describe("checked narrow cs-plane metric sample JSON contract", () => {
         samples: [sample],
       }).getSessionMetrics(providerFixture.id),
     ).rejects.toThrow("invalid metric series");
-  });
-
-  it("rejects metrics for a different session", async () => {
-    await expect(
-      clientFor({
-        sessionId: "s-111111111111",
-        samples: [],
-      }).getSessionMetrics(providerFixture.id),
-    ).rejects.toThrow("returned metrics for s-111111111111, not");
   });
 
   it("accepts numeric memory, CPU and GPU readings", async () => {

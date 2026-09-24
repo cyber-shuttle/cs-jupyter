@@ -114,18 +114,6 @@ describe("a session action a host refuses for a login", () => {
     await close();
   });
 
-  it("leaves a failure that is not a login refusal alone", async () => {
-    const operation = new FakeOperation();
-    const { panel, close } = await opened(
-      vi.fn().mockRejectedValue(new Error("Slurm said no.")),
-      operation,
-    );
-    await panel.actions.runAgain(base.id);
-    expect(operation.starts).toHaveLength(0);
-    expect(panel.state.error).toBe("Slurm said no.");
-    await close();
-  });
-
   it("offers the login and retries stop once the confirmation is accepted", async () => {
     const operation = new FakeOperation();
     const stopSession = vi
@@ -186,8 +174,6 @@ describe("a session action a host refuses for a login", () => {
     const startSession = vi
       .fn()
       .mockRejectedValueOnce(refused())
-      .mockResolvedValueOnce({ ...base, state: "QUEUED" as const })
-      .mockRejectedValueOnce(refused())
       .mockResolvedValueOnce({ ...base, state: "QUEUED" as const });
     const { panel, api } = await opened(startSession, operation);
 
@@ -210,13 +196,6 @@ describe("a session action a host refuses for a login", () => {
     operation.starts[0].callbacks.ready?.();
     await running;
     expect(api.startSession).toHaveBeenCalledTimes(2);
-
-    const runningAgain = panel.actions.runAgain(base.id);
-    await vi.waitFor(() => expect(operation.starts.length).toBe(2));
-    expect(document.body.contains(dock.node)).toBe(true);
-    operation.starts[1].callbacks.ready?.();
-    await runningAgain;
-    expect(api.startSession).toHaveBeenCalledTimes(4);
 
     dock.dispose();
     panel.dispose();

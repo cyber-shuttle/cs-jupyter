@@ -75,7 +75,9 @@ function submitForm(widget: { node: HTMLElement }): void {
     .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
 }
 
-async function reviewAndSubmit(form: CreateSessionForm): Promise<void> {
+async function reviewAndSubmit(
+  form: CreateSessionForm,
+): Promise<HTMLButtonElement> {
   submitForm(form);
   await vi.waitFor(() =>
     expect(form.node.textContent).toContain("Review Slurm job"),
@@ -89,6 +91,7 @@ async function reviewAndSubmit(form: CreateSessionForm): Promise<void> {
     expect(submit?.disabled).toBe(false);
   });
   submit!.click();
+  return submit!;
 }
 type PendingDiscovery = {
   host: string;
@@ -593,47 +596,27 @@ describe("SSH CRUD and session-first creation", () => {
     expect(picker(form, "account").value).toBe("");
   });
 
-  it("keeps the script out of sight unless validation fails", async () => {
-    const form = await discoveredAlpha();
-    const validation = Promise.withResolvers<unknown>();
-    (form as any)._api.validateCreateRequest = () => validation.promise;
-    submitWorkspace(form, "$HOME");
-    await vi.waitFor(() =>
-      expect(form.node.textContent).toContain("Validating with Slurm"),
-    );
-    const script = form.node.querySelector<HTMLElement>(".csSlurmScript")!;
-    expect(script.hidden).toBe(true);
-    validation.resolve({
-      sessionId: "s-012345abcdef",
-      status: "PASSED",
-      script: "#!/bin/bash\n#SBATCH --partition=test\n",
-      message: "Slurm accepted the script.",
-    });
-    await vi.waitFor(() =>
-      expect(form.node.textContent).toContain("Validation passed."),
-    );
-    expect(script.hidden).toBe(true);
-    form.dispose();
-  });
-
-  it("shows the script when validation fails", async () => {
-    const form = await discoveredAlpha();
-    (form as any)._api.validateCreateRequest = async () => ({
-      sessionId: "s-012345abcdef",
-      status: "FAILED",
-      script: "#!/bin/bash\n#SBATCH --partition=missing\n",
-      message: "Slurm rejected the script.",
-      stderr: "sbatch: error: invalid partition specified: missing",
-    });
-    submitWorkspace(form, "$HOME");
-    await vi.waitFor(() =>
-      expect(form.node.textContent).toContain("Validation failed."),
-    );
-    const script = form.node.querySelector<HTMLElement>(".csSlurmScript")!;
-    expect(script.hidden).toBe(false);
-    expect(script.textContent).toContain("--partition=missing");
-    form.dispose();
-  });
+  it.each([
+    ["PASSED", "Validation passed.", true],
+    ["FAILED", "Validation failed.", false],
+  ])(
+    "shows the script only when validation fails: %s",
+    async (status, verdict, hidden) => {
+      const form = await discoveredAlpha();
+      (form as any)._api.validateCreateRequest = async () => ({
+        sessionId: "s-012345abcdef",
+        status,
+        script: "#!/bin/bash\n#SBATCH --partition=missing\n",
+        message: "Slurm answered.",
+      });
+      submitWorkspace(form, "$HOME");
+      await vi.waitFor(() => expect(form.node.textContent).toContain(verdict));
+      const script = form.node.querySelector<HTMLElement>(".csSlurmScript")!;
+      expect(script.hidden).toBe(hidden);
+      expect(script.textContent).toContain("--partition=missing");
+      form.dispose();
+    },
+  );
 
   it("shows create errors on the review step without losing validation", async () => {
     const { form, deliver } = formHarness();
@@ -646,19 +629,10 @@ describe("SSH CRUD and session-first creation", () => {
       form.setError("submission failed");
       form.setBusy(false);
     });
-    submitForm(form);
-    await Promise.resolve();
-    let submit: HTMLButtonElement | undefined;
-    await vi.waitFor(() => {
-      submit = [
-        ...form.node.querySelectorAll<HTMLButtonElement>("button"),
-      ].find((item) => item.textContent === "Submit");
-      expect(submit?.disabled).toBe(false);
-    });
-    submit!.click();
+    const submit = await reviewAndSubmit(form);
     expect(form.node.textContent).toContain("submission failed");
     expect(form.node.textContent).toContain("Validation passed.");
-    expect(submit!.disabled).toBe(false);
+    expect(submit.disabled).toBe(false);
   });
 });
 
@@ -676,7 +650,7 @@ describe("SSH hosts modal chrome", () => {
         },
         { name: "theirs", hostname: "own.example.edu", extraDirectives: [] },
       ]),
-      testSshHost: vi.fn(async () => ({ ok: true, message: "Connected." })),
+      hostHealth: vi.fn(async () => ({ ok: true, message: "Listening." })),
     };
     const hosts = new SshHosts(controlFake(api) as any);
     await hosts.refresh();
@@ -702,11 +676,11 @@ describe("SSH hosts modal chrome", () => {
     expect(action(entries[0], "Delete").disabled).toBe(false);
     expect(action(entries[1], "Edit").disabled).toBe(true);
     expect(action(entries[1], "Delete").disabled).toBe(true);
-    action(entries[0], "Test connection").click();
+    action(entries[0], "Check health").click();
     await vi.waitFor(() =>
-      expect(hosts.node.textContent).toContain("Connected."),
+      expect(hosts.node.textContent).toContain("Listening."),
     );
-    expect(api.testSshHost).toHaveBeenCalledWith("delta");
+    expect(api.hostHealth).toHaveBeenCalledWith("delta");
     hosts.dispose();
   });
 
@@ -718,7 +692,6 @@ describe("SSH hosts modal chrome", () => {
           hostname: "login.example.edu",
           user: "me",
           port: 2222,
-          identityFile: "~/.ssh/id_ed25519",
           extraDirectives: ["ProxyJump bastion", "ForwardAgent yes"],
           managed: true,
         },
@@ -739,7 +712,7 @@ describe("SSH hosts modal chrome", () => {
       'input[name="sshHostCommand"]',
     )!;
     expect(command.value).toBe(
-      "ssh -p 2222 -i ~/.ssh/id_ed25519 -J bastion -o ForwardAgent=yes me@login.example.edu",
+      "ssh -p 2222 -J bastion -o ForwardAgent=yes me@login.example.edu",
     );
     expect(hosts.node.querySelector('input[name="sshHostName"]')).toBeNull();
     command.value = "ssh -p 22 me@login2.example.edu";
@@ -791,14 +764,13 @@ describe("SSH hosts modal chrome", () => {
         {
           name: "delta",
           hostname: "login.example.edu",
-          identityFile: "/state/hosts/x/keys/delta-key",
-          key: "delta-key",
-          extraDirectives: ["IdentitiesOnly yes", "ProxyJump bastion"],
+          keyId: "delta-key",
+          extraDirectives: ["ProxyJump bastion"],
           managed: true,
         },
       ]),
       listSshKeys: vi.fn(async () => [
-        { name: "delta-key", type: "ssh-ed25519", fingerprint: "SHA256:abc" },
+        { id: "delta-key", type: "ssh-ed25519", fingerprint: "SHA256:abc" },
       ]),
       updateSshHost: vi.fn(async () => ({
         name: "delta",
@@ -845,10 +817,10 @@ describe("SSH keys modal", () => {
   it("uploads a private key file under a name and confirms before deleting one", async () => {
     const api = controlFake({
       listSshKeys: vi.fn(async () => [
-        { name: "old", type: "ssh-rsa", fingerprint: "SHA256:old" },
+        { id: "old", type: "ssh-rsa", fingerprint: "SHA256:old" },
       ]),
       addSshKey: vi.fn(async () => ({
-        name: "delta-key",
+        id: "delta-key",
         type: "ssh-ed25519",
         fingerprint: "SHA256:new",
       })),

@@ -10,7 +10,7 @@ import {
   type ISessionCreateRequest,
   type ISshHost,
 } from "./Common";
-import { needsTunnelLink, type ControlClient } from "./ControlClient";
+import { type ControlClient } from "./ControlClient";
 import type { CyberShuttlePanel } from "./CyberShuttlePanel";
 import { CreateSessionForm } from "./CreateSessionForm";
 import type { RemoteListWidget } from "./RebuildingWidget";
@@ -38,7 +38,6 @@ export class SessionModals {
     new CreateSessionForm(this._api, () => this.loginDock);
   private _sshHostsWidget: () => SshHosts = () => new SshHosts(this._api);
   private _loginDockWidget: () => SshLoginDock = () => new SshLoginDock();
-  private _tunnelLinkWidget: () => TunnelLink = () => new TunnelLink(this._api);
 
   constructor(
     private _panel: CyberShuttlePanel,
@@ -117,12 +116,8 @@ export class SessionModals {
     await this._openRefreshing("SSH Keys", new SshKeys(this._api));
   }
 
-  async openTunnelLink(): Promise<boolean> {
-    const widget = this._tunnelLinkWidget();
-    let linked = false;
-    widget.onLinked = () => (linked = true);
-    await this._openRefreshing("Dev Tunnels", widget);
-    return linked;
+  async openTunnelLink(): Promise<void> {
+    await this._openRefreshing("Dev Tunnels", new TunnelLink(this._api));
   }
 
   private async _openRefreshing(
@@ -146,14 +141,8 @@ export class SessionModals {
     form.setError("");
     form.setBusy(true);
     try {
-      const session = await this._api
-        .createSession(request)
-        .catch(async (error) => {
-          if (!needsTunnelLink(error)) throw error;
-          await this._linkInDialog(body, show);
-          show(form);
-          return this._api.createSession(request);
-        });
+      const session = await this._api.createSession(request);
+      await this._api.startSession(session.id);
       if (body.isDisposed || form.isDisposed) {
         return;
       }
@@ -169,24 +158,5 @@ export class SessionModals {
         form.setBusy(false);
       }
     }
-  }
-
-  private _linkInDialog(
-    body: Panel,
-    show: (widget: Widget) => void,
-  ): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const link = this._tunnelLinkWidget();
-      link.onLinked = () => {
-        link.dispose();
-        resolve();
-      };
-      body.disposed.connect(() =>
-        reject(new Error("Dev Tunnels is not linked.")),
-      );
-      body.addWidget(link);
-      show(link);
-      void link.refresh();
-    });
   }
 }

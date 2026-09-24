@@ -8,8 +8,7 @@ Name it with a closing keyword, for example `Closes #12`.
 
 ## Test plan
 
-What you ran and what it reported. `bun run build` must precede `bun run test:dist` and
-`bun run test:browser`.
+What you ran and what it reported.
 
 ## Checklist
 

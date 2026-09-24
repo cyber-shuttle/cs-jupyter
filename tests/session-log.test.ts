@@ -50,20 +50,15 @@ const tailsClient = (logs: unknown[]): ControlClient =>
   clientFor({ sessions: [], logs });
 
 describe("session log tails on the polled read", () => {
-  it("accepts a complete bounded tail", async () => {
-    const list = await tailsClient([log()]).listSessions();
+  it.each([
+    ["a complete bounded", log()],
+    ["an empty", log([])],
+  ])("accepts %s tail", async (_name, tail) => {
+    const list = await tailsClient([tail]).listSessions();
     if (list === UNCHANGED) {
       throw new Error("cs-plane answered 304 to a first read.");
     }
-    expect(list.logs).toEqual([log()]);
-  });
-
-  it("accepts a tail with no lines", async () => {
-    const list = await tailsClient([{ ...log(), lines: [] }]).listSessions();
-    if (list === UNCHANGED) {
-      throw new Error("cs-plane answered 304 to a first read.");
-    }
-    expect(list.logs).toEqual([{ sessionId, lines: [] }]);
+    expect(list.logs).toEqual([tail]);
   });
 
   it.each([

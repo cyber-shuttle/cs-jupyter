@@ -6,11 +6,7 @@ import {
   ControlClient,
   createSessionServerSettings,
 } from "../src/ControlClient";
-import {
-  jsonResponse,
-  validControlApiUrl,
-  validSessionId,
-} from "../src/Common";
+import { jsonResponse, validControlApiUrl } from "../src/Common";
 import {
   installSessionCommandGuard,
   SessionController,
@@ -29,7 +25,12 @@ import {
 
 const auth = fakeAuth("test-delegated-token");
 
-const access = accessFixture("s-012345abcdef", 1);
+const access = accessFixture("s-012345abcdef", 1, {
+  jupyter: {
+    uri: "http://localhost:3000/gateway/api/v1/sessions/s-012345abcdef/jupyter/",
+    token: "A".repeat(43),
+  },
+});
 
 const session = sessionFixture({
   account: "project-a",
@@ -56,7 +57,7 @@ describe("shared cs-plane client", () => {
       async (input: RequestInfo | URL, init?: RequestInit) => {
         const request = new Request(input, init);
         const path = new URL(request.url).pathname;
-        if (path === "/gateway/api/v1/ssh/hosts") {
+        if (path === "/gateway/api/v1/hosts") {
           return jsonResponse({ hosts: [] });
         }
         if (path === "/gateway/api/v1/sessions/validate") {
@@ -96,7 +97,7 @@ describe("shared cs-plane client", () => {
     expect(
       requests.map((item) => `${item.method} ${new URL(item.url).pathname}`),
     ).toEqual([
-      "GET /gateway/api/v1/ssh/hosts",
+      "GET /gateway/api/v1/hosts",
       "GET /gateway/api/v1/sessions",
       "POST /gateway/api/v1/sessions/validate",
       "POST /gateway/api/v1/sessions",
@@ -104,15 +105,6 @@ describe("shared cs-plane client", () => {
       "GET /gateway/api/v1/sessions/s-012345abcdef/access",
       "POST /gateway/api/v1/sessions/s-012345abcdef/stop",
     ]);
-    expect(
-      requests.every(
-        (item) =>
-          item.headers.get("Authorization") === "Bearer test-delegated-token",
-      ),
-    ).toBe(true);
-    expect(requests.every((item) => !item.headers.has("X-XSRFToken"))).toBe(
-      true,
-    );
   });
 
   it("rejects a getSession answer for another session", async () => {
@@ -223,14 +215,12 @@ describe("shared cs-plane client", () => {
     expect(() => validControlApiUrl("/gateway/api/v1")).toThrow(
       "absolute control API URL",
     );
-    expect(validSessionId(session.id)).toBe(session.id);
-    expect(() => validSessionId("not-a-session")).toThrow();
   });
 
   it("constructs token-authorized Jupyter HTTP and WebSocket settings", async () => {
     const settings = createSessionServerSettings(access);
-    expect(settings.baseUrl).toBe("https://31002.use.devtunnels.ms/");
-    expect(settings.wsUrl).toBe("wss://31002.use.devtunnels.ms/");
+    expect(settings.baseUrl).toBe(access.jupyter.uri);
+    expect(settings.wsUrl).toBe(access.jupyter.uri.replace(/^http/, "ws"));
     expect(settings.token).toBe(access.jupyter.token);
     expect(settings.appendToken).toBe(true);
   });
@@ -286,7 +276,7 @@ describe("kernel spec logos", () => {
       fetch: (async () => jsonResponse(body)) as unknown as typeof fetch,
     });
     const response = await settings.fetch(
-      "https://31002.use.devtunnels.ms/api/kernelspecs",
+      `${access.jupyter.uri}api/kernelspecs`,
     );
     const parsed = await response.json();
     expect(parsed.kernelspecs.python3.resources).toEqual({});

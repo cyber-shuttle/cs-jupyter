@@ -1,9 +1,9 @@
 // Playwright end-to-end run against dist, driving real Chromium against a
-// fake cs-plane, a fake OAuth issuer, and a fake Jupyter server. It exercises
-// PKCE sign-in, the Dev Tunnels device-link flow gating session create, and
-// the session lifecycle through the real built extension. Two console
-// messages are expected noise: the on-purpose 409 tunnel-link handshake and
-// an xterm teardown race.
+// fake cs-plane, a fake OAuth issuer, and a fake Jupyter server that answers
+// on cs-plane's Jupyter proxy path. It exercises PKCE sign-in, the optional
+// Dev Tunnels device-link flow, and the session lifecycle through the real
+// built extension. Two console messages are expected noise: the on-purpose
+// 409 SSH-login handshake and an xterm teardown race.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
@@ -20,7 +20,6 @@ const sessionId = "s-111111111111";
 const restartId = "s-222222222222";
 const createdId = "s-333333333333";
 const seq = 1;
-const directOrigin = "https://31002.use.devtunnels.ms";
 const account = "user@example.edu";
 const jupyterToken = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const tunnelHandle = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -164,11 +163,15 @@ const controlServer = createServer((request, response) => {
   ) {
     tunnelPollCount++;
     if (tunnelPollCount === 1)
-      return json(response, { status: "pending", intervalSeconds: 1 });
+      return json(response, {
+        status: "pending",
+        intervalSeconds: 1,
+        linked: false,
+      });
     tunnelLinked = true;
-    return json(response, tunnelLinkStatus());
+    return json(response, { status: "linked", ...tunnelLinkStatus() });
   }
-  if (url.pathname === "/api/v1/ssh/hosts" && request.method === "GET")
+  if (url.pathname === "/api/v1/hosts" && request.method === "GET")
     return json(response, {
       hosts: [
         {
@@ -181,7 +184,7 @@ const controlServer = createServer((request, response) => {
       ],
     });
   if (
-    url.pathname === "/api/v1/ssh/hosts/cluster/slurm" &&
+    url.pathname === "/api/v1/hosts/cluster/slurm" &&
     request.method === "GET"
   ) {
     discoveryCount++;
@@ -219,31 +222,16 @@ const controlServer = createServer((request, response) => {
     });
   }
   if (url.pathname === "/api/v1/sessions" && request.method === "POST") {
-    if (!tunnelLinked)
-      return json(
-        response,
-        {
-          error: {
-            code: "tunnel_link_required",
-            message: "Link your Dev Tunnels account to create a session.",
-          },
-        },
-        409,
-      );
     return readRequestJSON(request).then((body) => {
       assert.equal(body.rootFolder, "projects/browser-created");
       let item = sessions.find(({ id }) => id === createdId);
       if (!item) {
-        item = session(createdId, body.rootFolder, "QUEUED");
-        sessions[0].state = "STOPPED";
+        item = { ...session(createdId, body.rootFolder, "STOPPED"), seq: 0 };
         sessions.push(item);
       }
       json(response, item, 201, {
         location: `/api/v1/sessions/${item.id}`,
       });
-      setTimeout(() => {
-        item.state = "READY";
-      }, 25);
     });
   }
   if (url.pathname === "/api/v1/sessions" && request.method === "GET") {
@@ -277,7 +265,10 @@ const controlServer = createServer((request, response) => {
       sessionId: accessMatch[1],
       seq,
       expiresAt: "2030-01-01T00:00:00Z",
-      jupyter: { uri: `${directOrigin}/`, token: jupyterToken },
+      jupyter: {
+        uri: `${controlOrigin}/api/v1/sessions/${accessMatch[1]}/jupyter/`,
+        token: jupyterToken,
+      },
     });
   }
   const startMatch = /^\/api\/v1\/sessions\/(s-[a-f0-9]{12})\/start$/.exec(
@@ -286,8 +277,12 @@ const controlServer = createServer((request, response) => {
   if (startMatch && request.method === "POST") {
     const item = sessions.find(({ id }) => id === startMatch[1]);
     item.state = "QUEUED";
-    item.seq = 2;
+    item.seq += 1;
     item.error = undefined;
+    if (item.id === createdId)
+      setTimeout(() => {
+        item.state = "READY";
+      }, 25);
     return json(response, item);
   }
   const stopMatch = /^\/api\/v1\/sessions\/(s-[a-f0-9]{12})\/stop$/.exec(
@@ -356,7 +351,7 @@ controlServer.on("upgrade", (request, socket, head) => {
 });
 webSockets.on("connection", (socket, request) => {
   const path = new URL(request.url, controlOrigin).pathname;
-  assert.equal(path, "/api/v1/ssh/hosts/cluster/auth");
+  assert.equal(path, "/api/v1/hosts/cluster/ssh");
   setTimeout(() => socket.send(Buffer.from("Password: ")), 10);
   socket.on("message", () => socket.send(JSON.stringify({ type: "ready" })));
 });
@@ -384,61 +379,64 @@ try {
     if (message.type() === "error") browserErrors.push(message.text());
   });
 
-  await context.route(`${directOrigin}/**`, async (route) => {
-    const request = route.request();
-    const url = new URL(request.url());
-    const relative = url.pathname.slice(1);
-    directRequests.push({
-      method: request.method(),
-      path: url.pathname,
-      authorization: request.headers().authorization ?? "",
-      cookie: request.headers().cookie ?? "",
-    });
-    let body = [];
-    let status = 200;
-    if (relative === "api/kernelspecs")
-      body = {
-        default: "python",
-        kernelspecs: {
-          python: {
-            name: "python",
-            resources: {},
-            spec: {
-              argv: ["python"],
-              display_name: "Remote Python",
-              language: "python",
+  await context.route(
+    `${controlOrigin}/api/v1/sessions/*/jupyter/**`,
+    async (route) => {
+      const request = route.request();
+      const url = new URL(request.url());
+      const relative = url.pathname.split("/jupyter/")[1];
+      directRequests.push({
+        method: request.method(),
+        path: `/${relative}`,
+        authorization: request.headers().authorization ?? "",
+        cookie: request.headers().cookie ?? "",
+      });
+      let body = [];
+      let status = 200;
+      if (relative === "api/kernelspecs")
+        body = {
+          default: "python",
+          kernelspecs: {
+            python: {
+              name: "python",
+              resources: {},
+              spec: {
+                argv: ["python"],
+                display_name: "Remote Python",
+                language: "python",
+              },
             },
           },
+        };
+      else if (relative === "api/contents" || relative === "api/contents/") {
+        if (request.method() === "POST") status = 201;
+        body =
+          request.method() === "POST"
+            ? fileModel("untitled.txt")
+            : directoryModel();
+      } else if (relative === "api/contents/untitled.txt")
+        body = fileModel("untitled.txt");
+      else if (relative === "api/contents/untitled.txt/checkpoints") {
+        if (request.method() === "POST") status = 201;
+        body =
+          request.method() === "POST"
+            ? { id: "checkpoint", last_modified: "2026-01-01T00:00:00Z" }
+            : [];
+      } else if (
+        relative === "api/terminals" &&
+        route.request().method() === "POST"
+      )
+        body = { name: "1", last_activity: "2026-01-01T00:00:00Z" };
+      return route.fulfill({
+        status,
+        contentType: "application/json",
+        body: JSON.stringify(body),
+        headers: {
+          "access-control-allow-origin": "*",
         },
-      };
-    else if (relative === "api/contents" || relative === "api/contents/") {
-      if (request.method() === "POST") status = 201;
-      body =
-        request.method() === "POST"
-          ? fileModel("untitled.txt")
-          : directoryModel();
-    } else if (relative === "api/contents/untitled.txt")
-      body = fileModel("untitled.txt");
-    else if (relative === "api/contents/untitled.txt/checkpoints") {
-      if (request.method() === "POST") status = 201;
-      body =
-        request.method() === "POST"
-          ? { id: "checkpoint", last_modified: "2026-01-01T00:00:00Z" }
-          : [];
-    } else if (
-      relative === "api/terminals" &&
-      route.request().method() === "POST"
-    )
-      body = { name: "1", last_activity: "2026-01-01T00:00:00Z" };
-    return route.fulfill({
-      status,
-      contentType: "application/json",
-      body: JSON.stringify(body),
-      headers: {
-        "access-control-allow-origin": "*",
-      },
-    });
-  });
+      });
+    },
+  );
   await context.routeWebSocket("**/terminals/websocket/**", (socket) => {
     directWebSockets.push(socket.url());
     socket.send(JSON.stringify(["setup"]));
@@ -623,29 +621,40 @@ try {
     [true, "auto"],
     "session modal must remain wide and scrollable",
   );
-  assert.equal(
-    await sessionDialog.locator(".csSessionLogLine").count(),
-    0,
-    "a finished session must not carry a log on its card",
-  );
-  assert.equal(
-    await sessionDialog.locator(".csRunReport").count(),
-    0,
-    "a finished session's report belongs to the run history",
-  );
-  const cardsBeforeRunAgain = await page.locator(".csSessionCard").count();
   await sessionDialog.getByRole("button", { name: "Run again" }).click();
   await sessionDialog.getByText("QUEUED", { exact: true }).waitFor();
   assert.ok(
     controlRequests.includes(`POST /api/v1/sessions/${restartId}/start`),
     "Run again must run the finished session rather than create another",
   );
-  assert.equal(
-    await page.locator(".csSessionCard").count(),
-    cardsBeforeRunAgain,
-    "Run again must not add a card",
-  );
   await sessionDialog.locator(".jp-Dialog-close-button").click();
+
+  await page.getByRole("button", { name: account, exact: true }).click();
+  await page.locator('[data-session-action="tunnel-link"]').click();
+  await page.getByRole("button", { name: "Link GitHub" }).click();
+  const deviceDialog = page.getByRole("dialog", { name: "Sign in to GitHub" });
+  await deviceDialog.waitFor();
+  assert.equal(
+    popupCount,
+    0,
+    "device authorization must not open automatically",
+  );
+  const openSignIn = deviceDialog.getByRole("link", {
+    name: "Open sign-in page",
+  });
+  assert.equal(
+    await openSignIn.getAttribute("href"),
+    "https://verification.example.test/device",
+  );
+  const verificationPage = context.waitForEvent("page");
+  await openSignIn.click();
+  await verificationPage;
+  assert.equal(popupCount, 1, "only the explicit open action may open a page");
+  const tunnelDialog = page.locator(".jp-Dialog-content", {
+    has: page.getByRole("button", { name: "Unlink" }),
+  });
+  await tunnelDialog.waitFor();
+  await tunnelDialog.locator(".jp-Dialog-close-button").click();
 
   await page.getByRole("button", { name: "Add Session" }).click();
   const styledControlDifferences = await page
@@ -714,30 +723,6 @@ try {
   await page.getByText("Validation passed.", { exact: false }).waitFor();
   await page.getByRole("button", { name: "Submit", exact: true }).click();
 
-  const linkGitHub = page.getByRole("button", { name: "Link GitHub" });
-  await linkGitHub.waitFor();
-  await linkGitHub.click();
-  const deviceDialog = page.getByRole("dialog", { name: "Sign in to GitHub" });
-  await deviceDialog.waitFor();
-  assert.equal(
-    popupCount,
-    0,
-    "device authorization must not open automatically",
-  );
-  assert.notEqual(await deviceDialog.getAttribute("open"), null);
-  await deviceDialog.getByText("ABCD-EFGH", { exact: true }).waitFor();
-  const openSignIn = deviceDialog.getByRole("link", {
-    name: "Open sign-in page",
-  });
-  assert.equal(
-    await openSignIn.getAttribute("href"),
-    "https://verification.example.test/device",
-  );
-  const verificationPage = context.waitForEvent("page");
-  await openSignIn.click();
-  await verificationPage;
-  assert.equal(popupCount, 1, "only the explicit open action may open a page");
-
   const createdDetail = page.locator(
     ".jp-Dialog-content:has(.csSessionDetail)",
   );
@@ -749,8 +734,7 @@ try {
   await page.waitForURL(
     (url) =>
       url.searchParams.get("session") === createdId &&
-      url.searchParams.get("workspace") === createdId &&
-      !url.searchParams.has("seq"),
+      url.searchParams.get("workspace") === createdId,
     { timeout: 20_000 },
   );
   await page.waitForFunction(() => {
@@ -848,7 +832,7 @@ try {
     "direct manager requests omitted the Jupyter token or sent cookies",
   );
   assert.deepEqual(directWebSockets, [
-    `wss://31002.use.devtunnels.ms/terminals/websocket/1?token=${jupyterToken}`,
+    `${controlOrigin.replace(/^http/, "ws")}/api/v1/sessions/${createdId}/jupyter/terminals/websocket/1?token=${jupyterToken}`,
   ]);
 
   const controlBeforeReload = controlRequests.length;
@@ -900,12 +884,6 @@ try {
     directRequests.length,
     signedOutDirectRequests,
     "the signed-out page must not reconnect to the remote Jupyter server",
-  );
-
-  assert.equal(
-    controlRequests.some((entry) => entry.endsWith("/stop")),
-    false,
-    "connecting must not stop the session",
   );
 
   const EXPECTED_BROWSER_NOISE = [

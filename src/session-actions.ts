@@ -1,8 +1,6 @@
 // The panel's session-lifecycle verbs: connect, run again, stop, delete, and
 // Jupyter access once a session is READY. Stop and delete both cancel the
-// session's Slurm job and confirm first; an SSH login challenge retries once,
-// and starting a session without a linked Dev Tunnels account retries once
-// the account menu's link dialog reports success.
+// session's Slurm job and confirm first; an SSH login challenge retries once.
 import { Dialog, showDialog } from "@jupyterlab/apputils";
 import { errorMessage, ISession, isTerminal } from "./Common";
 import {
@@ -10,7 +8,6 @@ import {
   ControlClient,
   ControlError,
   needsSshLogin,
-  needsTunnelLink,
 } from "./ControlClient";
 import type { SshLoginDock } from "./ssh";
 import {
@@ -29,7 +26,6 @@ interface ISessionActionsHooks {
   select: (sessionId: string, current: () => boolean) => Promise<void>;
   loginDock: () => SshLoginDock;
   rejectDetail: () => void;
-  linkTunnel: () => Promise<void>;
 }
 
 interface IJupyterOperation {
@@ -189,29 +185,6 @@ export class SessionActions {
     };
   }
 
-  private async _recover<T>(
-    alias: string,
-    action: () => Promise<T>,
-    login: boolean,
-    link: boolean,
-  ): Promise<T> {
-    try {
-      return await action();
-    } catch (error) {
-      if (login && needsSshLogin(error)) {
-        await this._hooks
-          .loginDock()
-          .login(alias, this._api.sshAuthWebSocket(alias));
-        return this._recover(alias, action, false, link);
-      }
-      if (link && needsTunnelLink(error)) {
-        await this._hooks.linkTunnel();
-        return this._recover(alias, action, login, false);
-      }
-      throw error;
-    }
-  }
-
   async refreshJupyter(sessionId: string): Promise<void> {
     const session = this._session(sessionId);
     if (!session || session.state !== "READY") {
@@ -321,7 +294,6 @@ export class SessionActions {
     if (session) {
       await this._act(session, (id) => this._api.startSession(id), {
         kind: "relaunch",
-        allowTunnelLink: true,
       });
     }
   }
@@ -350,7 +322,6 @@ export class SessionActions {
       apply?: (acted: ISession) => ISession[];
       report?: (error: unknown) => boolean;
       allowLogin?: boolean;
-      allowTunnelLink?: boolean;
       clearError?: boolean;
       kind?: BusyKind;
     } = {},
@@ -362,7 +333,6 @@ export class SessionActions {
           .map((each) => (each.id === acted.id ? acted : each)),
       report = () => true,
       allowLogin = true,
-      allowTunnelLink = false,
       clearError = true,
       kind = "action",
     } = options;
@@ -375,12 +345,13 @@ export class SessionActions {
       selection === this._selection && !this._hooks.isDisposed();
     const release = this._busy(session.id, kind);
     try {
-      const acted = await this._recover(
-        session.sshHost,
-        () => act(session.id),
-        allowLogin,
-        allowTunnelLink,
-      );
+      const acted = await act(session.id).catch(async (error) => {
+        if (!allowLogin || !needsSshLogin(error)) throw error;
+        await this._hooks
+          .loginDock()
+          .login(session.sshHost, this._api.sshAuthWebSocket(session.sshHost));
+        return act(session.id);
+      });
       if (current()) {
         this._hooks.replaceSessions(apply(acted));
       }

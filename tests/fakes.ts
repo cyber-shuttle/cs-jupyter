@@ -123,7 +123,7 @@ export function accessFixture(
     seq,
     expiresAt: "2030-01-01T00:00:00Z",
     jupyter: {
-      uri: "https://31002.use.devtunnels.ms/",
+      uri: `http://localhost:3000/api/v1/sessions/${sessionId}/jupyter/`,
       token: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     },
     ...overrides,

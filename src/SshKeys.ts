@@ -116,24 +116,24 @@ export class SshKeys extends RemoteListWidget {
   private _keyEntry(key: ISshKey): HTMLElement {
     const row = element("div", "", "csSshKeyRow");
     row.append(
-      element("span", key.name, "csCardTitle"),
+      element("span", key.id, "csCardTitle"),
       element("span", `${key.type} ${key.fingerprint}`, "csMeta csSshKeyPrint"),
     );
-    if (this._confirming === key.name) {
+    if (this._confirming === key.id) {
       row.append(
         ...confirmDelete(
           "Delete this key and unassign it?",
-          `key-${key.name}`,
+          `key-${key.id}`,
           () => this._confirm(""),
-          () => void this._removeItem(() => this._api.removeSshKey(key.name)),
+          () => void this._removeItem(() => this._api.removeSshKey(key.id)),
         ),
       );
       return row;
     }
     const remove = button("Delete", "csDangerButton", () =>
-      this._confirm(key.name),
+      this._confirm(key.id),
     );
-    remove.dataset.sessionAction = `delete-key-${key.name}`;
+    remove.dataset.sessionAction = `delete-key-${key.id}`;
     row.appendChild(remove);
     return row;
   }
