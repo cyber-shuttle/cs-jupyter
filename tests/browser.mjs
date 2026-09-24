@@ -1018,6 +1018,7 @@ function session(id, rootFolder, state = "READY") {
     id,
     seq,
     state,
+    launcher: "cs-plane",
     sshHost: "cluster",
     account: "project-a",
     partition: "debug",
