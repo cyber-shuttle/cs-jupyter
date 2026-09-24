@@ -38,6 +38,9 @@ export const SESSION_STATES = [
 ] as const;
 export type SessionState = (typeof SESSION_STATES)[number];
 
+export const SESSION_LAUNCHERS = ["cs-plane", "client"] as const;
+type SessionLauncher = (typeof SESSION_LAUNCHERS)[number];
+
 export const VALIDATION_STATUSES = ["PASSED", "FAILED"] as const;
 type SessionValidationStatus = (typeof VALIDATION_STATUSES)[number];
 
@@ -78,6 +81,7 @@ export interface ISession extends IJobSpec {
   id: string;
   seq: number;
   state: SessionState;
+  launcher: SessionLauncher;
   error?: string;
   createdAt: string;
   startedAt?: string;

@@ -82,6 +82,7 @@ export function sessionFixture(overrides: Partial<ISession> = {}): ISession {
     id: "s-012345abcdef",
     seq: 1,
     state: "READY",
+    launcher: "cs-plane",
     sshHost: "delta",
     partition: "debug",
     rootFolder: "projects/demo",

@@ -54,6 +54,7 @@ describe("checked narrow cs-plane session JSON contract", () => {
     for (const field of [
       "id",
       "seq",
+      "launcher",
       "sshHost",
       "partition",
       "rootFolder",
