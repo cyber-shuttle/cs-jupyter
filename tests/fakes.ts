@@ -87,6 +87,7 @@ export function sessionFixture(overrides: Partial<ISession> = {}): ISession {
     partition: "debug",
     rootFolder: "projects/demo",
     resources: { cores: 2, memoryMb: 4096, wallMinutes: 30 },
+    tunnelModes: ["websocket"],
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:00:01Z",
     ...overrides,
@@ -101,6 +102,7 @@ export function runFixture(overrides: Partial<IRun> = {}): IRun {
     partition: "cpu",
     rootFolder: "$HOME/project",
     resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 },
+    tunnelModes: ["websocket"],
     finalState: "STOPPED",
     startedAt: "2030-01-01T00:00:00Z",
     endedAt: "2030-01-01T01:00:00Z",
@@ -139,6 +141,7 @@ export function controlFake<T extends object>(overrides = {} as T) {
     listSessions: vi.fn(async () => sessionListFixture()),
     listSshHosts: vi.fn(async () => []),
     listSshKeys: vi.fn(async () => []),
+    getTunnelLink: vi.fn(async () => ({ linked: false })),
     ...overrides,
   };
 }

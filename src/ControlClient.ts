@@ -36,6 +36,7 @@ import {
   SESSION_LAUNCHERS,
   SESSION_STATES,
   TOKEN_43,
+  TUNNEL_MODES,
   VALIDATION_STATUSES,
   expect,
   isPlainObject,
@@ -383,6 +384,9 @@ export class ControlClient {
           if (typeof value.error.message === "string") {
             message = value.error.message;
           }
+          if (code === "tunnel_link_required")
+            message =
+              "Dev Tunnel needs a linked account: link one under Dev Tunnels in the account menu, or choose WebSocket.";
         }
       } catch {}
       throw new ControlError(code, message, response.status);
@@ -501,6 +505,8 @@ const jobSpecFields = {
     gpuType: vOptional(vString()),
     gpuCount: vOptional(vPositiveInt),
   }),
+  tunnelModes: (v: unknown): v is ISession["tunnelModes"] =>
+    vArray(vOneOf(TUNNEL_MODES))(v) && v.length > 0,
 };
 
 const sessionShape = vObject<ISession>({

@@ -213,6 +213,7 @@ const controlServer = createServer((request, response) => {
   ) {
     return readRequestJSON(request).then((body) => {
       assert.equal(body.rootFolder, "projects/browser-created");
+      assert.deepEqual(body.tunnelModes, ["devtunnel", "websocket"]);
       return json(response, {
         sessionId: "s-012345abcdef",
         status: "PASSED",
@@ -224,6 +225,7 @@ const controlServer = createServer((request, response) => {
   if (url.pathname === "/api/v1/sessions" && request.method === "POST") {
     return readRequestJSON(request).then((body) => {
       assert.equal(body.rootFolder, "projects/browser-created");
+      assert.deepEqual(body.tunnelModes, ["devtunnel", "websocket"]);
       let item = sessions.find(({ id }) => id === createdId);
       if (!item) {
         item = { ...session(createdId, body.rootFolder, "STOPPED"), seq: 0 };
@@ -718,6 +720,7 @@ try {
     "discovery must resume once after interactive auth",
   );
   await workspace.fill("projects/browser-created");
+  await page.getByLabel("Dev Tunnel", { exact: true }).check();
   await page.getByRole("button", { name: "Review", exact: true }).click();
   await page.getByRole("heading", { name: "Review Slurm job" }).waitFor();
   await page.getByText("Validation passed.", { exact: false }).waitFor();
@@ -1024,6 +1027,7 @@ function session(id, rootFolder, state = "READY") {
     partition: "debug",
     rootFolder,
     resources: { cores: 4, memoryMb: 4096, wallMinutes: 30 },
+    tunnelModes: ["websocket"],
     error: state === "FAILED" ? "Previous startup failed" : undefined,
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:00:01Z",

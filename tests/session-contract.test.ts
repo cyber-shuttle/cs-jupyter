@@ -1,8 +1,9 @@
 // Locks the cs-plane wire shapes this client trusts. An upstream field
 // rename or removal is caught here, not rendered as undefined in the UI.
-import { clientFor, sessionFixture } from "./fakes";
-import { describe, expect, it } from "vitest";
-import { UNCHANGED } from "../src/ControlClient";
+import { clientFor, fakeAuth, sessionFixture } from "./fakes";
+import { describe, expect, it, vi } from "vitest";
+import { jsonResponse } from "../src/Common";
+import { ControlClient, UNCHANGED } from "../src/ControlClient";
 
 const providerFixture = sessionFixture({
   account: "project-a",
@@ -50,6 +51,31 @@ describe("checked narrow cs-plane session JSON contract", () => {
     },
   );
 
+  it("rejects empty tunnelModes", async () => {
+    await expect(
+      clientFor({
+        sessions: [{ ...providerFixture, tunnelModes: [] }],
+        logs: [],
+      }).listSessions(),
+    ).rejects.toThrow("invalid session list");
+  });
+
+  it("explains a Dev Tunnel start without a linked account", async () => {
+    const client = new ControlClient(
+      "https://control.example.edu/api/v1",
+      fakeAuth(),
+      vi.fn(async () =>
+        jsonResponse(
+          { error: { code: "tunnel_link_required", message: "conflict" } },
+          { status: 409 },
+        ),
+      ),
+    );
+    await expect(client.startSession(providerFixture.id)).rejects.toThrow(
+      "link one under Dev Tunnels",
+    );
+  });
+
   it("rejects a session missing required fields rather than rendering them undefined", async () => {
     for (const field of [
       "id",
@@ -58,6 +84,7 @@ describe("checked narrow cs-plane session JSON contract", () => {
       "sshHost",
       "partition",
       "rootFolder",
+      "tunnelModes",
       "createdAt",
       "updatedAt",
     ] as const) {
@@ -155,6 +182,7 @@ describe("checked narrow cs-plane run history JSON contract", () => {
     partition: "cpu",
     rootFolder: "$HOME/project",
     resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 },
+    tunnelModes: ["devtunnel", "websocket"],
     finalState: "STOPPED",
     startedAt: "2030-01-01T00:00:30Z",
     endedAt: "2030-01-01T01:00:30Z",

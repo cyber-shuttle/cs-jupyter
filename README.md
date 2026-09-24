@@ -16,14 +16,14 @@ Pre-release 0.1.0.
 | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
 | cs-plane 0.2.0 or newer                                                                                  | Owns every API this client calls: sign-in, hosts, keys, sessions |
 | CILogon account                                                                                          | Sole sign-in path                                                |
-| [Dev Tunnels](https://learn.microsoft.com/en-us/azure/developer/dev-tunnels/) account (Microsoft/GitHub) | Optional; gives each session a fallback route                    |
+| [Dev Tunnels](https://learn.microsoft.com/en-us/azure/developer/dev-tunnels/) account (Microsoft/GitHub) | Optional; enables a session's Dev Tunnel mode                    |
 | A current browser                                                                                        | No polyfills ship                                                |
 
 ## Usage
 
 1. **Sign in** on the CyberShuttle title row of the Launcher.
-2. **Add Session** in the Launcher's **Sessions** section submits a Slurm job; its card shows host, account,
-   state, resources and remaining walltime.
+2. **Add Session** in the Launcher's **Sessions** section submits a Slurm job reached over WebSocket, Dev Tunnel
+   or both; its card shows host, account, state, resources and remaining walltime.
 3. Open the card and choose **Connect** once it reads `READY`. The detail dialog shows usage and the status log.
 4. **Run history** keeps every run, including runs whose card was deleted.
 

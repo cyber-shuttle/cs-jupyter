@@ -39,7 +39,7 @@ navigates to CILogon. On return, the next load posts `code`, `state` and the ver
 (cs-plane holds the client secret) and restores the URL. Tokens live under `cybershuttle.oauth.v1`, are refreshed
 through `oauth/refresh` a minute before expiry, and are dropped once expired.
 
-A linked Dev Tunnels account is optional; cs-plane delegates a Dev Tunnel to each session as a fallback route.
+A linked Dev Tunnels account is optional; it enables the Dev Tunnel mode a session may choose besides WebSocket.
 The client drives the device-code flow and shows the verification URI and code; cs-plane keeps the credential.
 
 ## Session lifecycle

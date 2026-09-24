@@ -125,6 +125,7 @@ function formHarness() {
         }),
     ),
     sshAuthWebSocket: vi.fn((_host: string) => vi.fn()),
+    getTunnelLink: vi.fn(async () => ({ linked: false })),
     validateCreateRequest: vi.fn(
       async (_request: ISessionCreateRequest, _signal?: AbortSignal) => ({
         sessionId: "s-012345abcdef",
@@ -397,6 +398,19 @@ describe("SSH CRUD and session-first creation", () => {
     expect(request().partition).toBe("cpu");
     expect(request().resources).not.toHaveProperty("gpuType");
     expect(request().resources).not.toHaveProperty("gpuCount");
+  });
+
+  it("keeps WebSocket chosen and Dev Tunnel disabled without a linked account", async () => {
+    const form = await discoveredAlpha();
+    const mode = (value: string) =>
+      control<HTMLInputElement>(form, `input[value="${value}"]`);
+    expect(mode("devtunnel").disabled).toBe(true);
+    mode("websocket").checked = false;
+    mode("websocket").dispatchEvent(new Event("change"));
+    expect(mode("websocket").checked).toBe(true);
+    const request = captureCreateRequest(form);
+    await submitValidForm(form);
+    expect(request().tunnelModes).toEqual(["websocket"]);
   });
 
   it("keeps non-GPU GRES on CPU and does not drop mixed GPU partitions", async () => {

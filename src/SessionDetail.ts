@@ -3,7 +3,7 @@
 // again submits a fresh one. The status log stays visible, not behind a
 // disclosure, since it shows when a session last said anything.
 import { PanelBoundWidget } from "./RebuildingWidget";
-import { isTerminal, type ISession } from "./Common";
+import { isTerminal, TUNNEL_MODE_LABEL, type ISession } from "./Common";
 import type { CyberShuttlePanel } from "./CyberShuttlePanel";
 import type { ISessionLogTail } from "./ControlClient";
 import {
@@ -157,6 +157,10 @@ export class SessionDetail extends PanelBoundWidget {
       ["Workspace", session.rootFolder],
       ...sessionSummary(session),
       ["Walltime", `${session.resources.wallMinutes} min`],
+      [
+        "Tunnel",
+        session.tunnelModes.map((mode) => TUNNEL_MODE_LABEL[mode]).join(" + "),
+      ],
     ];
     if (session.resources.gpuCount) {
       rows.push([

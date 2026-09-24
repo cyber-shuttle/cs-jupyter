@@ -41,6 +41,13 @@ export type SessionState = (typeof SESSION_STATES)[number];
 export const SESSION_LAUNCHERS = ["cs-plane", "client"] as const;
 type SessionLauncher = (typeof SESSION_LAUNCHERS)[number];
 
+export const TUNNEL_MODES = ["devtunnel", "websocket"] as const;
+export type TunnelMode = (typeof TUNNEL_MODES)[number];
+export const TUNNEL_MODE_LABEL: Record<TunnelMode, string> = {
+  devtunnel: "Dev Tunnel",
+  websocket: "WebSocket",
+};
+
 export const VALIDATION_STATUSES = ["PASSED", "FAILED"] as const;
 type SessionValidationStatus = (typeof VALIDATION_STATUSES)[number];
 
@@ -62,6 +69,7 @@ interface IJobSpec {
   partition: string;
   rootFolder: string;
   resources: IResources;
+  tunnelModes: TunnelMode[];
 }
 
 export interface ISessionCreateRequest extends IJobSpec {
