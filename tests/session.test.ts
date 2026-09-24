@@ -85,6 +85,7 @@ describe("shared cs-plane client", () => {
       partition: "debug",
       rootFolder: "projects/demo",
       resources: { cores: 1, memoryMb: 1024, wallMinutes: 30 },
+      tunnelModes: ["websocket" as const],
     };
     await client.validateCreateRequest(request);
     await client.createSession(request);
@@ -199,6 +200,7 @@ describe("shared cs-plane client", () => {
           partition: "debug",
           rootFolder: ".",
           resources: { cores: 1, memoryMb: 1024, wallMinutes: 30 },
+          tunnelModes: ["websocket"],
         }),
       ).rejects.toThrow("invalid session validation");
     }

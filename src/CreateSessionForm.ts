@@ -7,7 +7,14 @@
 // chrome cannot swallow it before submit.
 import { Signal } from "@lumino/signaling";
 import { Widget } from "@lumino/widgets";
-import { IPartition, ISessionCreateRequest, ISshHost } from "./Common";
+import {
+  IPartition,
+  ISessionCreateRequest,
+  ISshHost,
+  TUNNEL_MODE_LABEL,
+  TUNNEL_MODES,
+  type TunnelMode,
+} from "./Common";
 import { ControlClient } from "./ControlClient";
 import type { SshLoginDock } from "./ssh";
 import { button, element, field, fillOptions, select } from "./dom";
@@ -94,6 +101,7 @@ interface ISessionDraft {
   gpuType: string;
   gpuCount: number;
   account: string | undefined;
+  tunnelModes: TunnelMode[];
 }
 
 function freshDraft(): ISessionDraft {
@@ -107,6 +115,7 @@ function freshDraft(): ISessionDraft {
     gpuType: "",
     gpuCount: 1,
     account: undefined,
+    tunnelModes: ["websocket"],
   };
 }
 
@@ -124,6 +133,7 @@ export class CreateSessionForm extends Widget {
   private _draft = freshDraft();
   private _discovery: SlurmDiscovery;
   private _review: ReviewStep;
+  private _devtunnelLinked: Promise<boolean>;
 
   constructor(
     private _api: ControlClient,
@@ -135,6 +145,10 @@ export class CreateSessionForm extends Widget {
     this.hide();
     this._discovery = new SlurmDiscovery(this._api, loginDock);
     this._review = new ReviewStep(this._api);
+    this._devtunnelLinked = this._api.getTunnelLink().then(
+      ({ linked }) => linked,
+      () => false,
+    );
     this._render();
   }
 
@@ -431,6 +445,7 @@ export class CreateSessionForm extends Widget {
       field("Walltime (minutes)", wall),
       gpuTypeField,
       gpuCountField,
+      this._buildTunnelModes(),
       error,
       footer,
     );
@@ -457,6 +472,7 @@ export class CreateSessionForm extends Widget {
           : {}),
         partition: choice.partition.name,
         rootFolder: rootFolder.value.trim(),
+        tunnelModes: this._draft.tunnelModes,
         resources: {
           cores: Number(cores.value),
           memoryMb: Number(memory.value),
@@ -474,6 +490,44 @@ export class CreateSessionForm extends Widget {
       void this._review.validate(this._reviewHooks());
     };
     return form;
+  }
+
+  private _buildTunnelModes(): HTMLElement {
+    const fieldset = element("fieldset", "", "csResourceType");
+    const choices = element("div", "", "csResourceTypeChoices");
+    const hint = element(
+      "div",
+      "Link an account under Dev Tunnels in the account menu to use Dev Tunnel.",
+      "csFieldHelp",
+    );
+    fieldset.append(element("legend", "Tunnel", "csLabel"), choices, hint);
+    for (const mode of ["websocket", "devtunnel"] as const) {
+      const label = element("label", "", "csResourceTypeOption");
+      const checkbox = element("input");
+      checkbox.type = "checkbox";
+      checkbox.name = "tunnelModes";
+      checkbox.value = mode;
+      checkbox.checked = this._draft.tunnelModes.includes(mode);
+      checkbox.onchange = () => {
+        const modes = TUNNEL_MODES.filter((item) =>
+          item === mode
+            ? checkbox.checked
+            : this._draft.tunnelModes.includes(item),
+        );
+        if (modes.length) this._draft.tunnelModes = modes;
+        else checkbox.checked = true;
+      };
+      label.append(checkbox, element("span", TUNNEL_MODE_LABEL[mode]));
+      choices.appendChild(label);
+      if (mode === "devtunnel") {
+        checkbox.disabled = true;
+        void this._devtunnelLinked.then((linked) => {
+          checkbox.disabled = !linked;
+          hint.hidden = linked;
+        });
+      }
+    }
+    return fieldset;
   }
 }
 

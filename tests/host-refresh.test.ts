@@ -27,6 +27,7 @@ const createRequest = {
   partition: "cpu",
   rootFolder: "projects/new",
   resources: { cores: 1, memoryMb: 1024, wallMinutes: 60 },
+  tunnelModes: ["websocket" as const],
 };
 
 afterEach(() => {
@@ -40,6 +41,7 @@ function harness(initialHosts: ISshHost[] = [alpha]) {
     listSshHosts: vi.fn(async (): Promise<ISshHost[]> => initialHosts),
     createSession: vi.fn(),
     startSession: vi.fn(async () => undefined),
+    getTunnelLink: vi.fn(async () => ({ linked: false })),
   };
   const panel = panelFake(api);
   void panel.signIn();

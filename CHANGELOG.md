@@ -8,7 +8,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Remote-only JupyterLite site and federated extension: file browser, kernels and terminals run in a Slurm
   allocation through cs-plane's Jupyter proxy; no in-browser kernel.
-- Launcher **Sessions** section: a wizard (host, partition, cores, memory, GPU, walltime, account) to submit a
+- Launcher **Sessions** section: a wizard (host, partition, cores, memory, GPU, walltime, account, tunnel) to submit a
   session; connect, run again, stop and delete. Cards, the detail dialog and the status bar show a walltime
   countdown; the detail dialog plots CPU, memory and GPU usage.
 - **Run history** of every run, including runs whose card was deleted, with duration, peak memory and CPU and

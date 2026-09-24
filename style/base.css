@@ -113,7 +113,7 @@
   gap: 12px;
   align-items: center;
 }
-.csForm .csField .csFieldHelp {
+.csForm .csFieldHelp {
   grid-column: 2;
 }
 
@@ -793,6 +793,10 @@
   border-color: var(--jp-brand-color1);
   background: var(--jp-brand-color1);
   color: var(--cs-on-brand);
+}
+.csResourceTypeOption input:disabled + span {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .csResourceTypeOption input:focus-visible + span {
   outline: 2px solid var(--jp-brand-color1);
