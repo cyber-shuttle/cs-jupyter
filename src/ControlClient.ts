@@ -8,6 +8,8 @@
 import { PageConfig, URLExt } from "@jupyterlab/coreutils";
 import { ServerConnection } from "@jupyterlab/services";
 import { Token } from "@lumino/coreutils";
+import type * as plane from "./api/session";
+import type * as tunnel from "./api/tunnel";
 import { AuthClient } from "./AuthClient";
 import { OAuthWebSocketFactory, type OAuthWebSocketConnector } from "./ssh";
 import {
@@ -55,21 +57,22 @@ import {
   validControlApiUrl,
   validSessionId,
   type TunnelProvider,
+  type Narrow,
 } from "./Common";
 
 const SESSION_LOG_CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
 
-export interface ISessionLogTail {
-  sessionId: string;
-  lines: ILogLine[];
-}
+export type ISessionLogTail = Narrow<
+  plane.SessionLogTail,
+  { lines: ILogLine[] }
+>;
 
 export const UNCHANGED = Symbol("cs-plane session list unchanged");
 
-export interface ISessionList {
-  sessions: ISession[];
-  logs: ISessionLogTail[];
-}
+export type ISessionList = Narrow<
+  plane.SessionList,
+  { sessions: ISession[]; logs: ISessionLogTail[] }
+>;
 
 export interface IControlAuth extends ITokenProvider {
   interactiveLogin(): Promise<void>;
@@ -260,7 +263,9 @@ export class ControlClient {
     return validateTunnelLinkStatus(await this._request("tunnel"));
   }
 
-  async startTunnelLink(provider: TunnelProvider): Promise<ITunnelLinkStart> {
+  async startTunnelLink(
+    provider: TunnelProvider,
+  ): Promise<tunnel.TunnelLinkStart> {
     return validateTunnelLinkStart(
       await this._request("tunnel/authorizations", json({ provider })),
     );
@@ -523,9 +528,9 @@ const sessionShape = vObject<ISession>({
 const validateSession = expect(sessionShape, "session");
 
 const validateSessionList = expect(
-  vObject<{ sessions: ISession[]; logs?: ISessionLogTail[] }>({
+  vObject<ISessionList>({
     sessions: vArray(sessionShape),
-    logs: vOptional(vArray(sessionLogTailShape)),
+    logs: vArray(sessionLogTailShape),
   }),
   "session list",
 );
@@ -538,9 +543,9 @@ const sampleShape = vObject<IMetricSample>({
     vArray(
       vObject<NonNullable<IMetricSample["gpus"]>[number]>({
         index: vNumber,
-        utilPct: vOptional(vNumber),
-        memUsedMiB: vOptional(vNumber),
-        memTotalMiB: vOptional(vNumber),
+        utilPct: vNumber,
+        memUsedMiB: vNumber,
+        memTotalMiB: vNumber,
       }),
     ),
   ),
@@ -590,7 +595,7 @@ const hostShape = vObject<ISshHost>({
   port: vOptional(vNumber),
   keyId: vOptional(vString()),
   extraDirectives: vArray(vString()),
-  managed: vOptional(vBoolean),
+  managed: vBoolean,
 });
 const validateHost = expect(hostShape, "SSH host");
 const validateHostList = expect(
@@ -626,7 +631,7 @@ export const validateSlurmResource = expect(
         gres: vArray(vObject<IGres>({ name: vString(), count: vNumber })),
       }),
     ),
-    homeDir: vOptional(vString()),
+    homeDir: vString(),
   }),
   "Slurm discovery",
 );
@@ -639,14 +644,6 @@ export type ITunnelLinkStatus =
       linkedAt: string;
     }
   | { linked: false };
-
-interface ITunnelLinkStart {
-  handle: string;
-  userCode: string;
-  verificationUri: string;
-  expiresInSeconds: number;
-  intervalSeconds: number;
-}
 
 type ITunnelLinkPoll =
   | { status: "pending"; intervalSeconds: number; linked: false }
@@ -670,7 +667,7 @@ const validateTunnelLinkStatus = expect(
 );
 
 const validateTunnelLinkStart = expect(
-  vObject<ITunnelLinkStart>({
+  vObject<tunnel.TunnelLinkStart>({
     handle: vString(TOKEN_43),
     userCode: vString(),
     verificationUri: vString(),

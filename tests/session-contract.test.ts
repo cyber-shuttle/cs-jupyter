@@ -11,7 +11,7 @@ const providerFixture = sessionFixture({
 });
 
 describe("checked narrow cs-plane session JSON contract", () => {
-  it("rejects unknown fields and non-canonical state values", async () => {
+  it("ignores unknown fields and rejects non-canonical state values", async () => {
     const list = await clientFor({
       sessions: [providerFixture],
       logs: [],
@@ -25,7 +25,7 @@ describe("checked narrow cs-plane session JSON contract", () => {
         sessions: [{ ...providerFixture, owner: {} }],
         logs: [],
       }).listSessions(),
-    ).rejects.toThrow("invalid session");
+    ).resolves.toBeDefined();
     await expect(
       clientFor({
         sessions: [{ ...providerFixture, state: "ready" }],
@@ -120,7 +120,7 @@ describe("checked narrow cs-plane metric sample JSON contract", () => {
           at,
           memBytes: 1024,
           cpuUsageUsec: 1000,
-          gpus: [{ index: 0, utilPct: 50 }],
+          gpus: [{ index: 0, utilPct: 50, memUsedMiB: 1, memTotalMiB: 2 }],
         },
       ],
     }).getSessionMetrics(providerFixture.id);
@@ -158,6 +158,7 @@ describe("checked narrow cs-plane Slurm discovery JSON contract", () => {
         gres: [{ name: "gpu:a100", count: 4 }],
       },
     ],
+    homeDir: "/home/u",
   };
 
   it("accepts a well-formed discovery", async () => {

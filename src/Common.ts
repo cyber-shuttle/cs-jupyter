@@ -1,9 +1,14 @@
 // Types, identifier and URL validation, and the Validator vocabulary
-// (vString, vNumber, vObject, ...) cs-plane response shapes are built from;
-// vObject matches iff every listed field validates and no other key is
-// present. Nothing here depends on the DOM or on cs-plane, so other modules
-// can import freely. Optional fields mean not observed or not yet, never a
-// stand-in for false or zero.
+// (vString, vNumber, vObject, ...) cs-plane response shapes are built from.
+// The shapes are cs-plane's own, generated into src/api by `bun run types`;
+// each validator is typed against one, so a field cs-plane adds, drops or
+// makes optional fails the build. vObject ignores keys it does not list, so a
+// newer cs-plane still validates; strict refuses them, for grants and tokens.
+// Optional fields mean not observed or not yet, never a stand-in for false or
+// zero.
+
+import type * as plane from "./api/session";
+import type * as ssh from "./api/ssh";
 
 export type TunnelProvider = "microsoft" | "github";
 
@@ -55,135 +60,37 @@ export function isTerminal(state: SessionState): boolean {
   return state === "STOPPED" || state === "FAILED";
 }
 
-interface IResources {
-  cores: number;
-  memoryMb: number;
-  wallMinutes: number;
-  gpuType?: string;
-  gpuCount?: number;
-}
-
-interface IJobSpec {
-  sshHost: string;
-  account?: string;
-  partition: string;
-  rootFolder: string;
-  resources: IResources;
-  tunnelModes: TunnelMode[];
-}
-
-export interface ISessionCreateRequest extends IJobSpec {
-  idempotencyKey: string;
-}
-
-export interface ISessionValidation {
-  sessionId: string;
-  status: SessionValidationStatus;
-  script: string;
-  message: string;
-  stdout?: string;
-  stderr?: string;
-}
-
-export interface ISession extends IJobSpec {
-  id: string;
-  seq: number;
-  state: SessionState;
-  launcher: SessionLauncher;
-  error?: string;
-  createdAt: string;
-  startedAt?: string;
-  updatedAt: string;
-}
-
-export interface IMetricSample {
-  at: string;
-  memBytes?: number;
-  cpuUsageUsec?: number;
-  gpus?: IGpuUtilisation[];
-}
-
-interface IGpuUtilisation {
-  index: number;
-  utilPct?: number;
-  memUsedMiB?: number;
-  memTotalMiB?: number;
-}
-
-export interface ISessionSeries {
-  sessionId: string;
-  samples: IMetricSample[];
-}
-
-export interface IRunStats {
-  requestedMemory?: string;
-  elapsedSeconds?: number;
-  maxRss?: string;
-  cpuEfficiencyPct?: number;
-  memoryEfficiencyPct?: number;
-  cores?: number;
-}
-
-export interface IRun extends IJobSpec {
-  sessionId: string;
-  seq: number;
-  finalState: SessionState;
-  error?: string;
-  startedAt?: string;
-  endedAt: string;
-  stats?: IRunStats;
-  samples?: IMetricSample[];
-  logs?: ILogLine[];
-}
-
+// The generated shapes carry Go's plain strings; Narrow pins the literals cs-plane sends.
+export type Narrow<T, N> = Omit<T, keyof N> & N;
 type LogStream = "status" | "stdout" | "stderr";
+type JobLiterals = { tunnelModes: TunnelMode[] };
 
-export interface ILogLine {
-  stream: LogStream;
-  text: string;
-  at: string;
-}
-
-export interface ISshHost {
-  name: string;
-  hostname?: string;
-  user?: string;
-  port?: number;
-  keyId?: string;
-  extraDirectives: string[];
-  managed?: boolean;
-}
-
-export interface ISshKey {
-  id: string;
-  type: string;
-  fingerprint: string;
-}
-
-export interface IHostHealth {
-  host: string;
-  ok: boolean;
-  message: string;
-}
-
-export interface IGres {
-  name: string;
-  count: number;
-}
-
-export interface IPartition {
-  name: string;
-  cpuCount: number;
-  memoryMb: number;
-  gres: IGres[];
-}
-
-export interface ISlurmInfo {
-  host: string;
-  accounts: string[];
-  partitions: IPartition[];
-  homeDir?: string;
-}
+export type ISessionCreateRequest = Narrow<
+  plane.CreateRequest,
+  JobLiterals & { idempotencyKey: string }
+>;
+export type ISessionValidation = Narrow<
+  plane.ValidationResult,
+  { status: SessionValidationStatus }
+>;
+export type ISession = Narrow<
+  plane.SessionResponse,
+  JobLiterals & { state: SessionState; launcher: SessionLauncher }
+>;
+export type IMetricSample = plane.MetricSample;
+export type ISessionSeries = plane.SessionSeries;
+export type IRunStats = plane.RunStats;
+export type ILogLine = Narrow<plane.SessionLogLine, { stream: LogStream }>;
+export type IRun = Narrow<
+  plane.Run,
+  JobLiterals & { finalState: SessionState; logs?: ILogLine[] }
+>;
+export type ISshHost = ssh.HostEntry;
+export type ISshKey = ssh.SSHKey;
+export type IHostHealth = ssh.HostHealth;
+export type IGres = plane.Gres;
+export type IPartition = plane.Partition;
+export type ISlurmInfo = plane.Resource;
 
 export function isPlainObject(value: unknown): value is Record<string, any> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -311,13 +218,14 @@ export function vEither<T>(...shapes: Validator<T>[]): Validator<T> {
   return (v): v is T => shapes.some((shape) => shape(v));
 }
 
-export function vObject<T>(fields: {
-  [K in keyof T]: Validator<T[K]>;
-}): Validator<T> {
+export function vObject<T>(
+  fields: { [K in keyof T]: Validator<T[K]> },
+  strict = false,
+): Validator<T> {
   const keys = Object.keys(fields);
   return (v): v is T =>
     isPlainObject(v) &&
-    Object.keys(v).every((key) => keys.includes(key)) &&
+    (!strict || Object.keys(v).every((key) => keys.includes(key))) &&
     keys.every((key) =>
       (fields as Record<string, Validator<unknown>>)[key](
         (v as Record<string, unknown>)[key],

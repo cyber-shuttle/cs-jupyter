@@ -67,18 +67,9 @@ describe("session log tails on the polled read", () => {
       { ...log(), sessionId: "invalid" },
       "invalid session list",
     ],
-    ["an unknown field", { ...log(), extra: true }, "invalid session list"],
     [
       "an unknown stream",
       { ...log(), lines: [{ stream: "other", text: "x", at: LOG_AT }] },
-      "invalid session list",
-    ],
-    [
-      "an unknown line field",
-      {
-        ...log(),
-        lines: [{ stream: "stdout", text: "x", extra: true, at: LOG_AT }],
-      },
       "invalid session list",
     ],
     [

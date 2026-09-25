@@ -180,6 +180,7 @@ const controlServer = createServer((request, response) => {
           user: "alice",
           port: 22,
           extraDirectives: [],
+          managed: true,
         },
       ],
     });

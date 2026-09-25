@@ -14,11 +14,13 @@ const alpha: ISshHost = {
   name: "alpha",
   hostname: "alpha.example",
   extraDirectives: [],
+  managed: false,
 };
 const gamma: ISshHost = {
   name: "gamma",
   hostname: "gamma.example",
   extraDirectives: [],
+  managed: false,
 };
 const createRequest = {
   idempotencyKey: "create-one",

@@ -176,20 +176,13 @@ describe("shared cs-plane client", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("strictly validates session validation responses", async () => {
+  it("rejects an unknown session validation status", async () => {
     for (const value of [
       {
         sessionId: "s-012345abcdef",
         status: "UNKNOWN",
         script: "x",
         message: "x",
-      },
-      {
-        sessionId: "s-012345abcdef",
-        status: "PASSED",
-        script: "x",
-        message: "x",
-        extra: true,
       },
     ]) {
       const client = makeClient(vi.fn(async () => jsonResponse(value)) as any);

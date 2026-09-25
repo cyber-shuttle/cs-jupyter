@@ -67,8 +67,8 @@ describe("resource samples", () => {
       gpuUtilisation([
         sample(0, {
           gpus: [
-            { index: 0, utilPct: 12 },
-            { index: 1, utilPct: 88 },
+            { index: 0, utilPct: 12, memUsedMiB: 0, memTotalMiB: 0 },
+            { index: 1, utilPct: 88, memUsedMiB: 0, memTotalMiB: 0 },
           ],
         }),
       ]),

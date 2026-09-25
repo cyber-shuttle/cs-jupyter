@@ -16,6 +16,7 @@ import {
   validSessionId,
 } from "./Common";
 import type { ISessionLogTail } from "./ControlClient";
+import type { SessionAccessResponse } from "./api/session";
 
 export function selectedSession(
   search = window.location.search,
@@ -107,19 +108,17 @@ export function displayState(
 const ACCESS_CACHE_PREFIX = "cybershuttle.session-access.v1.";
 export const RUN_REPORT_KEY = "cybershuttle.run-report.v1";
 
-export interface ISessionAccess {
-  sessionId: string;
-  seq: number;
-  expiresAt: string;
-  jupyter: { uri: string; token: string };
-}
+export type ISessionAccess = SessionAccessResponse;
 
-const accessShape = vObject<ISessionAccess>({
-  sessionId: vString(SESSION_ID),
-  seq: vPositiveInt,
-  expiresAt: vString(),
-  jupyter: vObject({ uri: vString(), token: vString(TOKEN_43) }),
-});
+const accessShape = vObject<ISessionAccess>(
+  {
+    sessionId: vString(SESSION_ID),
+    seq: vPositiveInt,
+    expiresAt: vString(),
+    jupyter: vObject({ uri: vString(), token: vString(TOKEN_43) }, true),
+  },
+  true,
+);
 
 export function validateSessionAccess(value: unknown): ISessionAccess {
   if (!accessShape(value) || !(Date.parse(value.expiresAt) > Date.now())) {

@@ -1,0 +1,20 @@
+packages:
+  - path: github.com/cyber-shuttle/cs-plane/subsystems/session
+    include_files: [wire.go]
+    output_path: ../src/api/session.ts
+    type_mappings:
+      time.Time: string
+  - path: github.com/cyber-shuttle/cs-plane/subsystems/ssh
+    include_files: [wire.go]
+    output_path: ../src/api/ssh.ts
+  - path: github.com/cyber-shuttle/cs-plane/subsystems/tunnel
+    include_files: [wire.go]
+    output_path: ../src/api/tunnel.ts
+    type_mappings:
+      time.Time: string
+  - path: github.com/cyber-shuttle/cs-plane/subsystems/oauth
+    include_files: [wire.go]
+    output_path: ../src/api/oauth.ts
+  - path: github.com/cyber-shuttle/cs-plane/internal/ssh
+    include_files: [wire.go]
+    output_path: ../src/api/frames.ts

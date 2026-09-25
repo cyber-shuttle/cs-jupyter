@@ -15,6 +15,7 @@ import { controlFake, FakeOperation } from "./fakes";
 const hosts = ["alpha", "beta"].map((name) => ({
   name,
   extraDirectives: [],
+  managed: false,
 }));
 function discovery(host: string) {
   return {
