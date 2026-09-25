@@ -15,6 +15,19 @@ jobs:
       - run: bun run lint
       - run: bun run test
 
+  # src/api is generated from the cs-plane version tools/go.mod pins; it must match a fresh run byte for byte.
+  types:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: tools/go.mod
+          cache-dependency-path: tools/go.sum
+      - uses: oven-sh/setup-bun@v2
+      - run: bun run types
+      - run: git add -N src/api && git diff --exit-code src/api
+
   # The end-to-end run needs the built site and a real browser, so it is its own
   # job: it drives JupyterLite against fake cs-plane and Jupyter Server hops
   # and checks the whole pipeline, not the units underneath it.

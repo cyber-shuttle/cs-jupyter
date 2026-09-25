@@ -4,6 +4,7 @@
 // `state` the redirect carries. The credential is held in per-tab
 // sessionStorage so it survives that navigation. Every cs-plane response is
 // validated strictly against its expected shape.
+import type { OAuthConfigResponse, TokenResponse } from "./api/oauth";
 import {
   isPlainObject,
   vBoundedInt,
@@ -41,19 +42,6 @@ interface IStoredCredentials {
   expiresAt: number;
 }
 
-interface IOAuthConfig {
-  issuer: string;
-  authorizationEndpoint: string;
-  clientId: string;
-  scope: string;
-}
-
-interface IOAuthTokens {
-  idToken: string;
-  refreshToken?: string;
-  expiresInSeconds: number;
-}
-
 interface IPendingSignIn {
   state: string;
   verifier: string;
@@ -61,31 +49,40 @@ interface IPendingSignIn {
   returnTo?: string;
 }
 
-const oauthConfigShape = vObject<IOAuthConfig>({
+const oauthConfigShape = vObject<OAuthConfigResponse>({
   issuer: vString(),
   authorizationEndpoint: vString(),
   clientId: vString(),
   scope: vString(),
 });
 
-const oauthTokensShape = vObject<IOAuthTokens>({
-  idToken: vString(),
-  refreshToken: vOptional(vString()),
-  expiresInSeconds: vBoundedInt(1, 86400),
-});
+const oauthTokensShape = vObject<TokenResponse>(
+  {
+    idToken: vString(),
+    refreshToken: vOptional(vString()),
+    expiresInSeconds: vBoundedInt(1, 86400),
+  },
+  true,
+);
 
-const storedCredentialsShape = vObject<IStoredCredentials>({
-  idToken: vString(),
-  refreshToken: vOptional(vString()),
-  expiresAt: vNumber,
-});
+const storedCredentialsShape = vObject<IStoredCredentials>(
+  {
+    idToken: vString(),
+    refreshToken: vOptional(vString()),
+    expiresAt: vNumber,
+  },
+  true,
+);
 
-const pendingSignInShape = vObject<IPendingSignIn>({
-  state: vString(),
-  verifier: vString(),
-  redirectUri: vString(),
-  returnTo: vOptional(vString()),
-});
+const pendingSignInShape = vObject<IPendingSignIn>(
+  {
+    state: vString(),
+    verifier: vString(),
+    redirectUri: vString(),
+    returnTo: vOptional(vString()),
+  },
+  true,
+);
 
 function readStored<T>(key: string, shape: Validator<T>): T | undefined {
   const raw = sessionStorage.getItem(key);
@@ -276,7 +273,7 @@ export class AuthClient {
     }
   }
 
-  private _store(tokens: IOAuthTokens): void {
+  private _store(tokens: TokenResponse): void {
     this._generation++;
     this._credentials = {
       idToken: tokens.idToken,

@@ -13,7 +13,9 @@ import {
   parseUrl,
   type ITokenProvider,
   base64UrlEncode,
+  type Narrow,
 } from "./Common";
+import type { ServerFrame as WireServerFrame } from "./api/frames";
 import { element } from "./dom";
 
 const CYBERSHUTTLE_WEBSOCKET_PROTOCOL = "cybershuttle.v1";
@@ -101,9 +103,7 @@ export interface ISshOperationConsole {
   dispose(): void;
 }
 
-type ServerFrame =
-  | { type: "ready" }
-  | { type: "exit"; code?: number; message?: string };
+type ServerFrame = Narrow<WireServerFrame, { type: "ready" | "exit" }>;
 
 export class SshOperationConsole implements ISshOperationConsole {
   readonly node = element("section", "", "csSshAuthTranscript", {
