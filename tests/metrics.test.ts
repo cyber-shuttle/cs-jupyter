@@ -245,6 +245,21 @@ describe("run history view", () => {
     history.dispose();
   });
 
+  it("filters runs by the platform that launched them", async () => {
+    const vscode = runFixture({
+      sessionId: "s-888888888888",
+      launcher: "client",
+    });
+    const history = new RunHistory(panelWith([finished, vscode], [live]));
+    const platform = history.node.querySelector<HTMLSelectElement>("select")!;
+    const shown = () => history.node.querySelectorAll("details").length;
+    expect(shown()).toBe(3);
+    platform.value = "client";
+    platform.dispatchEvent(new Event("change"));
+    expect(shown()).toBe(1);
+    history.dispose();
+  });
+
   it("does not list a terminal session as if it were still going", async () => {
     const stopped = { ...live, state: "STOPPED" } as ISession;
     const history = new RunHistory(panelWith([], [stopped]));

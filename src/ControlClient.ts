@@ -566,6 +566,7 @@ const validateRunList = expect(
         sessionId: vString(SESSION_ID),
         ...jobSpecFields,
         seq: vPositiveInt,
+        launcher: vOptional(vOneOf(SESSION_LAUNCHERS)),
         finalState: vOneOf(SESSION_STATES),
         error: vOptional(vString()),
         startedAt: vOptional(vString()),

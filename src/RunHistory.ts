@@ -14,8 +14,10 @@ import {
   detailGridWithRemaining,
   disclosure,
   element,
+  field,
   logSection,
   dialogBody,
+  select,
   statePill,
 } from "./dom";
 import {
@@ -24,6 +26,12 @@ import {
   sessionSummary,
   usagePlots,
 } from "./metrics";
+
+const PLATFORMS: Array<[string, string]> = [
+  ["", "All"],
+  ["cs-plane", "JupyterLab"],
+  ["client", "VS Code"],
+];
 
 interface IHistoryEntry {
   key: string;
@@ -35,6 +43,7 @@ interface IHistoryEntry {
 
 export class RunHistory extends PanelBoundWidget {
   private _open = new Set<string>();
+  private _platform = "";
 
   constructor(panel: CyberShuttlePanel, open?: string) {
     super(panel);
@@ -66,7 +75,11 @@ export class RunHistory extends PanelBoundWidget {
         run,
       };
     });
-    return [...running, ...finished];
+    return ([...running, ...finished] as IHistoryEntry[]).filter(
+      (entry) =>
+        !this._platform ||
+        (entry.run ?? entry.session)!.launcher === this._platform,
+    );
   }
 
   protected _rebuild(): void {
@@ -75,12 +88,26 @@ export class RunHistory extends PanelBoundWidget {
       "Every session you have run, still running first. A run is kept even after its card is deleted.",
       this._state.error,
     );
+    const platform = select("platform", PLATFORMS, false);
+    platform.value = this._platform;
+    platform.addEventListener("change", () => {
+      this._platform = platform.value;
+      this._render();
+    });
+    platform.dataset.sessionAction = "platform";
+    scroll.appendChild(field("Platform", platform));
     const entries = this._entries();
     for (const entry of entries) {
       card.appendChild(this._entry(entry));
     }
     if (entries.length === 0) {
-      card.appendChild(element("div", "No runs yet.", "csStatus"));
+      card.appendChild(
+        element(
+          "div",
+          this._platform ? "No runs on this platform." : "No runs yet.",
+          "csStatus",
+        ),
+      );
     }
     scroll.appendChild(card);
     this.node.appendChild(root);

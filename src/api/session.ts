@@ -66,6 +66,7 @@ export interface DevtunnelAccess {
 }
 export interface AttachResponse {
   session: SessionResponse;
+  port: number /* uint16 */;
   link?: LinkAccess;
   devtunnel?: DevtunnelAccess;
 }
@@ -89,18 +90,6 @@ export interface ValidationResult {
 }
 export interface RunList {
   runs: Run[];
-}
-export interface FinishedRun {
-  finalState: string;
-  error?: string;
-  startedAt?: string;
-  endedAt: string;
-  stats?: RunStats;
-  samples?: MetricSample[];
-}
-export interface SessionHistory {
-  createdAt?: string;
-  runs: FinishedRun[];
 }
 export interface SSHAccessResponse {
   port: number /* int */;
@@ -141,6 +130,7 @@ export interface RunStats {
 export interface Run {
   sessionId: string;
   seq: number /* int */;
+  launcher?: string;
   sshHost: string;
   account?: string;
   partition: string;
