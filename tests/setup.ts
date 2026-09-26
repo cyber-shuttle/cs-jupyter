@@ -4,10 +4,7 @@
 // implements neither showModal nor close.
 import { PageConfig } from "@jupyterlab/coreutils";
 
-PageConfig.setOption(
-  "cybershuttleControlApiUrl",
-  "http://localhost:8045/api/v1",
-);
+PageConfig.setOption("cybershuttlePlaneApiUrl", "http://localhost:8045/api/v1");
 class TestStorage implements Storage {
   private values = new Map<string, string>();
   get length(): number {

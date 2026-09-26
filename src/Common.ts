@@ -10,7 +10,8 @@
 import type * as plane from "./api/session";
 import type * as ssh from "./api/ssh";
 
-export type TunnelProvider = "microsoft" | "github";
+export const DEVTUNNELS_PROVIDERS = ["microsoft", "github"] as const;
+export type DevTunnelsProvider = (typeof DEVTUNNELS_PROVIDERS)[number];
 
 export interface OAuthCredentials {
   idToken: string;
@@ -43,14 +44,18 @@ export const SESSION_STATES = [
 ] as const;
 export type SessionState = (typeof SESSION_STATES)[number];
 
-export const SESSION_LAUNCHERS = ["cs-plane", "client"] as const;
-type SessionLauncher = (typeof SESSION_LAUNCHERS)[number];
+export const PLATFORMS = ["jupyterlab", "vscode"] as const;
+type Platform = (typeof PLATFORMS)[number];
+export const PLATFORM_LABEL: Record<Platform, string> = {
+  jupyterlab: "JupyterLab",
+  vscode: "VS Code",
+};
 
-export const TUNNEL_MODES = ["devtunnel", "websocket"] as const;
-export type TunnelMode = (typeof TUNNEL_MODES)[number];
-export const TUNNEL_MODE_LABEL: Record<TunnelMode, string> = {
+export const TRANSPORTS = ["devtunnel", "link"] as const;
+export type Transport = (typeof TRANSPORTS)[number];
+export const TRANSPORT_LABEL: Record<Transport, string> = {
   devtunnel: "Dev Tunnel",
-  websocket: "WebSocket",
+  link: "Link",
 };
 
 export const VALIDATION_STATUSES = ["PASSED", "FAILED"] as const;
@@ -63,7 +68,7 @@ export function isTerminal(state: SessionState): boolean {
 // The generated shapes carry Go's plain strings; Narrow pins the literals cs-plane sends.
 export type Narrow<T, N> = Omit<T, keyof N> & N;
 type LogStream = "status" | "stdout" | "stderr";
-type JobLiterals = { tunnelModes: TunnelMode[] };
+type JobLiterals = { tunnelModes: Transport[] };
 
 export type ISessionCreateRequest = Narrow<
   plane.CreateRequest,
@@ -75,19 +80,23 @@ export type ISessionValidation = Narrow<
 >;
 export type ISession = Narrow<
   plane.SessionResponse,
-  JobLiterals & { state: SessionState; launcher: SessionLauncher }
+  JobLiterals & { state: SessionState; platform: Platform }
 >;
-export type IMetricSample = plane.MetricSample;
+export type IUsageSample = plane.UsageSample;
 export type ISessionSeries = plane.SessionSeries;
 export type IRunStats = plane.RunStats;
 export type ILogLine = Narrow<plane.SessionLogLine, { stream: LogStream }>;
 export type IRun = Narrow<
   plane.Run,
-  JobLiterals & { finalState: SessionState; logs?: ILogLine[] }
+  JobLiterals & {
+    platform?: Platform;
+    finalState: SessionState;
+    logs?: ILogLine[];
+  }
 >;
 export type ISshHost = ssh.HostEntry;
 export type ISshKey = ssh.SSHKey;
-export type IHostHealth = ssh.HostHealth;
+export type ISshHostHealth = ssh.HostHealth;
 export type IGres = plane.Gres;
 export type IPartition = plane.Partition;
 export type ISlurmInfo = plane.Resource;
@@ -129,16 +138,16 @@ export function assertSecureOrLoopback(
   }
 }
 
-export function validControlApiUrl(configured: string): string {
+export function validPlaneApiUrl(configured: string): string {
   const url = parseUrl(
     configured,
-    "cybershuttleControlApiUrl must be an absolute control API URL.",
+    "cybershuttlePlaneApiUrl must be an absolute cs-plane API URL.",
   );
   assertSecureOrLoopback(
     url,
     "https:",
     "http:",
-    "cybershuttleControlApiUrl is invalid; it must use HTTPS or loopback HTTP without credentials, query, or fragment.",
+    "cybershuttlePlaneApiUrl is invalid; it must use HTTPS or loopback HTTP without credentials, query, or fragment.",
   );
   url.pathname = url.pathname.replace(/\/+$/, "");
   return url.toString().replace(/\/$/, "");

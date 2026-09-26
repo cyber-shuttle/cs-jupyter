@@ -1,14 +1,10 @@
 // Cross-origin auth headers and conditional ETag-based polling for
-// ControlClient's session list. A 304 response carries no ETag of its own. The
+// PlaneClient's session list. A 304 response carries no ETag of its own. The
 // client must retain the previous ETag across an unchanged answer to send it
 // again. Every request carries only a bearer ID token.
 import { etagResponse, fakeAuth } from "./fakes";
 import { afterEach, assert, describe, expect, it, vi } from "vitest";
-import {
-  ControlClient,
-  safeControlFetch,
-  UNCHANGED,
-} from "../src/ControlClient";
+import { PlaneClient, safePlaneFetch, UNCHANGED } from "../src/PlaneClient";
 import { jsonResponse } from "../src/Common";
 
 const auth = { ...fakeAuth(), invalidateToken: vi.fn() };
@@ -18,20 +14,20 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("OAuth cross-origin control client", () => {
-  it("sends only a bearer ID token to the configured control origin", async () => {
+describe("OAuth cross-origin cs-plane client", () => {
+  it("sends only a bearer ID token to the configured cs-plane origin", async () => {
     const browserFetch = vi.fn<typeof globalThis.fetch>(async () =>
       jsonResponse({ hosts: [] }),
     );
-    const client = new ControlClient(
-      "https://control.example.edu/api/v1",
+    const client = new PlaneClient(
+      "https://plane.example.edu/api/v1",
       auth,
       browserFetch,
     );
     await expect(client.listSshHosts()).resolves.toEqual([]);
     const [input, init] = browserFetch.mock.calls[0];
     assert.isDefined(init);
-    expect(String(input)).toBe("https://control.example.edu/api/v1/hosts");
+    expect(String(input)).toBe("https://plane.example.edu/api/v1/hosts");
     const headers = new Headers(init.headers);
     expect([...headers]).toEqual([["authorization", "Bearer delegated-token"]]);
     expect(init.cache).toBe("no-store");
@@ -41,31 +37,31 @@ describe("OAuth cross-origin control client", () => {
 
   it("invalidates delegated access after HTTP 401", async () => {
     auth.invalidateToken.mockClear();
-    const guarded = safeControlFetch(
-      "https://control.example.edu/api/v1",
+    const guarded = safePlaneFetch(
+      "https://plane.example.edu/api/v1",
       auth,
       vi.fn<typeof globalThis.fetch>(
         async () => new Response(null, { status: 401 }),
       ),
     );
-    await guarded("https://control.example.edu/api/v1/sessions");
+    await guarded("https://plane.example.edu/api/v1/sessions");
     expect(auth.invalidateToken).toHaveBeenCalledOnce();
   });
 
   it("keeps delegated access after HTTP 403", async () => {
     auth.invalidateToken.mockClear();
-    const guarded = safeControlFetch(
-      "https://control.example.edu/api/v1",
+    const guarded = safePlaneFetch(
+      "https://plane.example.edu/api/v1",
       auth,
       vi.fn<typeof globalThis.fetch>(
         async () => new Response(null, { status: 403 }),
       ),
     );
-    await guarded("https://control.example.edu/api/v1/sessions");
+    await guarded("https://plane.example.edu/api/v1/sessions");
     expect(auth.invalidateToken).not.toHaveBeenCalled();
   });
 
-  it("uses a custom control base for its default AuthClient", async () => {
+  it("uses a custom cs-plane base for its default AuthClient", async () => {
     sessionStorage.setItem(
       "cybershuttle.oauth.v1",
       JSON.stringify({
@@ -81,26 +77,26 @@ describe("OAuth cross-origin control client", () => {
     );
     vi.stubGlobal("fetch", browserFetch);
 
-    await new ControlClient(
-      "https://custom-control.example.edu/custom/api/v1",
+    await new PlaneClient(
+      "https://custom-plane.example.edu/custom/api/v1",
     ).listSshHosts();
 
     expect(browserFetch.mock.calls.map(([input]) => String(input))).toEqual([
-      "https://custom-control.example.edu/custom/api/v1/oauth/refresh",
-      "https://custom-control.example.edu/custom/api/v1/hosts",
+      "https://custom-plane.example.edu/custom/api/v1/oauth/refresh",
+      "https://custom-plane.example.edu/custom/api/v1/hosts",
     ]);
   });
 
   it("rejects unrelated origins", async () => {
-    const guarded = safeControlFetch(
-      "https://control.example.edu/api/v1",
+    const guarded = safePlaneFetch(
+      "https://plane.example.edu/api/v1",
       auth,
       vi.fn<typeof globalThis.fetch>(
         async () => new Response(null, { status: 200 }),
       ),
     );
     await expect(guarded("https://hostile.example/api/v1")).rejects.toThrow(
-      "outside the configured control origin",
+      "outside the configured cs-plane origin",
     );
   });
 });
@@ -110,8 +106,8 @@ describe("conditional session polling", () => {
   const etag = '"abc123"';
 
   function client(browserFetch: typeof globalThis.fetch) {
-    return new ControlClient(
-      "https://control.example.edu/api/v1",
+    return new PlaneClient(
+      "https://plane.example.edu/api/v1",
       auth,
       browserFetch,
     );

@@ -138,11 +138,12 @@ export function confirmDelete(
   message: string,
   action: string,
   cancel: () => void,
-  remove: () => void,
+  confirm: () => void,
+  label = "Delete",
 ): HTMLElement[] {
   const keep = button("Cancel", "csSecondaryButton", cancel);
   keep.dataset.sessionAction = `confirm-cancel-${action}`;
-  const drop = button("Delete", "csDangerButton", remove);
+  const drop = button(label, "csDangerButton", confirm);
   drop.dataset.sessionAction = `confirm-delete-${action}`;
   return [element("span", message, "csMeta"), keep, drop];
 }

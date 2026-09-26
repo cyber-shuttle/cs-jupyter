@@ -1,11 +1,11 @@
 // A session's identity, on-screen state, and cached Jupyter access. Identity
-// in the URL is the sessionId or nothing; the attempt seq stays server-side
+// in the URL is the sessionId or nothing; the run number stays in cs-plane
 // and arrives with the session record. displayState is the one place that
-// overlays a relaunching terminal session with SUBMITTING for display. Cached
-// Jupyter access carries the seq it was granted for, so a caller that knows
-// the live seq can refuse a stale grant, and its Jupyter URI is that
+// overlays a terminal session being started with SUBMITTING for display.
+// Cached Jupyter access carries the run it was granted for, so a caller that
+// knows the live run can refuse a stale grant, and its Jupyter URI is that
 // session's cs-plane proxy path.
-import type { IMetricSample, IRun, ISession, SessionState } from "./Common";
+import type { IUsageSample, IRun, ISession, SessionState } from "./Common";
 import {
   SESSION_ID,
   TOKEN_43,
@@ -15,7 +15,7 @@ import {
   vString,
   validSessionId,
 } from "./Common";
-import type { ISessionLogTail } from "./ControlClient";
+import type { ISessionLogTail } from "./PlaneClient";
 import type { SessionAccessResponse } from "./api/session";
 
 export function selectedSession(
@@ -62,12 +62,12 @@ export function getActiveSessionId(): string | undefined {
   return activeSession;
 }
 
-type IBusySessionIds = ReadonlyMap<string, "relaunch" | "action">;
+type IBusySessionIds = ReadonlyMap<string, "start" | "action">;
 
 export interface ISessionUiState {
   readonly sessions: readonly ISession[];
   readonly logs: ReadonlyMap<string, ISessionLogTail>;
-  readonly samples: ReadonlyMap<string, readonly IMetricSample[]>;
+  readonly samples: ReadonlyMap<string, readonly IUsageSample[]>;
   readonly runs: readonly IRun[];
   readonly loading: boolean;
   readonly updatesStatus: string;
@@ -100,7 +100,7 @@ export function displayState(
   session: ISession,
   busy: IBusySessionIds,
 ): SessionState {
-  return busy.get(session.id) === "relaunch" && isTerminal(session.state)
+  return busy.get(session.id) === "start" && isTerminal(session.state)
     ? "SUBMITTING"
     : session.state;
 }

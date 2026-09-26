@@ -9,10 +9,10 @@ import {
   formatRemaining,
   remainingMs,
 } from "../src/dom";
-import { WalltimeStatus } from "../src/metrics";
+import { WalltimeStatus } from "../src/usage";
 import { RunHistory } from "../src/RunHistory";
 import { SessionDetail } from "../src/SessionDetail";
-import { ControllerFake, sessionFixture as session, uiState } from "./fakes";
+import { PanelStateFake, sessionFixture as session, uiState } from "./fakes";
 
 function remainingText(node: HTMLElement): string {
   const label = [...node.querySelectorAll(".csSessionDetailLabel")].find(
@@ -72,11 +72,11 @@ describe("walltime countdown", () => {
       resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 },
     });
     const detail = new SessionDetail(
-      new ControllerFake(uiState({ sessions: [started] })) as never,
+      new PanelStateFake(uiState({ sessions: [started] })) as never,
       started.id,
     );
     const history = new RunHistory(
-      new ControllerFake(uiState({ sessions: [started] })) as never,
+      new PanelStateFake(uiState({ sessions: [started] })) as never,
     );
     expect(remainingText(detail.node)).toBe("30m 0s");
     expect(remainingText(detail.node)).toBe(remainingText(history.node));

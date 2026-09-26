@@ -1,36 +1,36 @@
 // Every field lookup goes through control, input or picker, so a broken selector
 // fails where it is read. Discovery and validation are async requests resolved
 // over two microtask turns, matching how the form really resolves them. Only SSH
-// host entries CyberShuttle itself wrote are editable or deletable; other
+// host entries cs-plane itself wrote are editable or deletable; other
 // entries are read-only.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ISessionCreateRequest } from "../src/Common";
-import { ControlError, validateSlurmResource } from "../src/ControlClient";
+import { PlaneError, validateSlurmResource } from "../src/PlaneClient";
 import { CreateSessionForm } from "../src/CreateSessionForm";
 import { SshHosts } from "../src/SshHosts";
 import { SshKeys } from "../src/SshKeys";
-import { SshLoginDock } from "../src/ssh";
-import { controlFake, FakeOperation } from "./fakes";
+import { SshAuthDock } from "../src/ssh";
+import { planeFake, FakeOperation } from "./fakes";
 
-const hosts = ["alpha", "beta"].map((name) => ({
-  name,
+const hosts = ["alpha", "beta"].map((alias) => ({
+  alias,
   extraDirectives: [],
   managed: false,
 }));
-function discovery(host: string) {
+function discovery(alias: string) {
   return {
-    host,
-    accounts: [`${host}-one`, `${host}-two`],
+    alias,
+    accounts: [`${alias}-one`, `${alias}-two`],
     partitions: [
-      { name: `${host}-cpu`, cpuCount: 16, memoryMb: 64000, gres: [] },
+      { name: `${alias}-cpu`, cpuCount: 16, memoryMb: 64000, gres: [] },
       {
-        name: `${host}-gpu`,
+        name: `${alias}-gpu`,
         cpuCount: 8,
         memoryMb: 32000,
         gres: [{ name: "gpu:a100", count: 4 }],
       },
     ],
-    homeDir: `/home/${host}`,
+    homeDir: `/home/${alias}`,
   };
 }
 function control<T extends HTMLElement>(
@@ -50,14 +50,14 @@ const picker = (form: CreateSessionForm, name: string): HTMLSelectElement =>
   control(form, `select[name="${name}"]`);
 
 const hostSelect = (form: CreateSessionForm): HTMLSelectElement =>
-  picker(form, "sshHost");
+  picker(form, "alias");
 function choose(form: CreateSessionForm, alias: string): void {
-  const host = hostSelect(form);
-  if (![...host.options].some((option) => option.value === alias)) {
-    throw new Error(`host alias ${alias} is not listed`);
+  const select = hostSelect(form);
+  if (![...select.options].some((option) => option.value === alias)) {
+    throw new Error(`SSH host ${alias} is not listed`);
   }
-  host.value = alias;
-  host.onchange?.(new Event("change"));
+  select.value = alias;
+  select.onchange?.(new Event("change"));
 }
 function options(form: CreateSessionForm): HTMLElement | null {
   return form.node.querySelector<HTMLElement>(".csSessionOptions");
@@ -95,7 +95,7 @@ async function reviewAndSubmit(
   return submit!;
 }
 type PendingDiscovery = {
-  host: string;
+  alias: string;
   resolve: (value: unknown) => void;
   reject: (reason: unknown) => void;
 };
@@ -120,13 +120,13 @@ function formHarness() {
   const discoveries: PendingDiscovery[] = [];
   const api = {
     discoverSlurm: vi.fn(
-      (host: string) =>
+      (alias: string) =>
         new Promise<unknown>((resolve, reject) => {
-          discoveries.push({ host, resolve, reject });
+          discoveries.push({ alias, resolve, reject });
         }),
     ),
-    sshAuthWebSocket: vi.fn((_host: string) => vi.fn()),
-    getTunnelLink: vi.fn(async () => ({ linked: false })),
+    sshAuthWebSocket: vi.fn((_alias: string) => vi.fn()),
+    getDevTunnelsAccount: vi.fn(async () => ({ connected: false })),
     validateCreateRequest: vi.fn(
       async (_request: ISessionCreateRequest, _signal?: AbortSignal) => ({
         sessionId: "s-012345abcdef",
@@ -136,12 +136,12 @@ function formHarness() {
       }),
     ),
   };
-  const loginDock = new SshLoginDock(() => {
+  const sshAuthDock = new SshAuthDock(() => {
     const operation = new FakeOperation();
     operations.push(operation);
     return operation;
   });
-  const form = new CreateSessionForm(api as any, () => loginDock);
+  const form = new CreateSessionForm(api as any, () => sshAuthDock);
   const deliver = async (index: number, value: unknown): Promise<void> => {
     try {
       discoveries[index].resolve(validateSlurmResource(value));
@@ -163,7 +163,7 @@ function formHarness() {
   return {
     form,
     api,
-    loginDock,
+    sshAuthDock,
     operations,
     discoveries,
     deliver,
@@ -181,7 +181,7 @@ async function discoveredAlpha(
 }
 
 async function pendingValidation(
-  workspaceValue: string,
+  rootFolderValue: string,
   configure?: (form: CreateSessionForm) => void,
   discoveryValue: unknown = discovery("alpha"),
 ) {
@@ -193,9 +193,9 @@ async function pendingValidation(
   choose(form, "alpha");
   await deliver(0, discoveryValue);
   configure?.(form);
-  const workspace = input(form, "rootFolder");
-  workspace.value = workspaceValue;
-  workspace.dispatchEvent(new Event("input"));
+  const rootFolder = input(form, "rootFolder");
+  rootFolder.value = rootFolderValue;
+  rootFolder.dispatchEvent(new Event("input"));
   submitForm(form);
   await Promise.resolve();
   await vi.waitFor(() =>
@@ -208,10 +208,10 @@ async function pendingValidation(
   return { form, api, signal, resolveValidation };
 }
 
-function submitWorkspace(form: CreateSessionForm, value: string): void {
-  const workspace = input(form, "rootFolder");
-  workspace.value = value;
-  workspace.dispatchEvent(new Event("input"));
+function submitRootFolder(form: CreateSessionForm, value: string): void {
+  const rootFolder = input(form, "rootFolder");
+  rootFolder.value = value;
+  rootFolder.dispatchEvent(new Event("input"));
   submitForm(form);
 }
 
@@ -234,7 +234,7 @@ async function backAfterStaleValidation(
 }
 
 describe("SSH CRUD and session-first creation", () => {
-  it("lists configured hosts before discovery and exposes an empty-host call to action", () => {
+  it("lists configured SSH hosts before discovery and exposes an empty-list call to action", () => {
     const { form } = formHarness();
     expect([...hostSelect(form).options].map((item) => item.value)).toEqual([
       "",
@@ -250,7 +250,7 @@ describe("SSH CRUD and session-first creation", () => {
     ).toBe(true);
   });
 
-  it("starts with host selection and reveals options after a valid result", async () => {
+  it("starts with SSH host selection and reveals options after a valid result", async () => {
     const { form, api, operations, deliver } = formHarness();
     expect(options(form)?.hidden).toBe(true);
     expect(hostSelect(form).value).toBe("");
@@ -274,12 +274,12 @@ describe("SSH CRUD and session-first creation", () => {
     );
   });
 
-  it("opens the login console on demand and restarts discovery once", async () => {
+  it("opens the SSH authentication console on demand and runs discovery again once", async () => {
     const { form, api, operations, discoveries, failDiscovery } = formHarness();
     choose(form, "alpha");
     await failDiscovery(
       0,
-      new ControlError("ssh_authentication_required", "Duo required"),
+      new PlaneError("ssh_authentication_required", "Duo required"),
     );
     expect(operations).toHaveLength(1);
     const operation = operations[0];
@@ -291,7 +291,7 @@ describe("SSH CRUD and session-first creation", () => {
     await vi.waitFor(() => expect(discoveries).toHaveLength(2));
     await failDiscovery(
       1,
-      new ControlError("ssh_authentication_required", "Still required"),
+      new PlaneError("ssh_authentication_required", "Still required"),
     );
     expect(operation.starts).toHaveLength(1);
     expect(form.node.textContent).toContain("already attempted");
@@ -311,7 +311,7 @@ describe("SSH CRUD and session-first creation", () => {
     expect(discoveries).toHaveLength(2);
   });
 
-  it("ignores a stale discovery result after switching hosts", async () => {
+  it("ignores a stale discovery result after switching SSH hosts", async () => {
     const { form, discoveries, deliver } = formHarness();
     choose(form, "alpha");
     choose(form, "");
@@ -331,7 +331,7 @@ describe("SSH CRUD and session-first creation", () => {
     const { form, deliver } = formHarness();
     choose(form, "alpha");
     await deliver(0, {
-      host: "alpha",
+      alias: "alpha",
       accounts: null,
     });
     expect(options(form)?.hidden).toBe(true);
@@ -356,13 +356,13 @@ describe("SSH CRUD and session-first creation", () => {
     );
   });
 
-  it("ignores a shared login after the form is disposed without disposing its dock", async () => {
-    const { form, loginDock, operations, discoveries, failDiscovery } =
+  it("ignores a shared SSH authentication after the form is disposed without disposing its dock", async () => {
+    const { form, sshAuthDock, operations, discoveries, failDiscovery } =
       formHarness();
     choose(form, "alpha");
     await failDiscovery(
       0,
-      new ControlError("ssh_authentication_required", "Duo required"),
+      new PlaneError("ssh_authentication_required", "Duo required"),
     );
     expect(operations).toHaveLength(1);
 
@@ -372,7 +372,7 @@ describe("SSH CRUD and session-first creation", () => {
 
     expect(discoveries).toHaveLength(1);
     expect(operations[0].disposed).toBe(false);
-    loginDock.dispose();
+    sshAuthDock.dispose();
   });
 
   it("filters CPU-only discovery and omits GPU fields from the payload", async () => {
@@ -391,9 +391,9 @@ describe("SSH CRUD and session-first creation", () => {
         .querySelector<HTMLElement>('select[name="gpuType"]')
         ?.closest<HTMLElement>(".csField")?.hidden,
     ).toBe(true);
-    const workspace = input(form, "rootFolder");
-    workspace.value = "projects/cpu";
-    workspace.dispatchEvent(new Event("input"));
+    const rootFolder = input(form, "rootFolder");
+    rootFolder.value = "projects/cpu";
+    rootFolder.dispatchEvent(new Event("input"));
     const request = captureCreateRequest(form);
     await submitValidForm(form);
     expect(request().partition).toBe("cpu");
@@ -401,17 +401,17 @@ describe("SSH CRUD and session-first creation", () => {
     expect(request().resources).not.toHaveProperty("gpuCount");
   });
 
-  it("keeps WebSocket chosen and Dev Tunnel disabled without a linked account", async () => {
+  it("keeps Link chosen and Dev Tunnel disabled without a Dev Tunnels account", async () => {
     const form = await discoveredAlpha();
-    const mode = (value: string) =>
+    const transport = (value: string) =>
       control<HTMLInputElement>(form, `input[value="${value}"]`);
-    expect(mode("devtunnel").disabled).toBe(true);
-    mode("websocket").checked = false;
-    mode("websocket").dispatchEvent(new Event("change"));
-    expect(mode("websocket").checked).toBe(true);
+    expect(transport("devtunnel").disabled).toBe(true);
+    transport("link").checked = false;
+    transport("link").dispatchEvent(new Event("change"));
+    expect(transport("link").checked).toBe(true);
     const request = captureCreateRequest(form);
     await submitValidForm(form);
-    expect(request().tunnelModes).toEqual(["websocket"]);
+    expect(request().tunnelModes).toEqual(["link"]);
   });
 
   it("keeps non-GPU GRES on CPU and does not drop mixed GPU partitions", async () => {
@@ -478,8 +478,8 @@ describe("SSH CRUD and session-first creation", () => {
       form.node.querySelector<HTMLSelectElement>('select[name="gpuType"]')
         ?.value,
     ).toBe("h100");
-    const workspace = input(form, "rootFolder");
-    workspace.value = "projects/gpu";
+    const rootFolder = input(form, "rootFolder");
+    rootFolder.value = "projects/gpu";
     const request = captureCreateRequest(form);
     await submitValidForm(form);
     expect(request().resources).toMatchObject({ gpuType: "h100", gpuCount: 1 });
@@ -541,8 +541,8 @@ describe("SSH CRUD and session-first creation", () => {
     ]);
     partition.value = "cpu:1";
     partition.dispatchEvent(new Event("change"));
-    const workspace = input(form, "rootFolder");
-    workspace.value = "projects/full";
+    const rootFolder = input(form, "rootFolder");
+    rootFolder.value = "projects/full";
     const request = captureCreateRequest(form);
     await submitValidForm(form);
     expect(request().partition).toBe("full");
@@ -624,7 +624,7 @@ describe("SSH CRUD and session-first creation", () => {
         script: "#!/bin/bash\n#SBATCH --partition=missing\n",
         message: "Slurm answered.",
       });
-      submitWorkspace(form, "$HOME");
+      submitRootFolder(form, "$HOME");
       await vi.waitFor(() => expect(form.node.textContent).toContain(verdict));
       const script = form.node.querySelector<HTMLElement>(".csSlurmScript")!;
       expect(script.hidden).toBe(hidden);
@@ -637,8 +637,8 @@ describe("SSH CRUD and session-first creation", () => {
     const { form, deliver } = formHarness();
     choose(form, "alpha");
     await deliver(0, discovery("alpha"));
-    const workspace = input(form, "rootFolder");
-    workspace.value = "projects/create-error";
+    const rootFolder = input(form, "rootFolder");
+    rootFolder.value = "projects/create-error";
     form.createRequested.connect(() => {
       form.setBusy(true);
       form.setError("submission failed");
@@ -652,22 +652,22 @@ describe("SSH CRUD and session-first creation", () => {
 });
 
 describe("SSH hosts modal chrome", () => {
-  it("expands a host to what ssh uses and to what can be done about it", async () => {
+  it("expands an SSH host to what ssh uses and to what can be done about it", async () => {
     const api = {
       listSshHosts: vi.fn(async () => [
         {
-          name: "delta",
-          hostname: "login.example.edu",
+          alias: "delta",
+          hostname: "delta.example.edu",
           user: "me",
           port: 2222,
           extraDirectives: ["ProxyJump bastion"],
           managed: true,
         },
-        { name: "theirs", hostname: "own.example.edu", extraDirectives: [] },
+        { alias: "theirs", hostname: "own.example.edu", extraDirectives: [] },
       ]),
-      hostHealth: vi.fn(async () => ({ ok: true, message: "Listening." })),
+      sshHostHealth: vi.fn(async () => ({ ok: true, message: "Listening." })),
     };
-    const hosts = new SshHosts(controlFake(api) as any);
+    const hosts = new SshHosts(planeFake(api) as any);
     await hosts.refresh();
     const entries = [
       ...hosts.node.querySelectorAll<HTMLDetailsElement>(".csSshHostEntry"),
@@ -678,7 +678,7 @@ describe("SSH hosts modal chrome", () => {
         (row) => row.textContent,
       ),
     ).toEqual([
-      "HostNamelogin.example.edu",
+      "HostNamedelta.example.edu",
       "Userme",
       "Port2222",
       "ProxyJumpbastion",
@@ -695,16 +695,16 @@ describe("SSH hosts modal chrome", () => {
     await vi.waitFor(() =>
       expect(hosts.node.textContent).toContain("Listening."),
     );
-    expect(api.hostHealth).toHaveBeenCalledWith("delta");
+    expect(api.sshHostHealth).toHaveBeenCalledWith("delta");
     hosts.dispose();
   });
 
-  it("edits a host by re-pasting a command prefilled from what is configured", async () => {
+  it("edits an SSH host by re-pasting a command prefilled from what is configured", async () => {
     const api = {
       listSshHosts: vi.fn(async () => [
         {
-          name: "delta",
-          hostname: "login.example.edu",
+          alias: "delta",
+          hostname: "delta.example.edu",
           user: "me",
           port: 2222,
           extraDirectives: ["ProxyJump bastion", "ForwardAgent yes"],
@@ -712,11 +712,11 @@ describe("SSH hosts modal chrome", () => {
         },
       ]),
       updateSshHost: vi.fn(async () => ({
-        name: "delta",
+        alias: "delta",
         extraDirectives: [],
       })),
     };
-    const hosts = new SshHosts(controlFake(api) as any);
+    const hosts = new SshHosts(planeFake(api) as any);
     await hosts.refresh();
     const named = (label: string): HTMLButtonElement =>
       [...hosts.node.querySelectorAll<HTMLButtonElement>("button")].find(
@@ -727,58 +727,61 @@ describe("SSH hosts modal chrome", () => {
       'input[name="sshHostCommand"]',
     )!;
     expect(command.value).toBe(
-      "ssh -p 2222 -J bastion -o ForwardAgent=yes me@login.example.edu",
+      "ssh -p 2222 -J bastion -o ForwardAgent=yes me@delta.example.edu",
     );
-    expect(hosts.node.querySelector('input[name="sshHostName"]')).toBeNull();
-    command.value = "ssh -p 22 me@login2.example.edu";
+    expect(hosts.node.querySelector('input[name="alias"]')).toBeNull();
+    command.value = "ssh -p 22 me@delta2.example.edu";
     command.dispatchEvent(new Event("input"));
     submitForm(hosts);
     await vi.waitFor(() =>
       expect(api.updateSshHost).toHaveBeenCalledWith(
         "delta",
-        "ssh -p 22 me@login2.example.edu",
+        "ssh -p 22 me@delta2.example.edu",
         "",
       ),
     );
     hosts.dispose();
   });
 
-  it("sends the pasted command for the server to parse", async () => {
+  it("sends the pasted command for cs-plane to parse", async () => {
     const api = {
       listSshHosts: vi.fn(async () => []),
-      addSshHost: vi.fn(async () => ({ name: "delta", extraDirectives: [] })),
+      addSshHost: vi.fn(async () => ({
+        alias: "delta",
+        extraDirectives: [],
+      })),
     };
-    const hosts = new SshHosts(controlFake(api) as any);
+    const hosts = new SshHosts(planeFake(api) as any);
     [...hosts.node.querySelectorAll<HTMLButtonElement>("button")]
       .find((item) => item.textContent === "Add SSH Host")!
       .click();
-    const name = hosts.node.querySelector<HTMLInputElement>(
-      'input[name="sshHostName"]',
+    const alias = hosts.node.querySelector<HTMLInputElement>(
+      'input[name="alias"]',
     )!;
     const command = hosts.node.querySelector<HTMLInputElement>(
       'input[name="sshHostCommand"]',
     )!;
-    name.value = "delta";
-    name.dispatchEvent(new Event("input"));
-    command.value = " ssh -p 2222 me@login.example.edu ";
+    alias.value = "delta";
+    alias.dispatchEvent(new Event("input"));
+    command.value = " ssh -p 2222 me@delta.example.edu ";
     command.dispatchEvent(new Event("input"));
     submitForm(hosts);
     await vi.waitFor(() =>
       expect(api.addSshHost).toHaveBeenCalledWith(
         "delta",
-        "ssh -p 2222 me@login.example.edu",
+        "ssh -p 2222 me@delta.example.edu",
         "",
       ),
     );
     hosts.dispose();
   });
 
-  it("assigns a stored key from the host form and shows it on the host", async () => {
-    const api = controlFake({
+  it("assigns a stored SSH key from the SSH host form and shows it on the SSH host", async () => {
+    const api = planeFake({
       listSshHosts: vi.fn(async () => [
         {
-          name: "delta",
-          hostname: "login.example.edu",
+          alias: "delta",
+          hostname: "delta.example.edu",
           keyId: "delta-key",
           extraDirectives: ["ProxyJump bastion"],
           managed: true,
@@ -788,7 +791,7 @@ describe("SSH hosts modal chrome", () => {
         { id: "delta-key", type: "ssh-ed25519", fingerprint: "SHA256:abc" },
       ]),
       updateSshHost: vi.fn(async () => ({
-        name: "delta",
+        alias: "delta",
         extraDirectives: [],
       })),
     });
@@ -799,8 +802,8 @@ describe("SSH hosts modal chrome", () => {
         (row) => row.textContent,
       ),
     ).toEqual([
-      "HostNamelogin.example.edu",
-      "Login keydelta-key",
+      "HostNamedelta.example.edu",
+      "SSH keydelta-key",
       "ProxyJumpbastion",
     ]);
     hosts.node
@@ -809,7 +812,7 @@ describe("SSH hosts modal chrome", () => {
     const command = hosts.node.querySelector<HTMLInputElement>(
       'input[name="sshHostCommand"]',
     )!;
-    expect(command.value).toBe("ssh -J bastion login.example.edu");
+    expect(command.value).toBe("ssh -J bastion delta.example.edu");
     const key = hosts.node.querySelector<HTMLSelectElement>(
       'select[name="sshHostKey"]',
     )!;
@@ -820,7 +823,7 @@ describe("SSH hosts modal chrome", () => {
     await vi.waitFor(() =>
       expect(api.updateSshHost).toHaveBeenCalledWith(
         "delta",
-        "ssh -J bastion login.example.edu",
+        "ssh -J bastion delta.example.edu",
         "",
       ),
     );
@@ -830,7 +833,7 @@ describe("SSH hosts modal chrome", () => {
 
 describe("SSH keys modal", () => {
   it("uploads a private key file under a name and confirms before deleting one", async () => {
-    const api = controlFake({
+    const api = planeFake({
       listSshKeys: vi.fn(async () => [
         { id: "old", type: "ssh-rsa", fingerprint: "SHA256:old" },
       ]),
@@ -839,21 +842,21 @@ describe("SSH keys modal", () => {
         type: "ssh-ed25519",
         fingerprint: "SHA256:new",
       })),
-      removeSshKey: vi.fn(async () => undefined),
+      deleteSshKey: vi.fn(async () => undefined),
     });
-    const hosts = new SshKeys(api as any);
-    await hosts.refresh();
-    hosts.node
+    const keys = new SshKeys(api as any);
+    await keys.refresh();
+    keys.node
       .querySelector<HTMLButtonElement>(
         '[data-session-action="upload-ssh-key-toggle"]',
       )!
       .click();
-    const name = hosts.node.querySelector<HTMLInputElement>(
+    const name = keys.node.querySelector<HTMLInputElement>(
       'input[name="sshKeyName"]',
     )!;
     name.value = "delta-key";
     name.dispatchEvent(new Event("input"));
-    const file = hosts.node.querySelector<HTMLInputElement>(
+    const file = keys.node.querySelector<HTMLInputElement>(
       'input[name="sshKeyFile"]',
     )!;
     Object.defineProperty(file, "files", {
@@ -872,21 +875,21 @@ describe("SSH keys modal", () => {
       ),
     );
 
-    hosts.node
+    keys.node
       .querySelector<HTMLButtonElement>(
         '[data-session-action="delete-key-old"]',
       )!
       .click();
-    expect(hosts.node.textContent).toContain("unassign it?");
-    expect(api.removeSshKey).not.toHaveBeenCalled();
-    hosts.node
+    expect(keys.node.textContent).toContain("unassign it?");
+    expect(api.deleteSshKey).not.toHaveBeenCalled();
+    keys.node
       .querySelector<HTMLButtonElement>(
         '[data-session-action="confirm-delete-key-old"]',
       )!
       .click();
     await vi.waitFor(() =>
-      expect(api.removeSshKey).toHaveBeenCalledWith("old"),
+      expect(api.deleteSshKey).toHaveBeenCalledWith("old"),
     );
-    hosts.dispose();
+    keys.dispose();
   });
 });

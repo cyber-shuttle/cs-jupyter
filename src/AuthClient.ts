@@ -13,7 +13,7 @@ import {
   vOptional,
   vString,
   type Validator,
-  validControlApiUrl,
+  validPlaneApiUrl,
   type OAuthCredentials,
   base64UrlEncode,
 } from "./Common";
@@ -130,11 +130,8 @@ export class AuthClient {
   private _refreshing: Promise<void> | undefined;
   private _generation = 0;
 
-  constructor(
-    controlApiUrl: string,
-    dependencies: IAuthClientDependencies = {},
-  ) {
-    this._base = validControlApiUrl(controlApiUrl);
+  constructor(planeApiUrl: string, dependencies: IAuthClientDependencies = {}) {
+    this._base = validPlaneApiUrl(planeApiUrl);
     this._fetch = dependencies.fetch ?? globalThis.fetch.bind(globalThis);
     this._now = dependencies.now ?? Date.now;
     this._navigate =
@@ -199,7 +196,7 @@ export class AuthClient {
     sessionStorage.removeItem(SIGN_IN_KEY);
   }
 
-  async interactiveLogin(): Promise<void> {
+  async signIn(): Promise<void> {
     const config = await this._call(
       `${this._base}/oauth/config`,
       oauthConfigShape,

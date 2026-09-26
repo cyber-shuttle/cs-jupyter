@@ -14,7 +14,7 @@ export interface Partition {
   gres: Gres[];
 }
 export interface Resource {
-  host: string;
+  alias: string;
   accounts: string[];
   partitions: Partition[];
   homeDir: string;
@@ -28,7 +28,7 @@ export interface Resources {
 }
 export interface CreateRequest {
   idempotencyKey?: string;
-  sshHost: string;
+  alias: string;
   account?: string;
   partition: string;
   rootFolder: string;
@@ -39,8 +39,8 @@ export interface SessionResponse {
   id: string;
   seq: number /* int */;
   state: string;
-  launcher: string;
-  sshHost: string;
+  platform: string;
+  alias: string;
   account?: string;
   partition: string;
   rootFolder: string;
@@ -66,6 +66,7 @@ export interface DevtunnelAccess {
 }
 export interface AttachResponse {
   session: SessionResponse;
+  port: number /* uint16 */;
   link?: LinkAccess;
   devtunnel?: DevtunnelAccess;
 }
@@ -90,18 +91,6 @@ export interface ValidationResult {
 export interface RunList {
   runs: Run[];
 }
-export interface FinishedRun {
-  finalState: string;
-  error?: string;
-  startedAt?: string;
-  endedAt: string;
-  stats?: RunStats;
-  samples?: MetricSample[];
-}
-export interface SessionHistory {
-  createdAt?: string;
-  runs: FinishedRun[];
-}
 export interface SSHAccessResponse {
   port: number /* int */;
 }
@@ -120,7 +109,7 @@ export interface GPUSample {
   memUsedMiB: number /* int */;
   memTotalMiB: number /* int */;
 }
-export interface MetricSample {
+export interface UsageSample {
   at: string;
   memBytes?: number /* int64 */;
   cpuUsageUsec?: number /* int64 */;
@@ -128,7 +117,7 @@ export interface MetricSample {
 }
 export interface SessionSeries {
   sessionId: string;
-  samples: MetricSample[];
+  samples: UsageSample[];
 }
 export interface RunStats {
   cores?: number /* int */;
@@ -141,7 +130,8 @@ export interface RunStats {
 export interface Run {
   sessionId: string;
   seq: number /* int */;
-  sshHost: string;
+  platform?: string;
+  alias: string;
   account?: string;
   partition: string;
   rootFolder: string;
@@ -152,6 +142,6 @@ export interface Run {
   startedAt?: string;
   endedAt: string;
   stats?: RunStats;
-  samples?: MetricSample[];
+  samples?: UsageSample[];
   logs?: SessionLogLine[];
 }

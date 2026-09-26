@@ -4,7 +4,7 @@
 // cs-plane.
 import type { JupyterFrontEnd } from "@jupyterlab/application";
 import type { Widget } from "@lumino/widgets";
-import { ControlClient } from "./ControlClient";
+import { PlaneClient } from "./PlaneClient";
 import {
   clearSessionAccess,
   getActiveSessionId,
@@ -22,7 +22,7 @@ export class SessionController {
 
   constructor(
     private _app: JupyterFrontEnd,
-    private _api: ControlClient,
+    private _api: PlaneClient,
     private _destination: SessionDestination,
     private _navigate: (url: string) => void = (url) =>
       window.location.assign(url),

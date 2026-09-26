@@ -1,16 +1,16 @@
-// Session actions that a host refuses pending an SSH login through the login
-// dock. Stop and Delete open their own confirmation by rejecting the detail
+// Session actions that an SSH host refuses pending SSH authentication through
+// the dock. Stop and Delete open their own confirmation by rejecting the detail
 // dialog first, including through its own close control. The dock sits inside
 // the open dialog without being its child, so it survives that rejection. The
-// dock, a fixed overlay, vanishes once a login succeeds and returns for the
-// next login on the same instance.
+// dock, a fixed overlay, vanishes once SSH authentication succeeds and returns
+// for the next one on the same instance.
 import { describe, expect, it, vi } from "vitest";
-import { ControlError } from "../src/ControlClient";
-import { SshLoginDock } from "../src/ssh";
+import { PlaneError } from "../src/PlaneClient";
+import { SshAuthDock } from "../src/ssh";
 import {
   FakeOperation,
   acceptDialog,
-  controlFake,
+  planeFake,
   panelFake,
   pollPanel,
   sessionFixture,
@@ -20,11 +20,11 @@ import {
 const base = sessionFixture({
   id: "s-111111111111",
   state: "STOPPED",
-  sshHost: "nexus",
+  alias: "nexus",
 });
 
-const refused = (): ControlError =>
-  new ControlError(
+const refused = (): PlaneError =>
+  new PlaneError(
     "ssh_authentication_required",
     "SSH authentication is required for nexus",
   );
@@ -34,15 +34,15 @@ async function opened(
   operation: FakeOperation,
   extraApi: Record<string, unknown> = {},
 ) {
-  const api = controlFake({
+  const api = planeFake({
     listSessions: vi.fn(async () => sessionListFixture([base])),
     sshAuthWebSocket: vi.fn(() => vi.fn()),
     startSession,
     ...extraApi,
   });
   const panel = panelFake(api);
-  (panel as any)._modals._loginDockWidget = () =>
-    new SshLoginDock(() => operation);
+  (panel as any)._modals._sshAuthDockWidget = () =>
+    new SshAuthDock(() => operation);
   await panel.signIn();
   await vi.waitFor(() => expect(panel.state.sessions.length).toBe(1));
   const open = panel.modals.openSession(base.id);
@@ -64,25 +64,25 @@ async function openedRefused(operation: FakeOperation) {
   return opened(vi.fn().mockRejectedValue(refused()), operation);
 }
 
-const awaitingLogin = (operation: FakeOperation): Promise<void> =>
+const awaitingAuthentication = (operation: FakeOperation): Promise<void> =>
   vi.waitFor(() => expect(operation.starts.length).toBe(1));
 
-const completeLogin = (operation: FakeOperation): void => {
+const completeAuthentication = (operation: FakeOperation): void => {
   const { ready } = operation.starts[0].callbacks;
   expect(ready).toBeDefined();
   ready?.();
 };
 
-async function refusedRunAgain() {
+async function refusedStart() {
   const operation = new FakeOperation();
   const { panel, api, close } = await openedRefused(operation);
-  const running = panel.actions.runAgain(base.id);
-  await awaitingLogin(operation);
+  const running = panel.actions.start(base.id);
+  await awaitingAuthentication(operation);
   return { operation, panel, api, close, running };
 }
 
-describe("a session action a host refuses for a login", () => {
-  it("offers the login and runs the action again once it is done", async () => {
+describe("a session action an SSH host refuses for SSH authentication", () => {
+  it("offers SSH authentication and retries the action once it is done", async () => {
     const operation = new FakeOperation();
     const { panel, api, close } = await opened(
       vi
@@ -92,21 +92,21 @@ describe("a session action a host refuses for a login", () => {
       operation,
     );
 
-    const running = panel.actions.runAgain(base.id);
-    await awaitingLogin(operation);
+    const running = panel.actions.start(base.id);
+    await awaitingAuthentication(operation);
     expect(api.sshAuthWebSocket).toHaveBeenCalledWith("nexus");
     expect(panel.state.error).toBe("");
 
-    completeLogin(operation);
+    completeAuthentication(operation);
     await running;
     expect(api.startSession).toHaveBeenCalledTimes(2);
     expect(panel.state.sessions[0].state).toBe("QUEUED");
     await close();
   });
 
-  it("does not offer a second login when the host refuses again", async () => {
-    const { operation, panel, api, close, running } = await refusedRunAgain();
-    completeLogin(operation);
+  it("does not offer SSH authentication twice when the SSH host refuses again", async () => {
+    const { operation, panel, api, close, running } = await refusedStart();
+    completeAuthentication(operation);
     await running;
     expect(api.startSession).toHaveBeenCalledTimes(2);
     expect(operation.starts).toHaveLength(1);
@@ -114,7 +114,7 @@ describe("a session action a host refuses for a login", () => {
     await close();
   });
 
-  it("offers the login and retries stop once the confirmation is accepted", async () => {
+  it("offers SSH authentication and retries stop once the confirmation is accepted", async () => {
     const operation = new FakeOperation();
     const stopSession = vi
       .fn()
@@ -124,15 +124,15 @@ describe("a session action a host refuses for a login", () => {
       stopSession,
     });
 
-    const dock = panel.modals.loginDock;
+    const dock = panel.modals.sshAuthDock;
     const stopping = panel.actions.stop(base.id);
     await acceptDialog();
-    await awaitingLogin(operation);
+    await awaitingAuthentication(operation);
     expect(api.sshAuthWebSocket).toHaveBeenCalledWith("nexus");
     expect(dock.isDisposed).toBe(false);
     expect(document.body.contains(dock.node)).toBe(true);
 
-    completeLogin(operation);
+    completeAuthentication(operation);
     await stopping;
     expect(stopSession).toHaveBeenCalledTimes(2);
     expect(panel.state.sessions[0].state).toBe("STOPPING");
@@ -140,8 +140,8 @@ describe("a session action a host refuses for a login", () => {
     await close();
   });
 
-  it("reports a login the person could not complete", async () => {
-    const { operation, panel, api, close, running } = await refusedRunAgain();
+  it("reports SSH authentication the person could not complete", async () => {
+    const { operation, panel, api, close, running } = await refusedStart();
     operation.starts[0].callbacks.failed("Permission denied.");
     await running;
     expect(panel.state.error).toBe("Permission denied.");
@@ -159,8 +159,8 @@ describe("a session action a host refuses for a login", () => {
       operation,
     );
 
-    void panel.actions.runAgain(base.id);
-    await awaitingLogin(operation);
+    void panel.actions.start(base.id);
+    await awaitingAuthentication(operation);
     prompt.focus();
     await pollPanel(panel);
     await pollPanel(panel);
@@ -177,9 +177,9 @@ describe("a session action a host refuses for a login", () => {
       .mockResolvedValueOnce({ ...base, state: "QUEUED" as const });
     const { panel, api } = await opened(startSession, operation);
 
-    const running = panel.actions.runAgain(base.id);
-    await awaitingLogin(operation);
-    const dock = panel.modals.loginDock;
+    const running = panel.actions.start(base.id);
+    await awaitingAuthentication(operation);
+    const dock = panel.modals.sshAuthDock;
     expect(document.querySelector(".jp-Dialog")!.contains(dock.node)).toBe(
       true,
     );
@@ -201,45 +201,45 @@ describe("a session action a host refuses for a login", () => {
     panel.dispose();
   });
 
-  it("settles the action when the modal is dismissed mid-login", async () => {
+  it("settles the action when the modal is dismissed mid-authentication", async () => {
     const operation = new FakeOperation();
-    const dock = new SshLoginDock(() => operation);
-    const login = dock.login("nexus", vi.fn());
-    await awaitingLogin(operation);
+    const dock = new SshAuthDock(() => operation);
+    const auth = dock.authenticate("nexus", vi.fn());
+    await awaitingAuthentication(operation);
     dock.dispose();
-    await expect(login).rejects.toThrow("dismissed");
+    await expect(auth).rejects.toThrow("dismissed");
     expect(operation.disposed).toBe(true);
   });
 });
 
-function startedLogin() {
+function startedAuthentication() {
   const operation = new FakeOperation();
-  const dock = new SshLoginDock(() => operation);
-  const login = dock.login("nexus", vi.fn());
+  const dock = new SshAuthDock(() => operation);
+  const auth = dock.authenticate("nexus", vi.fn());
   expect(dock.isHidden).toBe(false);
-  return { operation, dock, login };
+  return { operation, dock, auth };
 }
 
-describe("SshLoginDock visibility", () => {
-  it("hides itself once a login succeeds, and shows again on the next login", async () => {
-    const { operation, dock, login } = startedLogin();
+describe("SshAuthDock visibility", () => {
+  it("hides itself once SSH authentication succeeds, and shows again on the next one", async () => {
+    const { operation, dock, auth } = startedAuthentication();
 
     const { ready } = operation.starts[0].callbacks;
     ready?.();
-    await login;
+    await auth;
     expect(dock.isHidden).toBe(true);
 
-    dock.login("nexus", vi.fn());
+    dock.authenticate("nexus", vi.fn());
     expect(dock.isHidden).toBe(false);
     expect(operation.starts).toHaveLength(2);
   });
 
-  it("hides itself once a login fails, leaving no stranded dismiss control", async () => {
-    const { operation, dock, login } = startedLogin();
+  it("hides itself once SSH authentication fails, leaving no stranded dismiss control", async () => {
+    const { operation, dock, auth } = startedAuthentication();
 
     const { failed } = operation.starts[0].callbacks;
     failed?.("Authentication failed.");
-    await expect(login).rejects.toThrow("Authentication failed.");
+    await expect(auth).rejects.toThrow("Authentication failed.");
     expect(dock.isHidden).toBe(true);
   });
 });

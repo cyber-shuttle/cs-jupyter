@@ -1,5 +1,5 @@
-// Renders the launcher's session cards and header actions. A card's host and job
-// spec sit together as one identity, apart from the rest of the layout. The
+// Renders the Launcher's sessions and header actions. A session's SSH host and
+// job spec sit together as one identity, apart from the rest of the layout. The
 // countdown is the one figure that changes on its own, driven by a shared clock.
 import { caretLeftIcon } from "@jupyterlab/ui-components";
 import { Signal } from "@lumino/signaling";
@@ -62,7 +62,7 @@ export class SessionList extends PanelBoundWidget {
     sshHosts.dataset.sessionAction = "ssh-hosts";
     sshHosts.disabled = !this._state.signedIn;
     const history = button(
-      "Run history",
+      "Run History",
       "csTextButton csSectionHeaderButton",
       () => this.runHistoryRequested.emit(undefined),
     );
@@ -134,7 +134,7 @@ export class SessionList extends PanelBoundWidget {
       `jp-LauncherCard csSessionCard${current ? " csSessionCardCurrent" : ""}`,
       () => this.sessionRequested.emit(session.id),
     );
-    const caption = `${session.sshHost}, ${state}${current ? ", current session" : ""}`;
+    const caption = `${session.alias}, ${state}${current ? ", current session" : ""}`;
     card.setAttribute("aria-label", caption);
     card.title = caption;
     card.dataset.category = "CyberShuttle Sessions";
@@ -145,7 +145,7 @@ export class SessionList extends PanelBoundWidget {
       "jp-LauncherCard-label csSessionCardLabel",
     );
     const identity = element("span", "", "csSessionCardIdentity");
-    identity.append(element("p", session.sshHost, "csSessionCardTitle"));
+    identity.append(element("p", session.alias, "csSessionCardTitle"));
     if (session.account) {
       identity.append(element("span", session.account, "csSessionCardAccount"));
     }

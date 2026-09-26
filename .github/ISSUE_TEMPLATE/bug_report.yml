@@ -19,7 +19,7 @@ body:
     id: session-state
     attributes:
       label: Session state
-      description: Most behaviour here depends on it. The session card shows the state.
+      description: Most behaviour here depends on it. The session shows its state.
       options:
         - No session selected (signed out)
         - No session selected (signed in)

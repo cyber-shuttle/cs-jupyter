@@ -4,7 +4,7 @@ go 1.27.1
 
 tool github.com/gzuidhof/tygo
 
-require github.com/cyber-shuttle/cs-plane v0.1.1-0.20260925035838-ae5ed0ba2c69
+require github.com/cyber-shuttle/cs-plane v0.1.1-0.20260928162424-8f67df774900
 
 require (
 	github.com/creack/pty v1.1.24 // indirect

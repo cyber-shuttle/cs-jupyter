@@ -4,7 +4,7 @@
 // source: wire.go
 
 export interface HostEntry {
-  name: string;
+  alias: string;
   hostname?: string;
   user?: string;
   port?: number /* int */;
@@ -28,7 +28,7 @@ export interface SSHKeyRequest {
   privateKey: string;
 }
 export interface AddHostRequest {
-  name: string;
+  alias: string;
   command: string;
   keyId: string;
 }
@@ -37,7 +37,7 @@ export interface UpdateHostRequest {
   keyId: string;
 }
 export interface HostHealth {
-  host: string;
+  alias: string;
   ok: boolean;
   message: string;
 }

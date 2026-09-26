@@ -1,4 +1,4 @@
-/* Skins the extension's launcher, dialogs and run-history views hosted inside
+/* Skins the extension's panel, dialogs and run-history views hosted inside
    JupyterLab and Lumino. Most rules exist to countermand or coordinate with
    the host, not add new design. The brand fill stays blue in both themes, so
    anything painted with it forces white text. */
@@ -769,7 +769,8 @@
   margin: 0 0 14px;
   border: 0;
 }
-.csResourceTypeChoices {
+.csResourceTypeChoices,
+.csPlatformFilter {
   display: flex;
   gap: 8px;
 }
@@ -829,11 +830,11 @@
   border-radius: 8px;
   background: var(--jp-layout-color1);
 }
-.csLinkProviders {
+.csDevTunnelsProviders {
   flex-direction: row;
   flex-wrap: wrap;
 }
-.csLinkCard {
+.csDevTunnelsCard {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -842,16 +843,16 @@
   border: 1px solid var(--jp-brand-color1);
   border-radius: 4px;
 }
-.csLinkCard svg {
+.csDevTunnelsCard svg {
   flex: 0 0 auto;
   width: 18px;
   height: 18px;
 }
-.csLinkAccount {
+.csDevTunnelsAccountName {
   display: flex;
   flex-direction: column;
 }
-.csLinkAccount .csMeta {
+.csDevTunnelsAccountName .csMeta {
   margin-top: 0;
 }
 .csSshKeyRow {
@@ -958,7 +959,7 @@
   overflow: hidden;
   background: var(--jp-layout-color1);
 }
-.csSshLoginDock {
+.csSshAuthDock {
   margin-bottom: 12px;
   border: 1px solid var(--jp-border-color2);
   border-radius: 6px;
@@ -966,7 +967,7 @@
   background: var(--jp-layout-color1);
   box-shadow: var(--jp-elevation-z4);
 }
-body > .csSshLoginDock {
+body > .csSshAuthDock {
   position: fixed;
   z-index: 10001;
   top: 16px;

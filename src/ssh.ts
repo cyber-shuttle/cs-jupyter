@@ -1,7 +1,7 @@
-// SSH interactive auth end to end: the token-bearing WebSocket connector, the
-// terminal that renders an operation's transcript, and the dock that hosts it
-// during sign-in. A WebSocket cannot carry an Authorization header, so the
-// ID token travels as a subprotocol, refreshed on each open. The console is
+// SSH authentication end to end: the token-bearing WebSocket connector, the
+// terminal that renders an operation's transcript, and the dock that holds it
+// during SSH authentication. A WebSocket cannot carry an Authorization header,
+// so the ID token travels as a subprotocol, refreshed on each open. The console is
 // credential-blind, passing prompts and replies straight through to SSH, and
 // the dock attaches to document.body rather than the session detail dialog so
 // closing that dialog cannot destroy it.
@@ -20,7 +20,7 @@ import { element } from "./dom";
 
 const CYBERSHUTTLE_WEBSOCKET_PROTOCOL = "cybershuttle.v1";
 const CYBERSHUTTLE_BEARER_PROTOCOL_PREFIX = "bearer.";
-const MAX_ACCESS_TOKEN_BYTES = 16 * 1024;
+const MAX_ID_TOKEN_BYTES = 16 * 1024;
 const TOKEN_CONTROL_OR_WHITESPACE = /[\s\u0000-\u001f\u007f-\u009f]/u;
 
 export type OAuthWebSocketConnector = () => Promise<WebSocket>;
@@ -31,55 +31,53 @@ export type WebSocketConstructor = new (
 ) => WebSocket;
 
 export class OAuthWebSocketFactory {
-  private readonly _controlOrigin: string;
+  private readonly _planeOrigin: string;
 
   constructor(
     private readonly _auth: ITokenProvider,
-    controlOrigin: string,
+    planeOrigin: string,
     private readonly _WebSocket: WebSocketConstructor = WebSocket,
   ) {
-    const httpOrigin = new URL(controlOrigin);
+    const httpOrigin = new URL(planeOrigin);
     httpOrigin.protocol = httpOrigin.protocol === "https:" ? "wss:" : "ws:";
-    this._controlOrigin = new URL(
+    this._planeOrigin = new URL(
       validateWebSocketUrl(httpOrigin.toString()),
     ).origin;
   }
 
   async open(rawUrl: string): Promise<WebSocket> {
     const url = validateWebSocketUrl(rawUrl);
-    if (new URL(url).origin !== this._controlOrigin) {
+    if (new URL(url).origin !== this._planeOrigin) {
       throw new Error(
-        "CyberShuttle blocked a WebSocket outside the configured control origin.",
+        "Blocked a WebSocket outside the configured cs-plane origin.",
       );
     }
     const credentials = await this._auth.acquireToken();
     return new this._WebSocket(url, [
       CYBERSHUTTLE_WEBSOCKET_PROTOCOL,
-      `${CYBERSHUTTLE_BEARER_PROTOCOL_PREFIX}${encodeAccessToken(credentials.idToken)}`,
+      `${CYBERSHUTTLE_BEARER_PROTOCOL_PREFIX}${encodeIdToken(credentials.idToken)}`,
     ]);
   }
 }
 
-function encodeAccessToken(token: string): string {
+function encodeIdToken(token: string): string {
   if (!token || TOKEN_CONTROL_OR_WHITESPACE.test(token)) {
-    throw new Error(
-      "CyberShuttle delegated token contains invalid characters.",
-    );
+    throw new Error("The CyberShuttle ID token contains invalid characters.");
   }
   const bytes = new TextEncoder().encode(token);
-  if (bytes.byteLength > MAX_ACCESS_TOKEN_BYTES) {
-    throw new Error("CyberShuttle delegated token is too large.");
+  if (bytes.byteLength > MAX_ID_TOKEN_BYTES) {
+    throw new Error("The CyberShuttle ID token is too large.");
   }
   return base64UrlEncode(bytes);
 }
 
 function validateWebSocketUrl(raw: string): string {
-  const url = parseUrl(raw, "CyberShuttle WebSocket URL is invalid.");
+  const url = parseUrl(raw, "cs-plane WebSocket URL is invalid.");
   assertSecureOrLoopback(
     url,
     "wss:",
     "ws:",
-    "CyberShuttle WebSocket URL must use WSS or loopback WS without credentials, query, or fragment.",
+    "cs-plane WebSocket URL must use WSS or loopback WS without credentials, query, or fragment.",
   );
   return url.toString();
 }
@@ -207,10 +205,10 @@ export class SshOperationConsole implements ISshOperationConsole {
           if (socket.protocol !== CYBERSHUTTLE_WEBSOCKET_PROTOCOL) {
             socket.close(
               1002,
-              "CyberShuttle WebSocket protocol negotiation failed",
+              "cybershuttle.v1 subprotocol negotiation failed",
             );
             this._fail(
-              "cs-plane did not negotiate the required CyberShuttle WebSocket protocol.",
+              "cs-plane did not negotiate the required cybershuttle.v1 subprotocol.",
             );
             return;
           }
@@ -335,7 +333,7 @@ function boundedAnnouncement(value: unknown, fallback: string): string {
   return (message || fallback).slice(0, MAX_ANNOUNCEMENT_LENGTH);
 }
 
-export class SshLoginDock extends Widget {
+export class SshAuthDock extends Widget {
   private _console: ISshOperationConsole | undefined;
   private _pending: ((reason: Error) => void) | undefined;
   private _status = element("div", "", "csSshAuthStatus", {
@@ -347,13 +345,13 @@ export class SshLoginDock extends Widget {
       new SshOperationConsole(),
   ) {
     super();
-    this.addClass("csSshLoginDock");
+    this.addClass("csSshAuthDock");
     this.node.appendChild(this._status);
     this.hide();
   }
 
-  login(alias: string, connect: OAuthWebSocketConnector): Promise<void> {
-    this._settle(new Error("Superseded by another SSH login."));
+  authenticate(alias: string, connect: OAuthWebSocketConnector): Promise<void> {
+    this._settle(new Error("Superseded by another SSH authentication."));
     this._status.textContent = `${alias} is asking for credentials.`;
     this.show();
     if (!this._console) {
@@ -373,7 +371,7 @@ export class SshLoginDock extends Widget {
         return true;
       };
       console.start(connect, {
-        ready: () => done(`Signed in to ${alias}.`) && resolve(),
+        ready: () => done("SSH authentication complete.") && resolve(),
         failed: (message) => done(message) && reject(new Error(message)),
         status: (message) => {
           if (current()) this._status.textContent = message;
@@ -391,7 +389,7 @@ export class SshLoginDock extends Widget {
     if (this.isDisposed) {
       return;
     }
-    this._settle(new Error("SSH login dismissed."));
+    this._settle(new Error("SSH authentication dismissed."));
     this._console?.dispose();
     super.dispose();
   }

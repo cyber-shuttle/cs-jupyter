@@ -18,7 +18,7 @@ bun run dev
 ```
 
 `bun run dev` serves the site from the same `jupyter-lite.json` a deployment uses; set
-`cybershuttleControlApiUrl` there as in [docs/DEPLOYING.md](docs/DEPLOYING.md). Loopback HTTP is accepted.
+`cybershuttlePlaneApiUrl` there as in [docs/DEPLOYING.md](docs/DEPLOYING.md). Loopback HTTP is accepted.
 
 ## Scripts
 
@@ -28,7 +28,7 @@ bun run dev
 | `bun run build:lib`       | `tsc -b` into `lib/`                                                           |
 | `bun run build:extension` | Build the federated extension into `labextension/`                             |
 | `bun run build:lite`      | Build the extension, then the JupyterLite site                                 |
-| `bun run clean`           | Remove `lib/`, `labextension/`, `dist/` and the build caches                   |
+| `bun run clean`           | Delete `lib/`, `labextension/`, `dist/` and the build caches                   |
 | `bun run dev`             | Compile the extension and serve the site                                       |
 | `bun run typecheck`       | `tsc` over `src/` and `tests/`                                                 |
 | `bun run lint`            | `typecheck`, then `prettier --check .`                                         |
@@ -52,16 +52,16 @@ bun run dev
 
 Each `src/` file opens with a doc comment stating its role. Entry points:
 
-| Path                             | Role                                                               |
-| -------------------------------- | ------------------------------------------------------------------ |
-| `src/index.ts`                   | Extension plugins; fail-closed server settings                     |
-| `src/ControlClient.ts`           | cs-plane REST/WebSocket client and response validation             |
-| `src/Common.ts`                  | Shared types, `Validator` vocabulary, identifier and URL rules     |
-| `src/AuthClient.ts`              | CILogon sign-in with PKCE through cs-plane                         |
-| `src/CyberShuttlePanel.ts`       | Launcher controller: poll, sign-in state, dialogs                  |
-| `tests/session-contract.test.ts` | Pins the cs-plane wire contract; change it with `ControlClient.ts` |
-| `jupyter-lite.json`              | PageConfig of the built site                                       |
-| `jupyter_lite_config.json`       | JupyterLite build configuration                                    |
+| Path                             | Role                                                             |
+| -------------------------------- | ---------------------------------------------------------------- |
+| `src/index.ts`                   | Extension plugins; fail-closed server settings                   |
+| `src/PlaneClient.ts`             | cs-plane REST/WebSocket client and response validation           |
+| `src/Common.ts`                  | Shared types, `Validator` vocabulary, identifier and URL rules   |
+| `src/AuthClient.ts`              | CILogon sign-in with PKCE through cs-plane                       |
+| `src/CyberShuttlePanel.ts`       | Panel in the Launcher: poll, sign-in state, dialogs              |
+| `tests/session-contract.test.ts` | Pins the cs-plane wire contract; change it with `PlaneClient.ts` |
+| `jupyter-lite.json`              | PageConfig of the built site                                     |
+| `jupyter_lite_config.json`       | JupyterLite build configuration                                  |
 
 ## Releases
 

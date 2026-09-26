@@ -116,10 +116,10 @@ export abstract class RemoteListWidget extends RebuildingWidget {
     }
   }
 
-  protected async _removeItem(remove: () => Promise<void>): Promise<void> {
+  protected async _deleteItem(del: () => Promise<void>): Promise<void> {
     this._confirming = "";
     try {
-      await remove();
+      await del();
       await this.refresh();
     } catch (error) {
       this._error = errorMessage(error);

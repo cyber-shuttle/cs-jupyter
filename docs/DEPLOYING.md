@@ -15,12 +15,12 @@ uv sync --frozen
 bun run build   # deletes and rewrites dist/
 ```
 
-## 2. Set `cybershuttleControlApiUrl`
+## 2. Set `cybershuttlePlaneApiUrl`
 
 In the `jupyter-config-data` object of the served `dist/jupyter-lite.json`:
 
 ```json
-"cybershuttleControlApiUrl": "https://jupyterapi.example.edu/api/v1"
+"cybershuttlePlaneApiUrl": "https://jupyterapi.example.edu/api/v1"
 ```
 
 | Rule                                                             | Reason                                                                      |
@@ -32,7 +32,7 @@ In the `jupyter-config-data` object of the served `dist/jupyter-lite.json`:
 ## 3. Allow this site's origin on cs-plane
 
 cs-plane must list the site's exact origin (scheme, host, port; no path) in `--allowed-origin`, which is
-repeatable, requires one entry and rejects `*`. Otherwise the browser blocks sign-in and every control request.
+repeatable, requires one entry and rejects `*`. Otherwise the browser blocks sign-in and every cs-plane request.
 
 ```bash
 cs serve ... --allowed-origin https://jupyter.example.edu

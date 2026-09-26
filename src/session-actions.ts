@@ -1,15 +1,16 @@
-// The panel's session-lifecycle verbs: connect, run again, stop, delete, and
+// The panel's session-lifecycle verbs: connect, start, stop, delete, and
 // Jupyter access once a session is READY. Stop and delete both cancel the
-// session's Slurm job and confirm first; an SSH login challenge retries once.
+// session's Slurm job and confirm first; an SSH authentication challenge
+// retries once.
 import { Dialog, showDialog } from "@jupyterlab/apputils";
 import { errorMessage, ISession, isTerminal } from "./Common";
 import {
   accessUnavailable,
-  ControlClient,
-  ControlError,
-  needsSshLogin,
-} from "./ControlClient";
-import type { SshLoginDock } from "./ssh";
+  PlaneClient,
+  PlaneError,
+  needsSshAuthentication,
+} from "./PlaneClient";
+import type { SshAuthDock } from "./ssh";
 import {
   cacheSessionAccess,
   clearSessionAccess,
@@ -24,7 +25,7 @@ interface ISessionActionsHooks {
   replaceSessions: (sessions: ISession[]) => void;
   currentSessionId: () => string | undefined;
   select: (sessionId: string, current: () => boolean) => Promise<void>;
-  loginDock: () => SshLoginDock;
+  sshAuthDock: () => SshAuthDock;
   rejectDetail: () => void;
 }
 
@@ -40,15 +41,15 @@ interface IAccessBackoff {
   seq: number;
 }
 
-type BusyKind = "relaunch" | "action";
+type BusyKind = "start" | "action";
 
 const deleteMissing = (error: unknown): boolean =>
-  error instanceof ControlError &&
+  error instanceof PlaneError &&
   (error.status === 404 || error.code === "session_not_found");
 
 const transientDeleteFailure = (error: unknown): boolean =>
   error instanceof TypeError ||
-  (error instanceof ControlError &&
+  (error instanceof PlaneError &&
     (error.code === "session_not_stopped" ||
       error.status === 408 ||
       error.status === 429 ||
@@ -82,7 +83,7 @@ export class SessionActions {
   private _accessBackoff = new Map<string, IAccessBackoff>();
 
   constructor(
-    private _api: ControlClient,
+    private _api: PlaneClient,
     private _hooks: ISessionActionsHooks,
   ) {}
 
@@ -235,7 +236,7 @@ export class SessionActions {
       const access = await this._api.getSessionAccess(session.id);
       if (!this._jupyterOperationCurrent(operation)) return;
       if (access.seq !== operation.seq) {
-        throw new Error("Session access seq changed.");
+        throw new Error("Session access belongs to another run.");
       }
       cacheSessionAccess(access);
     }
@@ -286,14 +287,14 @@ export class SessionActions {
     }
   }
 
-  async runAgain(sessionId: string): Promise<void> {
+  async start(sessionId: string): Promise<void> {
     if (this._busySessionIds.has(sessionId)) {
       return;
     }
     const session = this._selectedSession(sessionId);
     if (session) {
       await this._act(session, (id) => this._api.startSession(id), {
-        kind: "relaunch",
+        kind: "start",
       });
     }
   }
@@ -306,7 +307,7 @@ export class SessionActions {
     this._hooks.rejectDetail();
     const confirmed = await confirm(
       "Stop session",
-      `Cancels the Slurm job on ${session.sshHost}. Anything unsaved in this session's kernels and terminals is lost.`,
+      `Cancels the Slurm job on ${session.alias}. Anything unsaved in this session's kernels and terminals is lost.`,
       "Stop",
     );
     if (!confirmed || this._hooks.isDisposed()) {
@@ -321,7 +322,7 @@ export class SessionActions {
     options: {
       apply?: (acted: ISession) => ISession[];
       report?: (error: unknown) => boolean;
-      allowLogin?: boolean;
+      allowSshAuthentication?: boolean;
       clearError?: boolean;
       kind?: BusyKind;
     } = {},
@@ -332,7 +333,7 @@ export class SessionActions {
           .sessions()
           .map((each) => (each.id === acted.id ? acted : each)),
       report = () => true,
-      allowLogin = true,
+      allowSshAuthentication = true,
       clearError = true,
       kind = "action",
     } = options;
@@ -346,10 +347,15 @@ export class SessionActions {
     const release = this._busy(session.id, kind);
     try {
       const acted = await act(session.id).catch(async (error) => {
-        if (!allowLogin || !needsSshLogin(error)) throw error;
+        if (!allowSshAuthentication || !needsSshAuthentication(error)) {
+          throw error;
+        }
         await this._hooks
-          .loginDock()
-          .login(session.sshHost, this._api.sshAuthWebSocket(session.sshHost));
+          .sshAuthDock()
+          .authenticate(
+            session.alias,
+            this._api.sshAuthWebSocket(session.alias),
+          );
         return act(session.id);
       });
       if (current()) {
@@ -371,7 +377,7 @@ export class SessionActions {
     }
   }
 
-  async remove(sessionId: string): Promise<void> {
+  async delete(sessionId: string): Promise<void> {
     const session = this._selectedSession(sessionId);
     if (!session) {
       return;
@@ -381,8 +387,8 @@ export class SessionActions {
     const confirmed = await confirm(
       live ? "Stop and delete session" : "Delete session",
       live
-        ? `${session.rootFolder} on ${session.sshHost} is ${session.state.toLowerCase()}. Its Slurm job will be stopped now and the session removed after it ends.`
-        : `Remove ${session.rootFolder} on ${session.sshHost} from this list? It has already ended.`,
+        ? `${session.rootFolder} on ${session.alias} is ${session.state.toLowerCase()}. Its Slurm job will be stopped now and the session deleted after it ends.`
+        : `Delete ${session.rootFolder} on ${session.alias}? It has already ended.`,
       live ? "Stop and delete" : "Delete",
     );
     if (!confirmed || this._hooks.isDisposed()) {
@@ -430,7 +436,7 @@ export class SessionActions {
       },
       {
         clearError: !retry,
-        allowLogin: false,
+        allowSshAuthentication: false,
         apply: () =>
           this._hooks.sessions().filter((each) => each.id !== session.id),
         report: (error) => !transientDeleteFailure(error),
