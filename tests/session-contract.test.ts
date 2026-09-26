@@ -179,6 +179,7 @@ describe("checked narrow cs-plane run history JSON contract", () => {
   const run = {
     sessionId: providerFixture.id,
     seq: providerFixture.seq,
+    launcher: "client",
     sshHost: "delta",
     partition: "cpu",
     rootFolder: "$HOME/project",

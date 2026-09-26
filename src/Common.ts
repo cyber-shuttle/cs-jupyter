@@ -83,7 +83,11 @@ export type IRunStats = plane.RunStats;
 export type ILogLine = Narrow<plane.SessionLogLine, { stream: LogStream }>;
 export type IRun = Narrow<
   plane.Run,
-  JobLiterals & { finalState: SessionState; logs?: ILogLine[] }
+  JobLiterals & {
+    launcher?: SessionLauncher;
+    finalState: SessionState;
+    logs?: ILogLine[];
+  }
 >;
 export type ISshHost = ssh.HostEntry;
 export type ISshKey = ssh.SSHKey;
