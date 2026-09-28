@@ -2,7 +2,7 @@
 
 A deployment is the built `dist/` served as static files over HTTPS, plus one configuration key naming its
 cs-plane. cs-plane is deployed separately, for example by [cs-infra](https://github.com/cyber-shuttle/cs-infra);
-the CILogon client and Custos URL are configured there. Any path works: the build uses relative URLs
+the CILogon client is configured there. Any path works: the build uses relative URLs
 (`base_url` is empty in `jupyter_lite_config.json`).
 
 ## 1. Build
