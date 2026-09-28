@@ -3,7 +3,7 @@
 // the subprotocol carries base64url of UTF-8 bytes, not the raw string.
 import { fakeAuth } from "./fakes";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ControlClient } from "../src/ControlClient";
+import { PlaneClient } from "../src/PlaneClient";
 import { OAuthWebSocketFactory, type WebSocketConstructor } from "../src/ssh";
 
 class FakeSocket extends EventTarget implements WebSocket {
@@ -41,25 +41,25 @@ afterEach(() => {
 });
 
 describe("OAuth WebSocket factory", () => {
-  it("builds the authentication socket URL from the control base", async () => {
+  it("builds the authentication socket URL from the cs-plane base", async () => {
     const auth = fakeAuth();
     const webSockets = new OAuthWebSocketFactory(
       auth,
-      "https://control.example.edu",
+      "https://plane.example.edu",
       Socket,
     );
     const open = vi
       .spyOn(webSockets, "open")
       .mockResolvedValue(new FakeSocket("wss://unused", []));
-    const client = new ControlClient(
-      "https://control.example.edu/api/v1",
+    const client = new PlaneClient(
+      "https://plane.example.edu/api/v1",
       auth,
       vi.fn<typeof globalThis.fetch>(),
       webSockets,
     );
     await client.sshAuthWebSocket("delta")();
     expect(open.mock.calls.map(([url]) => url)).toEqual([
-      "wss://control.example.edu/api/v1/hosts/delta/ssh",
+      "wss://plane.example.edu/api/v1/hosts/delta/ssh",
     ]);
   });
 
@@ -70,7 +70,7 @@ describe("OAuth WebSocket factory", () => {
       .mockResolvedValueOnce({ idToken: "second-token" });
     const factory = new OAuthWebSocketFactory(
       { acquireToken },
-      "https://control.example.edu",
+      "https://plane.example.edu",
       Socket,
     );
     window.localStorage.setItem("existing", "unchanged");
@@ -80,8 +80,8 @@ describe("OAuth WebSocket factory", () => {
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
 
-    await factory.open("wss://control.example.edu/api/v1/hosts/delta/ssh");
-    await factory.open("wss://control.example.edu/api/v1/hosts/echo/ssh");
+    await factory.open("wss://plane.example.edu/api/v1/hosts/delta/ssh");
+    await factory.open("wss://plane.example.edu/api/v1/hosts/echo/ssh");
 
     expect(acquireToken).toHaveBeenCalledTimes(2);
     expect(sockets.slice(-2).map(({ protocols }) => protocols)).toEqual([
@@ -89,7 +89,7 @@ describe("OAuth WebSocket factory", () => {
       ["cybershuttle.v1", "bearer.c2Vjb25kLXRva2Vu"],
     ]);
     expect(sockets.at(-2)?.url).toBe(
-      "wss://control.example.edu/api/v1/hosts/delta/ssh",
+      "wss://plane.example.edu/api/v1/hosts/delta/ssh",
     );
     expect([
       window.localStorage.length,
@@ -115,11 +115,11 @@ describe("OAuth WebSocket factory", () => {
       const before = sockets.length;
       const factory = new OAuthWebSocketFactory(
         { acquireToken: vi.fn(async () => ({ idToken })) },
-        "https://control.example.edu",
+        "https://plane.example.edu",
         Socket,
       );
       await expect(
-        factory.open("wss://control.example.edu/api/v1/hosts/delta/ssh"),
+        factory.open("wss://plane.example.edu/api/v1/hosts/delta/ssh"),
       ).rejects.toThrow(/token/i);
       expect(sockets).toHaveLength(before);
     },
@@ -129,15 +129,15 @@ describe("OAuth WebSocket factory", () => {
     const { acquireToken } = fakeAuth();
     const factory = new OAuthWebSocketFactory(
       { acquireToken },
-      "https://control.example.edu",
+      "https://plane.example.edu",
       Socket,
     );
     await expect(
-      factory.open("wss://control.example.edu/api/v1/hosts/delta/ssh?token=x"),
+      factory.open("wss://plane.example.edu/api/v1/hosts/delta/ssh?token=x"),
     ).rejects.toThrow("without credentials, query, or fragment");
     await expect(
       factory.open("wss://hostile.example/api/v1/hosts/delta/ssh"),
-    ).rejects.toThrow("outside the configured control origin");
+    ).rejects.toThrow("outside the configured cs-plane origin");
     expect(acquireToken).not.toHaveBeenCalled();
   });
 });

@@ -1,4 +1,4 @@
-// The stateful controller behind the launcher panel: polls cs-plane, holds
+// The stateful panel mounted in JupyterLab's Launcher: polls cs-plane, holds
 // session/run/log state and the sign-in state machine, and renders the title
 // row's sign-in status. It composes actions and modals rather than owning
 // their logic, and replaces log tails wholly each poll rather than merging.
@@ -6,14 +6,14 @@ import { Signal } from "@lumino/signaling";
 import { StackedPanel } from "@lumino/widgets";
 import {
   errorMessage,
-  IMetricSample,
+  IUsageSample,
   IRun,
   ISession,
   ISshHost,
   isTerminal,
 } from "./Common";
 import { AuthInteractionRequiredError } from "./AuthClient";
-import { ControlClient, ISessionLogTail, UNCHANGED } from "./ControlClient";
+import { PlaneClient, ISessionLogTail, UNCHANGED } from "./PlaneClient";
 import { PanelBoundWidget } from "./RebuildingWidget";
 import { SessionController } from "./SessionController";
 import {
@@ -35,7 +35,7 @@ export class CyberShuttleHeader extends PanelBoundWidget {
   readonly signInRequested = new Signal<this, void>(this);
   readonly signOutRequested = new Signal<this, void>(this);
   readonly sshKeysRequested = new Signal<this, void>(this);
-  readonly tunnelLinkRequested = new Signal<this, void>(this);
+  readonly devTunnelsAccountRequested = new Signal<this, void>(this);
 
   private _accountMenuOpen = false;
 
@@ -95,8 +95,11 @@ export class CyberShuttleHeader extends PanelBoundWidget {
     if (signedIn && this._accountMenuOpen) {
       const menu = element("div", "", "csAccountMenu", { role: "menu" });
       menu.append(
-        this._menuItem("Dev Tunnels", "tunnel-link", TUNNEL_GLYPH, () =>
-          this.tunnelLinkRequested.emit(undefined),
+        this._menuItem(
+          "Dev Tunnels",
+          "devtunnels-account",
+          DEVTUNNELS_GLYPH,
+          () => this.devTunnelsAccountRequested.emit(undefined),
         ),
         this._menuItem("SSH Keys", "ssh-keys", KEY_GLYPH, () =>
           this.sshKeysRequested.emit(undefined),
@@ -129,7 +132,7 @@ export class CyberShuttleHeader extends PanelBoundWidget {
 }
 
 const KEY_GLYPH = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="10" r="3.6" /><path d="M10.6 10h7.2M15.2 10v2.6M17.8 10v2" /></g></svg>`;
-const TUNNEL_GLYPH = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><path d="M7 13 13 7" /><path d="M8.5 4.5h3A3.5 3.5 0 0 1 15 8v0" /><path d="M11.5 15.5h-3A3.5 3.5 0 0 1 5 12v0" /></g></svg>`;
+const DEVTUNNELS_GLYPH = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><path d="M7 13 13 7" /><path d="M8.5 4.5h3A3.5 3.5 0 0 1 15 8v0" /><path d="M11.5 15.5h-3A3.5 3.5 0 0 1 5 12v0" /></g></svg>`;
 const SIGN_OUT_GLYPH = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3.5H4.5v13H8M12.5 6.5 16 10l-3.5 3.5M16 10H7.5" /></g></svg>`;
 
 const USER_GLYPH = `<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><circle cx="10" cy="10" r="8.6" /><circle cx="10" cy="8.2" r="2.6" /><path d="M5.3 16.5a5 5 0 0 1 9.4 0" /></g></svg>`;
@@ -144,7 +147,7 @@ export class CyberShuttlePanel extends StackedPanel {
   private _polling = false;
   private _sessions: ISession[] = [];
   private _logs = new Map<string, ISessionLogTail>();
-  private _samples = new Map<string, IMetricSample[]>();
+  private _samples = new Map<string, IUsageSample[]>();
   private _runs: IRun[] = [];
   private _loading = false;
   private _updatesStatus = "";
@@ -158,7 +161,7 @@ export class CyberShuttlePanel extends StackedPanel {
   private _actions: SessionActions;
 
   constructor(
-    private _api: ControlClient,
+    private _api: PlaneClient,
     private _controller: SessionController,
   ) {
     super();
@@ -173,7 +176,7 @@ export class CyberShuttlePanel extends StackedPanel {
       currentSessionId: () => getActiveSessionId(),
       select: (sessionId, current) =>
         this._controller.select(sessionId, current),
-      loginDock: () => this._modals.loginDock,
+      sshAuthDock: () => this._modals.sshAuthDock,
       rejectDetail: () => this._modals.rejectDetail(),
     });
     this._modals = new SessionModals(this, _api);
@@ -191,8 +194,8 @@ export class CyberShuttlePanel extends StackedPanel {
     this.header.signInRequested.connect(() => void this.signIn());
     this.header.signOutRequested.connect(() => this.signOut());
     this.header.sshKeysRequested.connect(() => void this._modals.openSshKeys());
-    this.header.tunnelLinkRequested.connect(
-      () => void this._modals.openTunnelLink(),
+    this.header.devTunnelsAccountRequested.connect(
+      () => void this._modals.openDevTunnelsAccount(),
     );
     this._emitState();
     this.restored = this.resume();
@@ -356,7 +359,7 @@ export class CyberShuttlePanel extends StackedPanel {
 
   private async _pollSample(sessionId: string, epoch: number): Promise<void> {
     try {
-      const series = await this._api.getSessionMetrics(sessionId);
+      const series = await this._api.getSessionUsage(sessionId);
       if (this._stale(epoch)) {
         return;
       }

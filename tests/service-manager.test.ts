@@ -1,7 +1,7 @@
 // The service manager registry is fail-closed until a READY session is
 // selected, keeping compute calls off the wrong session. It shares one
 // ServerConnection.ISettings across contents, kernels, sessions and terminals.
-// This workspace ships no local kernel and runs against a remote session's
+// This site ships no local kernel and runs against a remote session's
 // own Jupyter server; jupyter-lite.json must keep it that way.
 import { PageConfig } from "@jupyterlab/coreutils";
 import { PluginRegistry } from "@lumino/coreutils";
@@ -28,7 +28,7 @@ import {
 import { afterEach, assert, describe, expect, it, vi } from "vitest";
 
 import plugins, { remoteServicePlugins } from "../src/index";
-import { ControlClient, IControlClient } from "../src/ControlClient";
+import { PlaneClient, IPlaneClient } from "../src/PlaneClient";
 import { jsonResponse } from "../src/Common";
 import { getActiveSessionId } from "../src/session";
 import { accessFixture } from "./fakes";
@@ -45,7 +45,7 @@ const supportManagers = {
 function registryFor(path: string): PluginRegistry<null> {
   window.history.replaceState({}, "", path);
   PageConfig.setOption(
-    "cybershuttleControlApiUrl",
+    "cybershuttlePlaneApiUrl",
     "http://localhost:3000/api/v1",
   );
   const registry = new PluginRegistry<null>();
@@ -90,10 +90,10 @@ afterEach(() => vi.unstubAllGlobals());
 describe("shared cs-plane service", () => {
   it("provides one client to every plugin that reaches cs-plane", () => {
     const providers = plugins.filter(
-      (plugin) => plugin.provides === IControlClient,
+      (plugin) => plugin.provides === IPlaneClient,
     );
     expect(providers).toHaveLength(1);
-    expect(providers[0].activate(null as never)).toBeInstanceOf(ControlClient);
+    expect(providers[0].activate(null as never)).toBeInstanceOf(PlaneClient);
 
     for (const id of [
       "@cybershuttle/jupyter:remote-server-settings",
@@ -101,7 +101,7 @@ describe("shared cs-plane service", () => {
       "@cybershuttle/jupyter:walltime-status",
     ]) {
       expect(plugins.find((plugin) => plugin.id === id)?.requires).toContain(
-        IControlClient,
+        IPlaneClient,
       );
     }
   });

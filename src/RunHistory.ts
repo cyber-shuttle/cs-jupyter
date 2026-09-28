@@ -1,13 +1,14 @@
-// Every session this account has run, running ones first, then finished ones.
-// The history outlives the cards in it, so a deleted session's run stays, and
-// a session's current seq is itself a run entry with no outcome yet.
+// Every run of this account's sessions, running ones first, then finished ones.
+// The history outlives the sessions in it, so a deleted session's run stays,
+// and a session's current run is itself an entry with no outcome yet.
 // RunReport renders one finished entry's accounting, usage and frozen log.
 import { PanelBoundWidget } from "./RebuildingWidget";
 import type { IRun, ISession, SessionState } from "./Common";
-import { isTerminal } from "./Common";
+import { isTerminal, PLATFORM_LABEL, PLATFORMS } from "./Common";
 import { displayState } from "./session";
 import type { CyberShuttlePanel } from "./CyberShuttlePanel";
 import {
+  button,
   countsDown,
   detailColumns,
   detailGrid,
@@ -23,11 +24,16 @@ import {
   runSummary,
   sessionSummary,
   usagePlots,
-} from "./metrics";
+} from "./usage";
+
+const PLATFORM_OPTIONS: Array<[string, string]> = [
+  ["", "All"],
+  ...PLATFORMS.map((p): [string, string] => [p, PLATFORM_LABEL[p]]),
+];
 
 interface IHistoryEntry {
   key: string;
-  sshHost: string;
+  alias: string;
   state: SessionState;
   run?: IRun;
   session?: ISession;
@@ -35,6 +41,7 @@ interface IHistoryEntry {
 
 export class RunHistory extends PanelBoundWidget {
   private _open = new Set<string>();
+  private _platform = "";
 
   constructor(panel: CyberShuttlePanel, open?: string) {
     super(panel);
@@ -45,42 +52,71 @@ export class RunHistory extends PanelBoundWidget {
   }
 
   private _entries(): IHistoryEntry[] {
+    const shown = (p?: string) => !this._platform || p === this._platform;
     const running = this._state.sessions
-      .filter((session) => !isTerminal(session.state))
+      .filter(
+        (session) => !isTerminal(session.state) && shown(session.platform),
+      )
       .map((session) => ({
         key: `${session.id}/${session.seq}`,
-        sshHost: session.sshHost,
+        alias: session.alias,
         state: session.state,
         session,
       }));
-    const finished = this._state.runs.map((run) => {
-      const relaunching = this._state.sessions.find(
-        (session) => session.id === run.sessionId && session.seq === run.seq,
-      );
-      return {
-        key: `${run.sessionId}/${run.seq}`,
-        sshHost: run.sshHost,
-        state: relaunching
-          ? displayState(relaunching, this._state.busySessionIds)
-          : run.finalState,
-        run,
-      };
-    });
+    const finished = this._state.runs
+      .filter((run) => shown(run.platform))
+      .map((run) => {
+        const starting = this._state.sessions.find(
+          (session) => session.id === run.sessionId && session.seq === run.seq,
+        );
+        return {
+          key: `${run.sessionId}/${run.seq}`,
+          alias: run.alias,
+          state: starting
+            ? displayState(starting, this._state.busySessionIds)
+            : run.finalState,
+          run,
+        };
+      });
     return [...running, ...finished];
   }
 
   protected _rebuild(): void {
     this.node.textContent = "";
     const { root, scroll, card } = dialogBody(
-      "Every session you have run, still running first. A run is kept even after its card is deleted.",
+      "Every run of your sessions, running ones first. A run is kept even after its session is deleted.",
       this._state.error,
     );
+    // Buttons, not a select: the countdown rebuilds this every second, which
+    // would close an open dropdown.
+    const platforms = element("div", "", "csPlatformFilter");
+    for (const [value, label] of PLATFORM_OPTIONS) {
+      const chosen = value === this._platform;
+      const choice = button(
+        label,
+        chosen ? "csPrimaryButton" : "csSecondaryButton",
+        () => {
+          this._platform = value;
+          this._render();
+        },
+      );
+      choice.setAttribute("aria-pressed", String(chosen));
+      choice.dataset.sessionAction = `platform-${value || "all"}`;
+      platforms.appendChild(choice);
+    }
+    scroll.appendChild(platforms);
     const entries = this._entries();
     for (const entry of entries) {
       card.appendChild(this._entry(entry));
     }
     if (entries.length === 0) {
-      card.appendChild(element("div", "No runs yet.", "csStatus"));
+      card.appendChild(
+        element(
+          "div",
+          this._platform ? "No runs on this platform." : "No runs yet.",
+          "csStatus",
+        ),
+      );
     }
     scroll.appendChild(card);
     this.node.appendChild(root);
@@ -94,7 +130,7 @@ export class RunHistory extends PanelBoundWidget {
 
   private _entry(entry: IHistoryEntry): HTMLElement {
     const { entry: element_, body } = disclosure(entry.key, this._open, [
-      element("span", entry.sshHost, "csCardTitle"),
+      element("span", entry.alias, "csCardTitle"),
       element("span", this._when(entry), "csMeta csSshHostTarget"),
       statePill(entry.state),
     ]);

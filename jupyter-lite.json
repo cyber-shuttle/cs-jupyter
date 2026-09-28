@@ -1,7 +1,7 @@
 {
   "jupyter-config-data": {
     "appName": "CyberShuttle Jupyter",
-    "cybershuttleControlApiUrl": "",
+    "cybershuttlePlaneApiUrl": "",
     "deferredExtensions": ["@jupyterlab/terminal-extension:plugin"],
     "disabledExtensions": [
       "@jupyterlite/services-extension:workspace-manager",

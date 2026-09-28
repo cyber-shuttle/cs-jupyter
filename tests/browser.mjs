@@ -1,9 +1,9 @@
 // Playwright end-to-end run against dist, driving real Chromium against a
 // fake cs-plane, a fake OAuth issuer, and a fake Jupyter server that answers
 // on cs-plane's Jupyter proxy path. It exercises PKCE sign-in, the optional
-// Dev Tunnels device-link flow, and the session lifecycle through the real
+// Dev Tunnels account device flow, and the session lifecycle through the real
 // built extension. Two console messages are expected noise: the on-purpose
-// 409 SSH-login handshake and an xterm teardown race.
+// 409 SSH authentication handshake and an xterm teardown race.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
@@ -17,34 +17,34 @@ const dist = join(root, "dist");
 assert.ok(existsSync(join(dist, "lab", "index.html")), "dist is missing");
 
 const sessionId = "s-111111111111";
-const restartId = "s-222222222222";
+const startId = "s-222222222222";
 const createdId = "s-333333333333";
 const seq = 1;
 const account = "user@example.edu";
 const jupyterToken = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-const tunnelHandle = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+const devTunnelsHandle = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const issuerOrigin = "https://issuer.example.test";
 let idToken = "";
 let verifierUsed = "";
 let capturedAuthorize;
 let staticOrigin = "";
-let controlOrigin = "";
+let planeOrigin = "";
 let popupCount = 0;
-let tunnelLinked = false;
-let tunnelPollCount = 0;
+let devTunnelsConnected = false;
+let devTunnelsPollCount = 0;
 let discoveryCount = 0;
-const controlRequests = [];
+const planeRequests = [];
 const directRequests = [];
 const directWebSockets = [];
 const sessionLog = [
   { stream: "stderr", text: "startup warning", at: "2026-01-01T00:00:02Z" },
 ];
-const restartLog = [
+const startLog = [
   { stream: "stderr", text: "job failed", at: "2026-01-01T00:00:03Z" },
 ];
 const sessions = [
   session(sessionId, "projects/one"),
-  session(restartId, "projects/restart", "FAILED"),
+  session(startId, "projects/start", "FAILED"),
 ];
 
 const staticServer = createServer((request, response) => {
@@ -65,7 +65,7 @@ const staticServer = createServer((request, response) => {
   if (relative.endsWith("jupyter-lite.json")) {
     const config = JSON.parse(readFileSync(join(dist, relative), "utf8"));
     Object.assign(config["jupyter-config-data"], {
-      cybershuttleControlApiUrl: `${controlOrigin}/api/v1`,
+      cybershuttlePlaneApiUrl: `${planeOrigin}/api/v1`,
     });
     return json(response, config);
   }
@@ -81,8 +81,8 @@ const staticServer = createServer((request, response) => {
   response.end(readFileSync(file));
 });
 
-const controlServer = createServer((request, response) => {
-  const url = new URL(request.url ?? "/", controlOrigin);
+const planeServer = createServer((request, response) => {
+  const url = new URL(request.url ?? "/", planeOrigin);
   if (request.method === "OPTIONS") {
     cors(response);
     response.writeHead(204, {
@@ -92,7 +92,7 @@ const controlServer = createServer((request, response) => {
     });
     return response.end();
   }
-  controlRequests.push(`${request.method} ${url.pathname}`);
+  planeRequests.push(`${request.method} ${url.pathname}`);
   cors(response);
   if (url.pathname === "/api/v1/oauth/config" && request.method === "GET") {
     assert.equal(request.headers.origin, staticOrigin);
@@ -141,16 +141,16 @@ const controlServer = createServer((request, response) => {
       401,
       { "www-authenticate": "Bearer" },
     );
-  if (url.pathname === "/api/v1/tunnel" && request.method === "GET")
-    return json(response, tunnelLinkStatus());
+  if (url.pathname === "/api/v1/devtunnels" && request.method === "GET")
+    return json(response, devTunnelsAccountStatus());
   if (
-    url.pathname === "/api/v1/tunnel/authorizations" &&
+    url.pathname === "/api/v1/devtunnels/authorizations" &&
     request.method === "POST"
   )
     return readRequestJSON(request).then((body) => {
       assert.equal(body.provider, "github");
       return json(response, {
-        handle: tunnelHandle,
+        handle: devTunnelsHandle,
         userCode: "ABCD-EFGH",
         verificationUri: "https://verification.example.test/device",
         expiresInSeconds: 900,
@@ -158,25 +158,29 @@ const controlServer = createServer((request, response) => {
       });
     });
   if (
-    url.pathname === `/api/v1/tunnel/authorizations/${tunnelHandle}/poll` &&
+    url.pathname ===
+      `/api/v1/devtunnels/authorizations/${devTunnelsHandle}/poll` &&
     request.method === "POST"
   ) {
-    tunnelPollCount++;
-    if (tunnelPollCount === 1)
+    devTunnelsPollCount++;
+    if (devTunnelsPollCount === 1)
       return json(response, {
         status: "pending",
         intervalSeconds: 1,
-        linked: false,
+        connected: false,
       });
-    tunnelLinked = true;
-    return json(response, { status: "linked", ...tunnelLinkStatus() });
+    devTunnelsConnected = true;
+    return json(response, {
+      status: "connected",
+      ...devTunnelsAccountStatus(),
+    });
   }
   if (url.pathname === "/api/v1/hosts" && request.method === "GET")
     return json(response, {
       hosts: [
         {
-          name: "cluster",
-          hostname: "login.example.edu",
+          alias: "delta",
+          hostname: "delta.example.edu",
           user: "alice",
           port: 22,
           extraDirectives: [],
@@ -185,7 +189,7 @@ const controlServer = createServer((request, response) => {
       ],
     });
   if (
-    url.pathname === "/api/v1/hosts/cluster/slurm" &&
+    url.pathname === "/api/v1/hosts/delta/slurm" &&
     request.method === "GET"
   ) {
     discoveryCount++;
@@ -202,7 +206,7 @@ const controlServer = createServer((request, response) => {
       );
     }
     return json(response, {
-      host: "cluster",
+      alias: "delta",
       accounts: ["project-a"],
       partitions: [{ name: "debug", cpuCount: 16, memoryMb: 32768, gres: [] }],
       homeDir: "/home/browser",
@@ -214,7 +218,7 @@ const controlServer = createServer((request, response) => {
   ) {
     return readRequestJSON(request).then((body) => {
       assert.equal(body.rootFolder, "projects/browser-created");
-      assert.deepEqual(body.tunnelModes, ["devtunnel", "websocket"]);
+      assert.deepEqual(body.tunnelModes, ["devtunnel", "link"]);
       return json(response, {
         sessionId: "s-012345abcdef",
         status: "PASSED",
@@ -226,7 +230,7 @@ const controlServer = createServer((request, response) => {
   if (url.pathname === "/api/v1/sessions" && request.method === "POST") {
     return readRequestJSON(request).then((body) => {
       assert.equal(body.rootFolder, "projects/browser-created");
-      assert.deepEqual(body.tunnelModes, ["devtunnel", "websocket"]);
+      assert.deepEqual(body.tunnelModes, ["devtunnel", "link"]);
       let item = sessions.find(({ id }) => id === createdId);
       if (!item) {
         item = { ...session(createdId, body.rootFolder, "STOPPED"), seq: 0 };
@@ -242,7 +246,7 @@ const controlServer = createServer((request, response) => {
       sessions,
       logs: [
         { sessionId, lines: sessionLog },
-        { sessionId: restartId, lines: restartLog },
+        { sessionId: startId, lines: startLog },
       ],
     };
     const etag = `"${createHash("sha256").update(JSON.stringify(body)).digest("hex")}"`;
@@ -253,13 +257,13 @@ const controlServer = createServer((request, response) => {
     }
     return json(response, body, 200, { etag });
   }
-  if (url.pathname === "/api/v1/telemetry" && request.method === "GET")
+  if (url.pathname === "/api/v1/runs" && request.method === "GET")
     return json(response, { runs: [] });
-  const metricsMatch = /^\/api\/v1\/sessions\/(s-[a-f0-9]{12})\/metrics$/.exec(
+  const usageMatch = /^\/api\/v1\/sessions\/(s-[a-f0-9]{12})\/usage$/.exec(
     url.pathname,
   );
-  if (metricsMatch)
-    return json(response, { sessionId: metricsMatch[1], samples: [] });
+  if (usageMatch)
+    return json(response, { sessionId: usageMatch[1], samples: [] });
   const accessMatch = /^\/api\/v1\/sessions\/(s-[a-f0-9]{12})\/access$/.exec(
     url.pathname,
   );
@@ -269,7 +273,7 @@ const controlServer = createServer((request, response) => {
       seq,
       expiresAt: "2030-01-01T00:00:00Z",
       jupyter: {
-        uri: `${controlOrigin}/api/v1/sessions/${accessMatch[1]}/jupyter/`,
+        uri: `${planeOrigin}/api/v1/sessions/${accessMatch[1]}/jupyter/`,
         token: jupyterToken,
       },
     });
@@ -346,23 +350,23 @@ const webSockets = new WebSocketServer({
     return "cybershuttle.v1";
   },
 });
-controlServer.on("upgrade", (request, socket, head) => {
+planeServer.on("upgrade", (request, socket, head) => {
   assert.equal(request.headers.origin, staticOrigin);
   webSockets.handleUpgrade(request, socket, head, (webSocket) =>
     webSockets.emit("connection", webSocket, request),
   );
 });
 webSockets.on("connection", (socket, request) => {
-  const path = new URL(request.url, controlOrigin).pathname;
-  assert.equal(path, "/api/v1/hosts/cluster/ssh");
+  const path = new URL(request.url, planeOrigin).pathname;
+  assert.equal(path, "/api/v1/hosts/delta/ssh");
   setTimeout(() => socket.send(Buffer.from("Password: ")), 10);
   socket.on("message", () => socket.send(JSON.stringify({ type: "ready" })));
 });
 
 await listen(staticServer);
-await listen(controlServer);
+await listen(planeServer);
 staticOrigin = serverOrigin(staticServer);
-controlOrigin = serverOrigin(controlServer);
+planeOrigin = serverOrigin(planeServer);
 
 const browser = await chromium.launch({ headless: true });
 try {
@@ -383,7 +387,7 @@ try {
   });
 
   await context.route(
-    `${controlOrigin}/api/v1/sessions/*/jupyter/**`,
+    `${planeOrigin}/api/v1/sessions/*/jupyter/**`,
     async (route) => {
       const request = route.request();
       const url = new URL(request.url());
@@ -460,7 +464,7 @@ try {
       .getByRole("heading", { name: "CyberShuttle", exact: true })
       .count(),
     1,
-    "the product heading must appear once, in the launcher content header",
+    "the product heading must appear once, in the Launcher content header",
   );
   await page.getByRole("tab", { name: "Launcher", exact: true }).waitFor();
   const signInPrompt = page
@@ -472,7 +476,7 @@ try {
   assert.ok((await signInPrompt.textContent()).includes("remote HPC sessions"));
   assert.equal(popupCount, 0, "fresh load must not open an OAuth page");
   assert.deepEqual(
-    controlRequests,
+    planeRequests,
     [],
     "fresh load must not initialize HTTP or polling",
   );
@@ -499,7 +503,7 @@ try {
     await page
       .locator(`[data-session-action="${sessionId}"]`)
       .getAttribute("aria-label"),
-    "cluster, READY",
+    "delta, READY",
   );
   const browserState = await page.evaluate(() => ({
     href: window.location.href,
@@ -528,7 +532,7 @@ try {
     ["cybershuttle.oauth.v1", "cybershuttle.session-access.v1.<session>"],
     "session storage holds only the credentials and the cached session access",
   );
-  assert.ok(controlRequests.includes("GET /api/v1/sessions"));
+  assert.ok(planeRequests.includes("GET /api/v1/sessions"));
 
   assert.equal(
     await page
@@ -596,7 +600,7 @@ try {
   );
   await page.setViewportSize({ width: 1280, height: 720 });
 
-  await page.locator(`[data-session-action="${restartId}"]`).click();
+  await page.locator(`[data-session-action="${startId}"]`).click();
   const sessionDialog = page.locator(
     ".jp-Dialog-content:has(.csSessionDetail)",
   );
@@ -611,7 +615,7 @@ try {
         }),
       ),
     [
-      ["Run again", "rgb(255, 255, 255)", "solid"],
+      ["Start", "rgb(255, 255, 255)", "solid"],
       ["Delete", "rgb(211, 47, 47)", "solid"],
     ],
     "Jupyter dialog styling must not override session action variants",
@@ -624,17 +628,17 @@ try {
     [true, "auto"],
     "session modal must remain wide and scrollable",
   );
-  await sessionDialog.getByRole("button", { name: "Run again" }).click();
+  await sessionDialog.getByRole("button", { name: "Start" }).click();
   await sessionDialog.getByText("QUEUED", { exact: true }).waitFor();
   assert.ok(
-    controlRequests.includes(`POST /api/v1/sessions/${restartId}/start`),
-    "Run again must run the finished session rather than create another",
+    planeRequests.includes(`POST /api/v1/sessions/${startId}/start`),
+    "Start must run the finished session rather than create another",
   );
   await sessionDialog.locator(".jp-Dialog-close-button").click();
 
   await page.getByRole("button", { name: account, exact: true }).click();
-  await page.locator('[data-session-action="tunnel-link"]').click();
-  await page.getByRole("button", { name: "Link GitHub" }).click();
+  await page.locator('[data-session-action="devtunnels-account"]').click();
+  await page.getByRole("button", { name: "Connect GitHub" }).click();
   const deviceDialog = page.getByRole("dialog", { name: "Sign in to GitHub" });
   await deviceDialog.waitFor();
   assert.equal(
@@ -653,11 +657,11 @@ try {
   await openSignIn.click();
   await verificationPage;
   assert.equal(popupCount, 1, "only the explicit open action may open a page");
-  const tunnelDialog = page.locator(".jp-Dialog-content", {
-    has: page.getByRole("button", { name: "Unlink" }),
+  const devTunnelsDialog = page.locator(".jp-Dialog-content", {
+    has: page.getByRole("button", { name: "Disconnect" }),
   });
-  await tunnelDialog.waitFor();
-  await tunnelDialog.locator(".jp-Dialog-close-button").click();
+  await devTunnelsDialog.waitFor();
+  await devTunnelsDialog.locator(".jp-Dialog-close-button").click();
 
   await page.getByRole("button", { name: "Add Session" }).click();
   const styledControlDifferences = await page
@@ -705,7 +709,7 @@ try {
     "contents",
     "Jupyter's select wrapper must not alter the form layout",
   );
-  await page.getByLabel("SSH Host").selectOption("cluster");
+  await page.getByLabel("SSH host").selectOption("delta");
   await page
     .locator(".csSshOperationTerminal .xterm-rows")
     .getByText("Password:", { exact: true })
@@ -713,14 +717,14 @@ try {
   await page.locator(".csSshOperationTerminal .xterm-helper-textarea").focus();
   await page.keyboard.type("password");
   await page.keyboard.press("Control+M");
-  const workspace = page.getByLabel("Workspace folder");
-  await workspace.waitFor({ state: "visible" });
+  const rootFolder = page.getByLabel("Root folder");
+  await rootFolder.waitFor({ state: "visible" });
   assert.equal(
     discoveryCount,
     2,
     "discovery must resume once after interactive auth",
   );
-  await workspace.fill("projects/browser-created");
+  await rootFolder.fill("projects/browser-created");
   await page.getByLabel("Dev Tunnel", { exact: true }).check();
   await page.getByRole("button", { name: "Review", exact: true }).click();
   await page.getByRole("heading", { name: "Review Slurm job" }).waitFor();
@@ -733,7 +737,7 @@ try {
   await createdDetail.getByText("READY", { exact: true }).waitFor({
     timeout: 20_000,
   });
-  const controlBeforeCachedRestore = controlRequests.length;
+  const planeBeforeCachedRestore = planeRequests.length;
   await createdDetail.getByRole("button", { name: "Connect" }).click();
   await page.waitForURL(
     (url) =>
@@ -758,7 +762,7 @@ try {
     1,
     "direct-session restore must retain one combined Launcher",
   );
-  const afterConnect = controlRequests.slice(controlBeforeCachedRestore);
+  const afterConnect = planeRequests.slice(planeBeforeCachedRestore);
   assert.ok(
     afterConnect.filter((entry) =>
       entry.endsWith(`/api/v1/sessions/${createdId}`),
@@ -796,7 +800,7 @@ try {
       await page.getByRole("button", { name: account, exact: true }).count(),
     ],
     [1, 1],
-    "the section and its header must move to the launcher, not multiply or die with the old one",
+    "the section and its header must move to the Launcher, not multiply or die with the old one",
   );
   await page
     .locator('.jp-LauncherCard[title="Start a new terminal session"]')
@@ -836,10 +840,10 @@ try {
     "direct manager requests omitted the Jupyter token or sent cookies",
   );
   assert.deepEqual(directWebSockets, [
-    `${controlOrigin.replace(/^http/, "ws")}/api/v1/sessions/${createdId}/jupyter/terminals/websocket/1?token=${jupyterToken}`,
+    `${planeOrigin.replace(/^http/, "ws")}/api/v1/sessions/${createdId}/jupyter/terminals/websocket/1?token=${jupyterToken}`,
   ]);
 
-  const controlBeforeReload = controlRequests.length;
+  const planeBeforeReload = planeRequests.length;
   const directBeforeReload = directRequests.length;
   await page.reload();
   await page.waitForFunction(
@@ -853,8 +857,8 @@ try {
     "every call after a reload must still carry the Jupyter token",
   );
   assert.equal(
-    controlRequests
-      .slice(controlBeforeReload)
+    planeRequests
+      .slice(planeBeforeReload)
       .filter((entry) => entry.endsWith("/access")).length,
     1,
     "a session reload must reauthorize access",
@@ -882,7 +886,7 @@ try {
   assert.deepEqual(
     await page.evaluate(() => Object.keys(sessionStorage)),
     [],
-    "sign-out must remove OAuth and every cached session access",
+    "sign-out must delete OAuth and every cached session access",
   );
   assert.equal(
     directRequests.length,
@@ -899,14 +903,14 @@ try {
     [],
   );
   console.log(
-    `validated sign-in, guarded session access, remote Jupyter managers, and sign-out (${controlRequests.length} control requests)`,
+    `validated sign-in, guarded session access, remote Jupyter managers, and sign-out (${planeRequests.length} cs-plane requests)`,
   );
   await context.close();
 } finally {
   webSockets.close();
   await browser.close();
   await close(staticServer);
-  await close(controlServer);
+  await close(planeServer);
 }
 
 async function launcherSectionLayout(section) {
@@ -973,15 +977,15 @@ async function installIssuerRoute(context) {
   });
 }
 
-function tunnelLinkStatus() {
-  return tunnelLinked
+function devTunnelsAccountStatus() {
+  return devTunnelsConnected
     ? {
-        linked: true,
+        connected: true,
         provider: "github",
         account: "octocat",
-        linkedAt: "2026-01-01T00:00:00Z",
+        connectedAt: "2026-01-01T00:00:00Z",
       }
-    : { linked: false };
+    : { connected: false };
 }
 
 function directoryModel() {
@@ -1022,13 +1026,13 @@ function session(id, rootFolder, state = "READY") {
     id,
     seq,
     state,
-    launcher: "cs-plane",
-    sshHost: "cluster",
+    platform: "jupyterlab",
+    alias: "delta",
     account: "project-a",
     partition: "debug",
     rootFolder,
     resources: { cores: 4, memoryMb: 4096, wallMinutes: 30 },
-    tunnelModes: ["websocket"],
+    tunnelModes: ["link"],
     error: state === "FAILED" ? "Previous startup failed" : undefined,
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:00:01Z",

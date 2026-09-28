@@ -1,12 +1,9 @@
-// The shared ControlClient used for session lifecycle calls and for building
+// The shared PlaneClient used for session lifecycle calls and for building
 // Jupyter server connection settings. Validating a session id before an action
 // avoids reporting a spurious failure for an already-stopped session.
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  ControlClient,
-  createSessionServerSettings,
-} from "../src/ControlClient";
-import { jsonResponse, validControlApiUrl } from "../src/Common";
+import { PlaneClient, createSessionServerSettings } from "../src/PlaneClient";
+import { jsonResponse, validPlaneApiUrl } from "../src/Common";
 import {
   installSessionCommandGuard,
   SessionController,
@@ -45,7 +42,7 @@ beforeEach(() => {
 
 describe("shared cs-plane client", () => {
   function makeClient(browserFetch: typeof globalThis.fetch) {
-    return new ControlClient(
+    return new PlaneClient(
       "http://localhost:3000/gateway/api/v1",
       auth,
       browserFetch,
@@ -81,11 +78,11 @@ describe("shared cs-plane client", () => {
     await client.listSessions();
     const request = {
       idempotencyKey: "idem",
-      sshHost: "delta",
+      alias: "delta",
       partition: "debug",
       rootFolder: "projects/demo",
       resources: { cores: 1, memoryMb: 1024, wallMinutes: 30 },
-      tunnelModes: ["websocket" as const],
+      tunnelModes: ["link" as const],
     };
     await client.validateCreateRequest(request);
     await client.createSession(request);
@@ -189,26 +186,26 @@ describe("shared cs-plane client", () => {
       await expect(
         client.validateCreateRequest({
           idempotencyKey: "idem",
-          sshHost: "delta",
+          alias: "delta",
           partition: "debug",
           rootFolder: ".",
           resources: { cores: 1, memoryMb: 1024, wallMinutes: 30 },
-          tunnelModes: ["websocket"],
+          tunnelModes: ["link"],
         }),
       ).rejects.toThrow("invalid session validation");
     }
   });
 
-  it("accepts plain http on every loopback host a URL reports, and nowhere else", () => {
-    for (const host of ["localhost", "127.0.0.1", "[::1]"]) {
-      const url = `http://${host}:8045/api/v1`;
-      expect(validControlApiUrl(url)).toBe(url);
+  it("accepts plain http on every loopback hostname a URL reports, and nowhere else", () => {
+    for (const hostname of ["localhost", "127.0.0.1", "[::1]"]) {
+      const url = `http://${hostname}:8045/api/v1`;
+      expect(validPlaneApiUrl(url)).toBe(url);
     }
-    expect(() => validControlApiUrl("http://other.example/api/v1")).toThrow(
+    expect(() => validPlaneApiUrl("http://other.example/api/v1")).toThrow(
       "HTTPS or loopback HTTP",
     );
-    expect(() => validControlApiUrl("/gateway/api/v1")).toThrow(
-      "absolute control API URL",
+    expect(() => validPlaneApiUrl("/gateway/api/v1")).toThrow(
+      "absolute cs-plane API URL",
     );
   });
 

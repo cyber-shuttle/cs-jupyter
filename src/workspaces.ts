@@ -1,6 +1,6 @@
 // Stores each session's JupyterLab layout as a file in the session's own home
 // through its contents API, so the layout follows the session across devices
-// and restarts instead of living in one browser slot. Without a selected
+// and runs instead of living in one browser slot. Without a selected
 // session there is nothing to keep, and every call is a no-op.
 import type { ServerConnection, Workspace } from "@jupyterlab/services";
 import { Drive } from "@jupyterlab/services";

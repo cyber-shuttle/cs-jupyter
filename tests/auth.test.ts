@@ -10,7 +10,7 @@ import {
 } from "../src/AuthClient";
 import { jsonResponse } from "../src/Common";
 
-const controlApiUrl = "https://control.example.edu/api/v1";
+const planeApiUrl = "https://plane.example.edu/api/v1";
 
 const config = {
   issuer: "https://cilogon.org",
@@ -55,12 +55,12 @@ beforeEach(() => {
 describe("AuthClient interactive sign-in", () => {
   it("builds the authorize URL from cs-plane's config and stores state and verifier", async () => {
     const navigate = vi.fn();
-    const auth = new AuthClient(controlApiUrl, {
+    const auth = new AuthClient(planeApiUrl, {
       fetch: fetchSequence([{ body: config }]),
       navigate,
     });
 
-    await auth.interactiveLogin();
+    await auth.signIn();
 
     expect(navigate).toHaveBeenCalledTimes(1);
     const url = new URL(navigate.mock.calls[0][0]);
@@ -118,7 +118,7 @@ describe("AuthClient callback exchange", () => {
       }),
     );
     setUrl("/lite/lab/?code=auth-code&state=s");
-    const auth = new AuthClient(controlApiUrl, {
+    const auth = new AuthClient(planeApiUrl, {
       fetch: fetchSequence([
         { body: { idToken: jwt({ sub: "x" }), expiresInSeconds: 900 } },
       ]),
@@ -136,7 +136,7 @@ describe("AuthClient callback exchange", () => {
         { body: { idToken, refreshToken: "refresh-1", expiresInSeconds: 900 } },
       ]),
     };
-    const auth = new AuthClient(controlApiUrl, dependencies);
+    const auth = new AuthClient(planeApiUrl, dependencies);
 
     await expect(auth.acquireToken()).resolves.toEqual({ idToken });
     expect(auth.account).toBe("user@example.edu");
@@ -147,7 +147,7 @@ describe("AuthClient callback exchange", () => {
     ).toMatchObject({ idToken, refreshToken: "refresh-1" });
 
     const [url, init] = vi.mocked(dependencies.fetch!).mock.calls[0];
-    expect(String(url)).toBe(`${controlApiUrl}/oauth/exchange`);
+    expect(String(url)).toBe(`${planeApiUrl}/oauth/exchange`);
     expect(JSON.parse(String(init?.body))).toEqual({
       code: "auth-code",
       codeVerifier: "verifier-value",
@@ -158,14 +158,14 @@ describe("AuthClient callback exchange", () => {
   it("rejects a state mismatch and leaves the caller unauthenticated", async () => {
     seedPending("expected-state");
     setUrl("/lite/lab/?code=auth-code&state=wrong-state");
-    const auth = new AuthClient(controlApiUrl, { fetch: fetchSequence([]) });
+    const auth = new AuthClient(planeApiUrl, { fetch: fetchSequence([]) });
 
     await expect(auth.acquireToken()).rejects.toThrow("state did not match");
   });
 
   it("rejects a callback with no sign-in in progress", async () => {
     setUrl("/lite/lab/?code=auth-code&state=some-state");
-    const auth = new AuthClient(controlApiUrl, { fetch: fetchSequence([]) });
+    const auth = new AuthClient(planeApiUrl, { fetch: fetchSequence([]) });
 
     await expect(auth.acquireToken()).rejects.toThrow(
       "No sign-in was in progress",
@@ -187,7 +187,7 @@ describe("AuthClient token refresh", () => {
     );
     const reply = Promise.withResolvers<Response>();
     const fetch = vi.fn(() => reply.promise);
-    const auth = new AuthClient(controlApiUrl, { fetch, now: () => 0 });
+    const auth = new AuthClient(planeApiUrl, { fetch, now: () => 0 });
 
     const first = auth.acquireToken();
     const second = auth.acquireToken();
@@ -217,7 +217,7 @@ describe("AuthClient token refresh", () => {
       }),
     );
     const reply = Promise.withResolvers<Response>();
-    const auth = new AuthClient(controlApiUrl, {
+    const auth = new AuthClient(planeApiUrl, {
       fetch: vi.fn(() => reply.promise),
       now: () => 0,
     });
@@ -264,11 +264,11 @@ describe("AuthClient token refresh", () => {
       ]),
       now: () => now,
     };
-    const auth = new AuthClient(controlApiUrl, dependencies);
+    const auth = new AuthClient(planeApiUrl, dependencies);
 
     await expect(auth.acquireToken()).resolves.toEqual({ idToken: refreshed });
     const [url, init] = vi.mocked(dependencies.fetch!).mock.calls[0];
-    expect(String(url)).toBe(`${controlApiUrl}/oauth/refresh`);
+    expect(String(url)).toBe(`${planeApiUrl}/oauth/refresh`);
     expect(JSON.parse(String(init?.body))).toEqual({
       refreshToken: "refresh-old",
     });
@@ -287,7 +287,7 @@ describe("AuthClient token refresh", () => {
         expiresAt: 30_000,
       }),
     );
-    const auth = new AuthClient(controlApiUrl, {
+    const auth = new AuthClient(planeApiUrl, {
       fetch: fetchSequence([new TypeError("network unavailable")]),
       now: () => 0,
     });
@@ -301,7 +301,7 @@ describe("AuthClient token refresh", () => {
       "cybershuttle.oauth.v1",
       JSON.stringify({ idToken, expiresAt: 1_000 }),
     );
-    const auth = new AuthClient(controlApiUrl, {
+    const auth = new AuthClient(planeApiUrl, {
       fetch: fetchSequence([]),
       now: () => 2_000,
     });
@@ -327,7 +327,7 @@ describe("AuthClient account claim", () => {
       "cybershuttle.oauth.v1",
       JSON.stringify({ idToken: jwt(claims), expiresAt: 3_600_000 }),
     );
-    const auth = new AuthClient(controlApiUrl, {
+    const auth = new AuthClient(planeApiUrl, {
       fetch: fetchSequence([]),
       now: () => 0,
     });
@@ -345,7 +345,7 @@ describe("AuthClient credential persistence", () => {
     { name: "an expired record", record: { idToken: "x", expiresAt: 0 } },
   ])("refuses a stored record with $name", async ({ record }) => {
     sessionStorage.setItem("cybershuttle.oauth.v1", JSON.stringify(record));
-    const auth = new AuthClient(controlApiUrl, {
+    const auth = new AuthClient(planeApiUrl, {
       fetch: fetchSequence([]),
       now: () => 1_000,
     });
@@ -361,7 +361,7 @@ describe("AuthClient credential persistence", () => {
       "cybershuttle.oauth.v1",
       JSON.stringify({ idToken, expiresAt: 3_600_000 }),
     );
-    const auth = new AuthClient(controlApiUrl, {
+    const auth = new AuthClient(planeApiUrl, {
       fetch: fetchSequence([]),
       now: () => 1_000,
     });
@@ -385,7 +385,7 @@ describe("AuthClient response validation", () => {
         }),
       );
       setUrl("/lite/lab/?code=c&state=s");
-      const auth = new AuthClient(controlApiUrl, {
+      const auth = new AuthClient(planeApiUrl, {
         fetch: fetchSequence([reply]),
       });
       await expect(auth.acquireToken()).rejects.toThrow(/invalid/i);

@@ -1,21 +1,21 @@
-// Log tails are remote process output rendered straight into the workspace, so
+// Log tails are remote process output rendered straight into JupyterLab, so
 // their shape is a trust boundary. Delete stays available in every session
-// state, since a stuck session most needs removing. A session's live log is
+// state, since a stuck session most needs deleting. A session's live log is
 // dropped once it stops running, since its narration has moved into the run
-// record.
+// history.
 import { describe, expect, it, vi } from "vitest";
 import type { ILogLine, ISession } from "../src/Common";
 import {
-  ControlClient,
+  PlaneClient,
   UNCHANGED,
   type ISessionLogTail,
-} from "../src/ControlClient";
+} from "../src/PlaneClient";
 import { RunReport } from "../src/RunHistory";
 import type { ISessionUiState } from "../src/session";
 import { SessionDetail } from "../src/SessionDetail";
 import {
   clientFor,
-  ControllerFake,
+  PanelStateFake,
   runFixture,
   sessionFixture,
   uiState,
@@ -46,7 +46,7 @@ function log(
   };
 }
 
-const tailsClient = (logs: unknown[]): ControlClient =>
+const tailsClient = (logs: unknown[]): PlaneClient =>
   clientFor({ sessions: [], logs });
 
 describe("session log tails on the polled read", () => {
@@ -146,13 +146,13 @@ function detailState(
 }
 
 function sessionDetail(value: ISession): {
-  controller: ControllerFake;
+  fake: PanelStateFake;
   detail: SessionDetail;
 } {
-  const controller = new ControllerFake(detailState(value));
+  const fake = new PanelStateFake(detailState(value));
   return {
-    controller,
-    detail: new SessionDetail(controller as never, value.id),
+    fake,
+    detail: new SessionDetail(fake as never, value.id),
   };
 }
 
@@ -213,8 +213,8 @@ describe("session detail modal body", () => {
     ["SUBMITTING", ["Stop", "Delete"]],
     ["READY", ["Stop", "Connect", "Delete"]],
     ["STOPPING", ["Delete"]],
-    ["STOPPED", ["Run again", "Delete"]],
-    ["FAILED", ["Run again", "Delete"]],
+    ["STOPPED", ["Start", "Delete"]],
+    ["FAILED", ["Start", "Delete"]],
   ] as const)("gates %s actions", (state, expected) => {
     const { detail } = sessionDetail(sessionInState(state));
     expect(
@@ -227,14 +227,14 @@ describe("session detail modal body", () => {
 
   it("hides Connect until Linkspan Jupyter state is ready", () => {
     const ready = sessionInState("READY");
-    const controller = new ControllerFake(
+    const fake = new PanelStateFake(
       uiState({
         sessions: [ready],
         logs: new Map(),
         jupyterReady: new Set<string>(),
       }),
     );
-    const detail = new SessionDetail(controller as never, ready.id);
+    const detail = new SessionDetail(fake as never, ready.id);
     expect(detail.node.textContent).not.toContain("Connect");
     detail.dispose();
   });
@@ -242,7 +242,7 @@ describe("session detail modal body", () => {
   it("rerenders live, preserves status scroll, and disconnects on dispose", () => {
     vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(200);
     vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(50);
-    const { controller, detail } = sessionDetail({
+    const { fake, detail } = sessionDetail({
       ...session,
       state: "STARTING",
     });
@@ -250,7 +250,7 @@ describe("session detail modal body", () => {
       detail.node.querySelector<HTMLElement>(".csSessionLogScroll")!;
     let scroller = logScroll();
     scroller.scrollTop = 40;
-    controller.setState(
+    fake.setState(
       detailState({ ...session, state: "STARTING" }, [
         { stream: "stdout", text: "next" },
       ]),
@@ -259,7 +259,7 @@ describe("session detail modal body", () => {
     expect(scroller.scrollTop).toBe(40);
 
     scroller.scrollTop = 150;
-    controller.setState(
+    fake.setState(
       detailState({ ...session, state: "READY" }, [
         { stream: "stdout", text: "ready" },
       ]),
@@ -271,11 +271,11 @@ describe("session detail modal body", () => {
     expect(logScroll().scrollTop).toBe(200);
 
     logScroll().scrollTop = 40;
-    controller.setState({
+    fake.setState({
       ...detailState({ ...session, state: "STARTING" }),
       logs: new Map(),
     });
-    controller.setState(
+    fake.setState(
       detailState({ ...session, state: "STARTING" }, [
         { stream: "stdout", text: "new epoch" },
       ]),
@@ -286,7 +286,7 @@ describe("session detail modal body", () => {
     expect(logScroll().scrollTop).toBe(200);
 
     detail.dispose();
-    controller.setState(detailState({ ...session, state: "FAILED" }));
+    fake.setState(detailState({ ...session, state: "FAILED" }));
     expect(detail.node.textContent).not.toContain("FAILED");
   });
 });

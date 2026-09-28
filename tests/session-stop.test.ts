@@ -1,5 +1,5 @@
-// Stop, relaunch and delete actions on a session, the launch and connection to
-// a Jupyter server through Linkspan. A relaunch's busy state is driven by the
+// Start, stop and delete actions on a session, the launch and connection to
+// a Jupyter server through Linkspan. A start's busy state is driven by the
 // click that started it, not the next poll. cs-plane can refuse a delete
 // repeatedly, and each refusal must leave it pending for the next poll. Stop
 // and Delete from the post-create detail reach their own confirmation even
@@ -8,14 +8,14 @@ import { Dialog } from "@jupyterlab/apputils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ISession } from "../src/Common";
 import { CyberShuttlePanel } from "../src/CyberShuttlePanel";
-import { ControlError } from "../src/ControlClient";
+import { PlaneError } from "../src/PlaneClient";
 import {
   acceptDialog,
   accessFixture,
-  controlFake,
+  planeFake,
   panelFake,
   pollPanel,
-  removeConfirmed,
+  deleteConfirmed,
   sessionFixture,
   sessionListFixture,
 } from "./fakes";
@@ -24,7 +24,7 @@ const base = sessionFixture({
   id: "s-111111111111",
   state: "STOPPED",
   account: "project-a",
-  rootFolder: "projects/restart",
+  rootFolder: "projects/start",
 });
 const readyBase: ISession = { ...base, state: "READY" };
 
@@ -38,7 +38,7 @@ async function loaded(panel: CyberShuttlePanel): Promise<void> {
 }
 
 async function started(startSession: unknown) {
-  const api = controlFake({
+  const api = planeFake({
     listSessions: vi.fn(async () => sessionListFixture([base])),
     startSession,
   });
@@ -52,7 +52,7 @@ async function runAgainStarted(
   api: { startSession: unknown },
   id: string,
 ): Promise<{ running: Promise<void> }> {
-  const running = panel.actions.runAgain(id);
+  const running = panel.actions.start(id);
   await vi.waitFor(() => expect(api.startSession).toHaveBeenCalledWith(id));
   return { running };
 }
@@ -61,14 +61,14 @@ async function deletePanel<T extends object>(
   deleteSession: ReturnType<typeof vi.fn>,
   overrides: T = {} as T,
 ) {
-  const api = controlFake({
+  const api = planeFake({
     listSessions: vi.fn(async () => sessionListFixture([base])),
     deleteSession,
     ...overrides,
   });
   const panel = panelFake(api);
   await loaded(panel);
-  await removeConfirmed(panel, base.id);
+  await deleteConfirmed(panel, base.id);
   expect(deleteSession).toHaveBeenCalledTimes(1);
   return { panel, api };
 }
@@ -76,7 +76,7 @@ async function deletePanel<T extends object>(
 describe("session stop action", () => {
   it("publishes busy state for the whole stop request", async () => {
     const stopPending = Promise.withResolvers<ISession>();
-    const api = controlFake({
+    const api = planeFake({
       listSessions: vi.fn(async () => sessionListFixture([readyBase])),
       stopSession: vi.fn(() => stopPending.promise),
     });
@@ -105,7 +105,7 @@ describe("session stop action", () => {
     await pollPanel(panel);
     await pollPanel(panel);
 
-    await panel.actions.runAgain(base.id);
+    await panel.actions.start(base.id);
     expect(api.startSession).toHaveBeenCalledTimes(1);
 
     pending.resolve({ ...base, state: "QUEUED" });
@@ -117,14 +117,14 @@ describe("session stop action", () => {
 
   it("keeps a stopped session's own state while deleting it, not SUBMITTING", async () => {
     const pending = Promise.withResolvers<void>();
-    const api = controlFake({
+    const api = planeFake({
       listSessions: vi.fn(async () => sessionListFixture([base])),
       deleteSession: vi.fn(() => pending.promise),
     });
     const panel = panelFake(api);
     await loaded(panel);
 
-    void panel.actions.remove(base.id);
+    void panel.actions.delete(base.id);
     await acceptDialog();
     await vi.waitFor(() =>
       expect(api.deleteSession).toHaveBeenCalledWith(base.id),
@@ -138,13 +138,13 @@ describe("session stop action", () => {
     panel.dispose();
   });
 
-  it("keeps a failed relaunch's reason on screen across a poll", async () => {
+  it("keeps a failed start's reason on screen across a poll", async () => {
     const { panel } = await started(
       vi.fn(async () => {
         throw new Error("Slurm validation failed.");
       }),
     );
-    await panel.actions.runAgain(base.id);
+    await panel.actions.start(base.id);
     expect(panel.state.error).toBe("Slurm validation failed.");
     await pollPanel(panel);
     expect(panel.state.error).toBe("Slurm validation failed.");
@@ -153,7 +153,7 @@ describe("session stop action", () => {
 
   it("stops a live session, keeps it visible, then deletes it once terminal", async () => {
     let state: ISession["state"] = "READY";
-    const api = controlFake({
+    const api = planeFake({
       listSessions: vi.fn(async () => sessionListFixture([{ ...base, state }])),
       stopSession: vi.fn(async () => ({ ...base, state: "STOPPING" as const })),
       deleteSession: vi.fn(async () => undefined),
@@ -161,7 +161,7 @@ describe("session stop action", () => {
     const panel = panelFake(api);
     await loaded(panel);
 
-    await removeConfirmed(panel, base.id);
+    await deleteConfirmed(panel, base.id);
     expect(api.stopSession).toHaveBeenCalledOnce();
     expect(api.deleteSession).not.toHaveBeenCalled();
     expect(panel.state.sessions.map((each) => each.id)).toEqual([base.id]);
@@ -180,9 +180,9 @@ describe("session stop action", () => {
   it("clears a pending delete when the terminal session is already gone", async () => {
     let state: ISession["state"] = "READY";
     const deleteSession = vi.fn(async () => {
-      throw new ControlError("session_not_found", "session not found", 404);
+      throw new PlaneError("session_not_found", "session not found", 404);
     });
-    const api = controlFake({
+    const api = planeFake({
       listSessions: vi.fn(async () => sessionListFixture([{ ...base, state }])),
       stopSession: vi.fn(async () => ({ ...base, state: "STOPPING" as const })),
       deleteSession,
@@ -190,7 +190,7 @@ describe("session stop action", () => {
     const panel = panelFake(api);
     await loaded(panel);
 
-    await removeConfirmed(panel, base.id);
+    await deleteConfirmed(panel, base.id);
     state = "STOPPED";
     await pollPanel(panel);
     await vi.waitFor(() => expect(deleteSession).toHaveBeenCalledOnce());
@@ -205,10 +205,10 @@ describe("session stop action", () => {
     const deleteSession = vi
       .fn()
       .mockRejectedValueOnce(
-        new ControlError("session_not_stopped", "not released yet"),
+        new PlaneError("session_not_stopped", "not released yet"),
       )
       .mockRejectedValueOnce(
-        new ControlError("session_not_stopped", "not released yet"),
+        new PlaneError("session_not_stopped", "not released yet"),
       )
       .mockResolvedValueOnce(undefined);
     const { panel } = await deletePanel(deleteSession);
@@ -226,13 +226,13 @@ describe("session stop action", () => {
     panel.dispose();
   });
 
-  it("keeps a pending delete queued when a Connect on another card races its classification", async () => {
+  it("keeps a pending delete queued when a Connect on another session races its classification", async () => {
     const other = sessionFixture({ id: "s-222222222222", state: "READY" });
     const deleting = Promise.withResolvers<void>();
     const deleteSession = vi
       .fn()
       .mockRejectedValueOnce(
-        new ControlError("session_not_stopped", "not released yet"),
+        new PlaneError("session_not_stopped", "not released yet"),
       )
       .mockImplementationOnce(() => deleting.promise)
       .mockResolvedValueOnce(undefined);
@@ -245,9 +245,7 @@ describe("session stop action", () => {
     await vi.waitFor(() => expect(deleteSession).toHaveBeenCalledTimes(2));
 
     void panel.actions.connect(other.id);
-    deleting.reject(
-      new ControlError("session_not_stopped", "not released yet"),
-    );
+    deleting.reject(new PlaneError("session_not_stopped", "not released yet"));
     await polling;
 
     await pollPanel(panel);
@@ -262,10 +260,10 @@ describe("session stop action", () => {
     const deleteSession = vi
       .fn()
       .mockRejectedValueOnce(
-        new ControlError("session_not_stopped", "not released yet"),
+        new PlaneError("session_not_stopped", "not released yet"),
       )
       .mockRejectedValueOnce(
-        new ControlError(
+        new PlaneError(
           "ssh_authentication_required",
           "SSH authentication is required",
         ),
@@ -288,7 +286,7 @@ describe("session stop action", () => {
 
   it("does not clear a standing error while retrying a pending delete", async () => {
     const deleteSession = vi.fn(async () => {
-      throw new ControlError("session_not_stopped", "not released yet");
+      throw new PlaneError("session_not_stopped", "not released yet");
     });
     const { panel } = await deletePanel(deleteSession);
 
@@ -301,7 +299,7 @@ describe("session stop action", () => {
   });
 
   it("keeps a failed stop's error across a poll whose access read succeeds", async () => {
-    const api = controlFake({
+    const api = planeFake({
       listSessions: vi.fn(async () => sessionListFixture([readyBase])),
       stopSession: vi
         .fn()
@@ -327,7 +325,7 @@ describe("session stop action", () => {
     const ready = sessionFixture({ id: "s-333333333333", state: "READY" });
     const stopping = Promise.withResolvers<ISession>();
     const access = Promise.withResolvers<ReturnType<typeof accessFixture>>();
-    const api = controlFake({
+    const api = planeFake({
       listSessions: vi.fn(async () => sessionListFixture([ready])),
       stopSession: vi.fn(() => stopping.promise),
       getSessionAccess: vi.fn(() => access.promise),
@@ -363,10 +361,10 @@ describe("confirmations opened while the create wizard is open", () => {
   const base = sessionFixture({ id: "s-333333333333", state: "READY" });
   const other = sessionFixture({ id: "s-444444444444", state: "READY" });
 
-  it.each(["stop", "remove"] as const)(
+  it.each(["stop", "delete"] as const)(
     "lets %s show its confirmation without the wizard being closed first",
     async (action) => {
-      const api = controlFake({
+      const api = planeFake({
         listSessions: vi.fn(async () => sessionListFixture([base])),
         stopSession: vi.fn(async () => ({
           ...base,
@@ -393,7 +391,7 @@ describe("confirmations opened while the create wizard is open", () => {
   );
 
   it("keeps the second dialog rejectable after the first one closes", async () => {
-    const api = controlFake({
+    const api = planeFake({
       listSessions: vi.fn(async () => sessionListFixture([base, other])),
     });
     const panel = panelFake(api);

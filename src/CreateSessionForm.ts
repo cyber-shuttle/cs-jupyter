@@ -2,7 +2,7 @@
 // and the partition/GPU model that turns discovered Slurm partitions into
 // configuration-step choices, with MIN_CORES, MIN_MEMORY_MB and
 // MAX_WALL_MINUTES mirroring the bounds cs-plane enforces in
-// validateCreate. Host discovery and the final submit step live in their own
+// validateCreate. SSH host discovery and the final submit step live in their own
 // modules. A document-level keydown listener retakes Enter so the dialog
 // chrome cannot swallow it before submit.
 import { Signal } from "@lumino/signaling";
@@ -11,12 +11,12 @@ import {
   IPartition,
   ISessionCreateRequest,
   ISshHost,
-  TUNNEL_MODE_LABEL,
-  TUNNEL_MODES,
-  type TunnelMode,
+  TRANSPORT_LABEL,
+  TRANSPORTS,
+  type Transport,
 } from "./Common";
-import { ControlClient } from "./ControlClient";
-import type { SshLoginDock } from "./ssh";
+import { PlaneClient } from "./PlaneClient";
+import type { SshAuthDock } from "./ssh";
 import { button, element, field, fillOptions, select } from "./dom";
 import { ReviewStep, type IReviewStepHooks } from "./ReviewStep";
 import { SlurmDiscovery } from "./SlurmDiscovery";
@@ -101,7 +101,7 @@ interface ISessionDraft {
   gpuType: string;
   gpuCount: number;
   account: string | undefined;
-  tunnelModes: TunnelMode[];
+  transports: Transport[];
 }
 
 function freshDraft(): ISessionDraft {
@@ -115,7 +115,7 @@ function freshDraft(): ISessionDraft {
     gpuType: "",
     gpuCount: 1,
     account: undefined,
-    tunnelModes: ["websocket"],
+    transports: ["link"],
   };
 }
 
@@ -133,20 +133,20 @@ export class CreateSessionForm extends Widget {
   private _draft = freshDraft();
   private _discovery: SlurmDiscovery;
   private _review: ReviewStep;
-  private _devtunnelLinked: Promise<boolean>;
+  private _devTunnelsConnected: Promise<boolean>;
 
   constructor(
-    private _api: ControlClient,
-    loginDock: () => SshLoginDock,
+    private _api: PlaneClient,
+    sshAuthDock: () => SshAuthDock,
   ) {
     super();
     this.id = "cybershuttle-create-session";
     this.addClass("csSessionPanel");
     this.hide();
-    this._discovery = new SlurmDiscovery(this._api, loginDock);
+    this._discovery = new SlurmDiscovery(this._api, sshAuthDock);
     this._review = new ReviewStep(this._api);
-    this._devtunnelLinked = this._api.getTunnelLink().then(
-      ({ linked }) => linked,
+    this._devTunnelsConnected = this._api.getDevTunnelsAccount().then(
+      ({ connected }) => connected,
       () => false,
     );
     this._render();
@@ -260,15 +260,15 @@ export class CreateSessionForm extends Widget {
     this._partition = partition;
     const rootFolder = input("rootFolder", "text");
     rootFolder.value = this._draft.rootFolder;
-    const workspaceHelp = element(
+    const rootFolderHelp = element(
       "div",
-      workspaceHelpText(this._discovery.slurm?.homeDir),
+      rootFolderHelpText(this._discovery.slurm?.homeDir),
       "csFieldHelp",
-      { id: "cybershuttle-workspace-help" },
+      { id: "cybershuttle-root-folder-help" },
     );
-    rootFolder.setAttribute("aria-describedby", workspaceHelp.id);
-    const workspaceField = field("Workspace folder", rootFolder);
-    workspaceField.appendChild(workspaceHelp);
+    rootFolder.setAttribute("aria-describedby", rootFolderHelp.id);
+    const rootFolderField = field("Root folder", rootFolder);
+    rootFolderField.appendChild(rootFolderHelp);
     const cores = number("cores", MIN_CORES, MIN_CORES);
     const memory = number("memoryMb", MIN_MEMORY_MB, MIN_MEMORY_MB);
     const wall = number("wallMinutes", this._draft.wallMinutes);
@@ -373,7 +373,7 @@ export class CreateSessionForm extends Widget {
           ? "cpu"
           : types[0];
       if (!remembered) {
-        this._error = `No CPU or GPU Slurm partitions were discovered for ${this._discovery.sshHost}.`;
+        this._error = `No CPU or GPU Slurm partitions were discovered for ${this._discovery.alias}.`;
         this._syncStatus();
         return false;
       }
@@ -415,7 +415,7 @@ export class CreateSessionForm extends Widget {
         this._render();
       },
       onDiscovered: () => {
-        workspaceHelp.textContent = workspaceHelpText(
+        rootFolderHelp.textContent = rootFolderHelpText(
           this._discovery.slurm?.homeDir,
         );
         options.hidden = !buildResourceTypes();
@@ -423,7 +423,7 @@ export class CreateSessionForm extends Widget {
       onCleared: () => {
         this._partitionChoices = [];
         options.hidden = true;
-        workspaceHelp.textContent = workspaceHelpText(undefined);
+        rootFolderHelp.textContent = rootFolderHelpText(undefined);
         this._syncStatus();
       },
       onError: (message) => {
@@ -439,13 +439,13 @@ export class CreateSessionForm extends Widget {
       resourceType,
       this._discovery.accountField,
       field("Partition", partition),
-      workspaceField,
+      rootFolderField,
       field("Cores", cores),
       field("Memory (MB)", memory),
       field("Walltime (minutes)", wall),
       gpuTypeField,
       gpuCountField,
-      this._buildTunnelModes(),
+      this._buildTransports(),
       error,
       footer,
     );
@@ -466,13 +466,13 @@ export class CreateSessionForm extends Widget {
           ? { gpuType: gpuType.value, gpuCount: Number(gpuCount.value) }
           : {};
       const payload = {
-        sshHost: this._discovery.sshHost,
+        alias: this._discovery.alias,
         ...(this._discovery.account.value
           ? { account: this._discovery.account.value }
           : {}),
         partition: choice.partition.name,
         rootFolder: rootFolder.value.trim(),
-        tunnelModes: this._draft.tunnelModes,
+        tunnelModes: this._draft.transports,
         resources: {
           cores: Number(cores.value),
           memoryMb: Number(memory.value),
@@ -492,38 +492,38 @@ export class CreateSessionForm extends Widget {
     return form;
   }
 
-  private _buildTunnelModes(): HTMLElement {
+  private _buildTransports(): HTMLElement {
     const fieldset = element("fieldset", "", "csResourceType");
     const choices = element("div", "", "csResourceTypeChoices");
     const hint = element(
       "div",
-      "Link an account under Dev Tunnels in the account menu to use Dev Tunnel.",
+      "Connect a Dev Tunnels account in the account menu to use Dev Tunnel.",
       "csFieldHelp",
     );
-    fieldset.append(element("legend", "Tunnel", "csLabel"), choices, hint);
-    for (const mode of ["websocket", "devtunnel"] as const) {
+    fieldset.append(element("legend", "Transport", "csLabel"), choices, hint);
+    for (const transport of ["link", "devtunnel"] as const) {
       const label = element("label", "", "csResourceTypeOption");
       const checkbox = element("input");
       checkbox.type = "checkbox";
-      checkbox.name = "tunnelModes";
-      checkbox.value = mode;
-      checkbox.checked = this._draft.tunnelModes.includes(mode);
+      checkbox.name = "transport";
+      checkbox.value = transport;
+      checkbox.checked = this._draft.transports.includes(transport);
       checkbox.onchange = () => {
-        const modes = TUNNEL_MODES.filter((item) =>
-          item === mode
+        const chosen = TRANSPORTS.filter((item) =>
+          item === transport
             ? checkbox.checked
-            : this._draft.tunnelModes.includes(item),
+            : this._draft.transports.includes(item),
         );
-        if (modes.length) this._draft.tunnelModes = modes;
+        if (chosen.length) this._draft.transports = chosen;
         else checkbox.checked = true;
       };
-      label.append(checkbox, element("span", TUNNEL_MODE_LABEL[mode]));
+      label.append(checkbox, element("span", TRANSPORT_LABEL[transport]));
       choices.appendChild(label);
-      if (mode === "devtunnel") {
+      if (transport === "devtunnel") {
         checkbox.disabled = true;
-        void this._devtunnelLinked.then((linked) => {
-          checkbox.disabled = !linked;
-          hint.hidden = linked;
+        void this._devTunnelsConnected.then((connected) => {
+          checkbox.disabled = !connected;
+          hint.hidden = connected;
         });
       }
     }
@@ -531,7 +531,7 @@ export class CreateSessionForm extends Widget {
   }
 }
 
-function workspaceHelpText(homeDir: string | undefined): string {
+function rootFolderHelpText(homeDir: string | undefined): string {
   return homeDir
     ? `Relative to ${homeDir} unless it starts with /, ~ or $.`
     : "Examples: . · ~/cybershuttle · $HOME/work · /scratch/user/work";

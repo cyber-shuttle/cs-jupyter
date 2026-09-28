@@ -1,9 +1,9 @@
-// SSH login key dialog: list, upload and remove the private keys a host can be
-// assigned. Removal confirms inline, since JupyterLab would otherwise queue a
+// SSH key dialog: list, upload and delete the private keys an SSH host can be
+// assigned. Deletion confirms inline, since JupyterLab would otherwise queue a
 // second dialog behind the one open.
 import { RemoteListWidget } from "./RebuildingWidget";
 import { ISshKey } from "./Common";
-import { ControlClient } from "./ControlClient";
+import { PlaneClient } from "./PlaneClient";
 import {
   addSection,
   button,
@@ -18,7 +18,7 @@ export class SshKeys extends RemoteListWidget {
   private _keys: ISshKey[] = [];
   private _form: { name: string; file: File | undefined } | undefined;
 
-  constructor(private _api: ControlClient) {
+  constructor(private _api: PlaneClient) {
     super();
     this.id = "cybershuttle-ssh-keys";
     this.addClass("csSessionPanel");
@@ -41,7 +41,7 @@ export class SshKeys extends RemoteListWidget {
   protected _rebuild(): void {
     this.node.textContent = "";
     const { root, scroll, card } = dialogBody(
-      "A stored key is kept for your account only. Pick it as a host's login key and that host signs in with it.",
+      "A stored SSH key is kept for your account only. Assign it to an SSH host and SSH authentication there uses it.",
       this._error,
     );
     scroll.appendChild(this._addSection());
@@ -49,7 +49,7 @@ export class SshKeys extends RemoteListWidget {
       card.appendChild(this._keyEntry(key));
     }
     if (!this._busy && this._keys.length === 0) {
-      card.appendChild(element("div", "No login keys are stored.", "csStatus"));
+      card.appendChild(element("div", "No SSH keys are stored.", "csStatus"));
     }
     scroll.appendChild(card);
     this.node.appendChild(root);
@@ -85,7 +85,7 @@ export class SshKeys extends RemoteListWidget {
     file.onchange = () => (draft.file = file.files?.[0]);
     const help = element(
       "div",
-      "The private key file, such as ~/.ssh/id_ed25519. A passphrase is asked for at login.",
+      "The private key file, such as ~/.ssh/id_ed25519. A passphrase is asked for during SSH authentication.",
       "csFieldHelp",
     );
     const [error, footer] = formFooter(
@@ -125,16 +125,14 @@ export class SshKeys extends RemoteListWidget {
           "Delete this key and unassign it?",
           `key-${key.id}`,
           () => this._confirm(""),
-          () => void this._removeItem(() => this._api.removeSshKey(key.id)),
+          () => void this._deleteItem(() => this._api.deleteSshKey(key.id)),
         ),
       );
       return row;
     }
-    const remove = button("Delete", "csDangerButton", () =>
-      this._confirm(key.id),
-    );
-    remove.dataset.sessionAction = `delete-key-${key.id}`;
-    row.appendChild(remove);
+    const del = button("Delete", "csDangerButton", () => this._confirm(key.id));
+    del.dataset.sessionAction = `delete-key-${key.id}`;
+    row.appendChild(del);
     return row;
   }
 }

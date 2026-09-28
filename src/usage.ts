@@ -1,15 +1,15 @@
-// Turns raw metric samples and run accounting into series, summaries,
+// Turns raw usage samples and Slurm accounting into series, summaries,
 // CPU/MEM/GPU usage plots (USAGE_SLOTS wide, mirroring cs-plane's window)
 // and the status-bar walltime countdown for the session this page is
-// attached to. It reads cs-plane directly since the launcher panel is
-// disposed once anything opens, and hides for a queued, stopping or
-// finished session.
+// attached to. It reads cs-plane directly since JupyterLab disposes the
+// Launcher, and the panel in it, once anything opens, and hides for a queued,
+// stopping or finished session.
 import type { JupyterFrontEndPlugin } from "@jupyterlab/application";
 import { IStatusBar } from "@jupyterlab/statusbar";
 import { Widget } from "@lumino/widgets";
-import type { IMetricSample, IRun, IRunStats, ISession } from "./Common";
+import type { IUsageSample, IRun, IRunStats, ISession } from "./Common";
 import { isTerminal } from "./Common";
-import { ControlClient, IControlClient } from "./ControlClient";
+import { PlaneClient, IPlaneClient } from "./PlaneClient";
 import {
   Clock,
   CLOCK_GLYPH,
@@ -21,7 +21,7 @@ import {
 } from "./dom";
 import { RUN_REPORT_KEY, selectedSession, sessionHomeUrl } from "./session";
 
-export function cpuCoreSeries(samples: readonly IMetricSample[]): number[] {
+export function cpuCoreSeries(samples: readonly IUsageSample[]): number[] {
   return samples.flatMap((sample, index) => {
     const previous = samples[index - 1];
     if (
@@ -39,12 +39,12 @@ export function cpuCoreSeries(samples: readonly IMetricSample[]): number[] {
   });
 }
 
-export const memoryGigabytes = (samples: readonly IMetricSample[]): number[] =>
+export const memoryGigabytes = (samples: readonly IUsageSample[]): number[] =>
   samples.flatMap((sample) =>
     sample.memBytes === undefined ? [] : [sample.memBytes / 1024 ** 3],
   );
 
-export const gpuUtilisation = (samples: readonly IMetricSample[]): number[] =>
+export const gpuUsage = (samples: readonly IUsageSample[]): number[] =>
   samples.flatMap((sample) => {
     const pcts = (sample.gpus ?? []).flatMap((gpu) =>
       gpu.utilPct === undefined ? [] : [gpu.utilPct],
@@ -61,7 +61,7 @@ interface IResourceGraph {
 
 export function resourceGraphs(
   spec: Pick<ISession, "resources"> & { stats?: IRunStats },
-  samples: readonly IMetricSample[],
+  samples: readonly IUsageSample[],
 ): IResourceGraph[] {
   const { cores, memoryMb, gpuCount = 0 } = spec.resources;
   const cpuCeiling = spec.stats?.cores ?? cores;
@@ -83,9 +83,9 @@ export function resourceGraphs(
   if (gpuCount > 0) {
     graphs.push({
       label: "GPU",
-      values: gpuUtilisation(samples),
+      values: gpuUsage(samples),
       ceiling: 100,
-      format: (value) => `${Math.round(value)}% util`,
+      format: (value) => `${Math.round(value)}% busy`,
     });
   }
   return graphs;
@@ -126,7 +126,7 @@ export function runSummary(run: IRun): Array<[string, string]> {
   ];
   const stats: IRunStats = run.stats ?? {};
   if (stats.cores !== undefined)
-    rows.push(["Allocated cores", String(stats.cores)]);
+    rows.push(["Granted cores", String(stats.cores)]);
   if (stats.maxRss) rows.push(["Peak memory", stats.maxRss]);
   if (stats.requestedMemory) rows.push(["Requested", stats.requestedMemory]);
   if (stats.cpuEfficiencyPct !== undefined) {
@@ -179,7 +179,7 @@ function plot(points: string, title: string): HTMLElement {
 
 export function usagePlots(
   spec: Pick<ISession, "resources"> & { stats?: IRunStats },
-  samples: readonly IMetricSample[],
+  samples: readonly IUsageSample[],
   mode: "latest" | "peak",
 ): HTMLElement {
   const prefix = mode === "peak" ? "peak " : "";
@@ -225,7 +225,7 @@ export class WalltimeStatus extends Widget {
   private _refresh: number | undefined;
 
   constructor(
-    private _api: ControlClient,
+    private _api: PlaneClient,
     private _sessionId: string,
     private _leave = () => window.location.replace(sessionHomeUrl()),
   ) {
@@ -272,7 +272,7 @@ export class WalltimeStatus extends Widget {
     }
     const { label, low } = remainingBadge(session, Date.now());
     this.toggleClass("csWalltimeStatusLow", low);
-    const caption = `${session.sshHost}: ${label} of the session's ${session.resources.wallMinutes} minutes left`;
+    const caption = `${session.alias}: ${label} of the session's ${session.resources.wallMinutes} minutes left`;
     this.node.textContent = "";
     const item = element("span", "", "csWalltimeStatusItem");
     item.innerHTML = CLOCK_GLYPH;
@@ -287,8 +287,8 @@ export const walltimeStatusPlugin: JupyterFrontEndPlugin<void> = {
   description:
     "Count the selected session's remaining walltime down in the status bar.",
   autoStart: true,
-  requires: [IStatusBar, IControlClient],
-  activate: (_app, statusBar: IStatusBar, api: ControlClient) => {
+  requires: [IStatusBar, IPlaneClient],
+  activate: (_app, statusBar: IStatusBar, api: PlaneClient) => {
     const selected = selectedSession();
     if (!selected) {
       return;

@@ -1,12 +1,12 @@
-// Mounts the CyberShuttle panel into JupyterLab's launcher. The header goes in
-// the launcher's fixed content header, the sessions in the scrolling body, where
+// Mounts the CyberShuttle panel into JupyterLab's Launcher. The header goes in
+// the Launcher's fixed content header, the sessions in the scrolling body, where
 // a React re-render can drop the foreign node, so a mutation observer re-mounts
 // it and release tolerates a node already gone from the document.
 import type { JupyterFrontEndPlugin } from "@jupyterlab/application";
 import { Dialog, ICommandPalette, showDialog } from "@jupyterlab/apputils";
 import type { ReactWidget } from "@jupyterlab/ui-components";
 import { BoxPanel, Widget } from "@lumino/widgets";
-import { ControlClient, IControlClient } from "./ControlClient";
+import { PlaneClient, IPlaneClient } from "./PlaneClient";
 import { CyberShuttlePanel } from "./CyberShuttlePanel";
 import {
   SessionController,
@@ -36,15 +36,11 @@ async function offerSignIn(panel: CyberShuttlePanel): Promise<void> {
 
 export const sessionUiPlugin: JupyterFrontEndPlugin<void> = {
   id: "@cybershuttle/jupyter:session-ui",
-  description: "Mount the CyberShuttle session panel into the launcher.",
+  description: "Mount the CyberShuttle session panel into the Launcher.",
   autoStart: true,
-  requires: [IControlClient],
+  requires: [IPlaneClient],
   optional: [ICommandPalette],
-  activate: async (
-    app,
-    api: ControlClient,
-    palette: ICommandPalette | null,
-  ) => {
+  activate: async (app, api: PlaneClient, palette: ICommandPalette | null) => {
     const controller = new SessionController(app, api, sessionLiteUrl);
     let panel: CyberShuttlePanel | undefined;
     let current: MainWidget | undefined;

@@ -1,5 +1,5 @@
-// JupyterLab disposes a launcher once anything is launched from it. The sessions
-// section and its header must follow to whatever launcher becomes current.
+// JupyterLab disposes a Launcher once anything is launched from it. The sessions
+// section and its header must follow to whatever Launcher becomes current.
 import { MainAreaWidget } from "@jupyterlab/apputils";
 import { Signal } from "@lumino/signaling";
 import { Widget } from "@lumino/widgets";
@@ -33,8 +33,8 @@ async function settle(): Promise<void> {
   }
 }
 
-describe("sessions section across launchers", () => {
-  it("follows the launcher JupyterLab disposes when something is launched", async () => {
+describe("sessions section across Launchers", () => {
+  it("follows the Launcher JupyterLab disposes when something is launched", async () => {
     const first = launcher("launcher-1");
     const currentChanged = new Signal<unknown, { newValue: Widget | null }>({});
     const app = fakeApp(first, currentChanged);
@@ -56,7 +56,7 @@ describe("sessions section across launchers", () => {
     expect(next.contentHeader.widgets[0]).toBe(header);
   });
 
-  it("re-mounts the section after the launcher re-renders its content without it", async () => {
+  it("re-mounts the section after the Launcher re-renders its content without it", async () => {
     const first = launcher("launcher-3");
     const currentChanged = new Signal<unknown, { newValue: Widget | null }>({});
     const app = fakeApp(first, currentChanged);
@@ -72,7 +72,7 @@ describe("sessions section across launchers", () => {
     expect(section(first)).not.toBeNull();
   });
 
-  it("connects title.changed once per launcher when alternating between two", async () => {
+  it("connects title.changed once per Launcher when alternating between two", async () => {
     const first = launcher("launcher-4");
     const second = launcher("launcher-5");
     const currentChanged = new Signal<unknown, { newValue: Widget | null }>({});

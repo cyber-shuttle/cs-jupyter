@@ -3,23 +3,23 @@
 //////////
 // source: wire.go
 
-export interface TunnelLinkStatus {
-  linked: boolean;
+export interface AccountStatus {
+  connected: boolean;
   provider?: string;
   account?: string;
-  linkedAt?: string;
+  connectedAt?: string;
 }
-export interface TunnelLinkStart {
+export interface AuthorizationStart {
   handle: string;
   userCode: string;
   verificationUri: string;
   expiresInSeconds: number /* int64 */;
   intervalSeconds: number /* int64 */;
 }
-export interface TunnelLinkPoll extends TunnelLinkStatus {
+export interface AuthorizationPoll extends AccountStatus {
   status: string;
   intervalSeconds?: number /* int64 */;
 }
-export interface StartLinkRequest {
+export interface AuthorizationRequest {
   provider: string;
 }

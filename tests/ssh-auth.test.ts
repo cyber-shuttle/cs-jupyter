@@ -1,5 +1,5 @@
-// The SSH login console fails closed unless cs-plane negotiates the
-// CyberShuttle WebSocket subprotocol. It must swallow the Enter key itself,
+// The SSH authentication console fails closed unless cs-plane negotiates the
+// cybershuttle.v1 subprotocol. It must swallow the Enter key itself,
 // since the hosting dialog would otherwise close on the same keystroke.
 import type { ITerminalOptions } from "@xterm/xterm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -106,7 +106,7 @@ describe("SSH operation console protocol", () => {
       socket.onopen?.();
       expect(socket.closed).toBe(true);
       expect(error).toHaveBeenCalledWith(
-        "cs-plane did not negotiate the required CyberShuttle WebSocket protocol.",
+        "cs-plane did not negotiate the required cybershuttle.v1 subprotocol.",
       );
       console.dispose();
     },

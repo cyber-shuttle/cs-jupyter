@@ -1,15 +1,16 @@
 // The typed client for cs-plane's REST and WebSocket API. Every response is
 // validated against a Common.ts vObject shape covering every field cs-plane's
-// response may carry, per docs/API.md in cs-plane, rejecting any other key;
-// expect() turns a shape into a throwing parser for one call site. UNCHANGED
-// marks a 304 Not Modified response, meaning the caller's cached copy is still
-// current. accessUnavailable marks the 409 a session answers while leaving
-// READY, which the next poll shows and no caller surfaces.
+// response may carry, per docs/API.md in cs-plane, ignoring unlisted keys;
+// grant and token shapes are strict; expect() turns a shape into a throwing
+// parser for one call site. UNCHANGED marks a 304 Not Modified response,
+// meaning the caller's cached copy is still current. accessUnavailable marks
+// the 409 a session answers while leaving READY, which the next poll shows and
+// no caller surfaces.
 import { PageConfig, URLExt } from "@jupyterlab/coreutils";
 import { ServerConnection } from "@jupyterlab/services";
 import { Token } from "@lumino/coreutils";
 import type * as plane from "./api/session";
-import type * as tunnel from "./api/tunnel";
+import type * as devtunnels from "./api/devtunnels";
 import { AuthClient } from "./AuthClient";
 import { OAuthWebSocketFactory, type OAuthWebSocketConnector } from "./ssh";
 import {
@@ -21,7 +22,7 @@ import {
 import {
   IGres,
   ILogLine,
-  IMetricSample,
+  IUsageSample,
   IPartition,
   IRun,
   IRunStats,
@@ -32,13 +33,14 @@ import {
   ISlurmInfo,
   ISshHost,
   ISshKey,
-  IHostHealth,
+  ISshHostHealth,
   ITokenProvider,
+  DEVTUNNELS_PROVIDERS,
   SESSION_ID,
-  SESSION_LAUNCHERS,
+  PLATFORMS,
   SESSION_STATES,
   TOKEN_43,
-  TUNNEL_MODES,
+  TRANSPORTS,
   VALIDATION_STATUSES,
   expect,
   isPlainObject,
@@ -54,9 +56,9 @@ import {
   vOptional,
   vPositiveInt,
   vString,
-  validControlApiUrl,
+  validPlaneApiUrl,
   validSessionId,
-  type TunnelProvider,
+  type DevTunnelsProvider,
   type Narrow,
 } from "./Common";
 
@@ -74,12 +76,12 @@ export type ISessionList = Narrow<
   { sessions: ISession[]; logs: ISessionLogTail[] }
 >;
 
-export interface IControlAuth extends ITokenProvider {
-  interactiveLogin(): Promise<void>;
+export interface IPlaneAuth extends ITokenProvider {
+  signIn(): Promise<void>;
   readonly account?: string | undefined;
 }
 
-export class ControlError extends Error {
+export class PlaneError extends Error {
   constructor(
     readonly code: string,
     message: string,
@@ -92,9 +94,9 @@ export class ControlError extends Error {
 const failsWith =
   (code: string) =>
   (error: unknown): boolean =>
-    error instanceof ControlError && error.code === code;
+    error instanceof PlaneError && error.code === code;
 
-export const needsSshLogin = failsWith("ssh_authentication_required");
+export const needsSshAuthentication = failsWith("ssh_authentication_required");
 export const accessUnavailable = failsWith("session_access_unavailable");
 
 const json = (body: unknown, method = "POST"): RequestInit => ({
@@ -112,17 +114,17 @@ function owned<T>(value: T, id: string, expected: string, what: string): T {
   return value;
 }
 
-export function safeControlFetch(
-  controlApiUrl: string,
+export function safePlaneFetch(
+  planeApiUrl: string,
   auth: ITokenProvider,
   fetch: typeof globalThis.fetch = globalThis.fetch.bind(globalThis),
 ): typeof globalThis.fetch {
-  const controlOrigin = new URL(controlApiUrl).origin;
+  const planeOrigin = new URL(planeApiUrl).origin;
   return async (input, init = {}) => {
     const url = new URL(requestUrl(input));
-    if (url.origin !== controlOrigin) {
+    if (url.origin !== planeOrigin) {
       throw new Error(
-        "CyberShuttle blocked a request outside the configured control origin.",
+        "Blocked a request outside the configured cs-plane origin.",
       );
     }
     const headers = new Headers(
@@ -144,27 +146,27 @@ export function safeControlFetch(
   };
 }
 
-export const IControlClient = new Token<ControlClient>(
-  "@cybershuttle/jupyter:IControlClient",
+export const IPlaneClient = new Token<PlaneClient>(
+  "@cybershuttle/jupyter:IPlaneClient",
   "The shared cs-plane API client.",
 );
 
-export class ControlClient {
+export class PlaneClient {
   private _base: string;
   private _fetch: typeof globalThis.fetch;
   private _webSockets: OAuthWebSocketFactory;
-  private _auth: IControlAuth;
+  private _auth: IPlaneAuth;
   private _sessionsTag: string | undefined;
 
   constructor(
-    base = PageConfig.getOption("cybershuttleControlApiUrl"),
-    auth?: IControlAuth,
+    base = PageConfig.getOption("cybershuttlePlaneApiUrl"),
+    auth?: IPlaneAuth,
     fetch: typeof globalThis.fetch = globalThis.fetch.bind(globalThis),
     webSockets?: OAuthWebSocketFactory,
   ) {
-    this._base = validControlApiUrl(base);
+    this._base = validPlaneApiUrl(base);
     this._auth = auth ?? new AuthClient(this._base);
-    this._fetch = safeControlFetch(this._base, this._auth, fetch);
+    this._fetch = safePlaneFetch(this._base, this._auth, fetch);
     this._webSockets =
       webSockets ??
       new OAuthWebSocketFactory(this._auth, new URL(this._base).origin);
@@ -172,7 +174,7 @@ export class ControlClient {
 
   async signIn(): Promise<void> {
     this._sessionsTag = undefined;
-    await this._auth.interactiveLogin();
+    await this._auth.signIn();
   }
 
   async resumeSignIn(): Promise<void> {
@@ -195,12 +197,12 @@ export class ControlClient {
   }
 
   async addSshHost(
-    name: string,
+    alias: string,
     command: string,
     keyId = "",
   ): Promise<ISshHost> {
     return validateHost(
-      await this._request("hosts", json({ name, command, keyId })),
+      await this._request("hosts", json({ alias, command, keyId })),
     );
   }
 
@@ -227,19 +229,19 @@ export class ControlClient {
     );
   }
 
-  async removeSshKey(id: string): Promise<void> {
+  async deleteSshKey(id: string): Promise<void> {
     await this._request(`keys/ssh/${encoded(id)}`, { method: "DELETE" });
   }
 
-  async removeSshHost(alias: string): Promise<void> {
+  async deleteSshHost(alias: string): Promise<void> {
     await this._request(`hosts/${encoded(alias)}`, { method: "DELETE" });
   }
 
-  async hostHealth(alias: string): Promise<IHostHealth> {
-    const value = validateHostHealth(
+  async sshHostHealth(alias: string): Promise<ISshHostHealth> {
+    const value = validateSshHostHealth(
       await this._request(`hosts/${encoded(alias)}/health`),
     );
-    return owned(value, value.host, alias, "a host health check");
+    return owned(value, value.alias, alias, "an SSH host health check");
   }
 
   async discoverSlurm(
@@ -249,7 +251,7 @@ export class ControlClient {
     const value = validateSlurmResource(
       await this._request(`hosts/${encoded(alias)}/slurm`, { signal }),
     );
-    return owned(value, value.host, alias, "Slurm discovery");
+    return owned(value, value.alias, alias, "Slurm discovery");
   }
 
   sshAuthWebSocket(alias: string): OAuthWebSocketConnector {
@@ -259,28 +261,28 @@ export class ControlClient {
     return () => this._webSockets.open(endpoint);
   }
 
-  async getTunnelLink(): Promise<ITunnelLinkStatus> {
-    return validateTunnelLinkStatus(await this._request("tunnel"));
+  async getDevTunnelsAccount(): Promise<IDevTunnelsAccountStatus> {
+    return validateDevTunnelsAccountStatus(await this._request("devtunnels"));
   }
 
-  async startTunnelLink(
-    provider: TunnelProvider,
-  ): Promise<tunnel.TunnelLinkStart> {
-    return validateTunnelLinkStart(
-      await this._request("tunnel/authorizations", json({ provider })),
+  async connectDevTunnelsAccount(
+    provider: DevTunnelsProvider,
+  ): Promise<devtunnels.AuthorizationStart> {
+    return validateDevTunnelsAccountStart(
+      await this._request("devtunnels/authorizations", json({ provider })),
     );
   }
 
-  async pollTunnelLink(handle: string): Promise<ITunnelLinkPoll> {
-    return validateTunnelLinkPoll(
-      await this._request(`tunnel/authorizations/${encoded(handle)}/poll`, {
+  async pollDevTunnelsAccount(handle: string): Promise<IDevTunnelsAccountPoll> {
+    return validateDevTunnelsAccountPoll(
+      await this._request(`devtunnels/authorizations/${encoded(handle)}/poll`, {
         method: "POST",
       }),
     );
   }
 
-  async removeTunnelLink(): Promise<void> {
-    await this._request("tunnel", { method: "DELETE" });
+  async disconnectDevTunnelsAccount(): Promise<void> {
+    await this._request("devtunnels", { method: "DELETE" });
   }
 
   async listSessions(): Promise<ISessionList | typeof UNCHANGED> {
@@ -329,16 +331,16 @@ export class ControlClient {
     clearSessionAccess(sessionId);
   }
 
-  async getSessionMetrics(id: string): Promise<ISessionSeries> {
+  async getSessionUsage(id: string): Promise<ISessionSeries> {
     const sessionId = validSessionId(id);
     const series = validateSessionSeries(
-      await this._request(`sessions/${encoded(sessionId)}/metrics`),
+      await this._request(`sessions/${encoded(sessionId)}/usage`),
     );
-    return owned(series, series.sessionId, sessionId, "metrics");
+    return owned(series, series.sessionId, sessionId, "usage");
   }
 
   async listRuns(): Promise<IRun[]> {
-    const runs = validateRunList(await this._request("telemetry")).runs;
+    const runs = validateRunList(await this._request("runs")).runs;
     for (const run of runs) {
       checkLogBudget(run.logs ?? []);
     }
@@ -389,12 +391,12 @@ export class ControlClient {
           if (typeof value.error.message === "string") {
             message = value.error.message;
           }
-          if (code === "tunnel_link_required")
+          if (code === "devtunnels_account_required")
             message =
-              "Dev Tunnel needs a linked account: link one under Dev Tunnels in the account menu, or choose WebSocket.";
+              "Dev Tunnel needs a Dev Tunnels account: connect one under Dev Tunnels in the account menu, or choose Link.";
         }
       } catch {}
-      throw new ControlError(code, message, response.status);
+      throw new PlaneError(code, message, response.status);
     }
     return response;
   }
@@ -499,7 +501,7 @@ const sessionLogTailShape = vObject<ISessionLogTail>({
 });
 
 const jobSpecFields = {
-  sshHost: vString(),
+  alias: vString(),
   account: vOptional(vString()),
   partition: vString(),
   rootFolder: vString(),
@@ -511,7 +513,7 @@ const jobSpecFields = {
     gpuCount: vOptional(vPositiveInt),
   }),
   tunnelModes: (v: unknown): v is ISession["tunnelModes"] =>
-    vArray(vOneOf(TUNNEL_MODES))(v) && v.length > 0,
+    vArray(vOneOf(TRANSPORTS))(v) && v.length > 0,
 };
 
 const sessionShape = vObject<ISession>({
@@ -519,7 +521,7 @@ const sessionShape = vObject<ISession>({
   ...jobSpecFields,
   seq: vBoundedInt(0, Number.MAX_SAFE_INTEGER),
   state: vOneOf(SESSION_STATES),
-  launcher: vOneOf(SESSION_LAUNCHERS),
+  platform: vOneOf(PLATFORMS),
   error: vOptional(vString()),
   createdAt: vString(),
   startedAt: vOptional(vString()),
@@ -535,13 +537,13 @@ const validateSessionList = expect(
   "session list",
 );
 
-const sampleShape = vObject<IMetricSample>({
+const sampleShape = vObject<IUsageSample>({
   at: vString(),
   memBytes: vOptional(vNumber),
   cpuUsageUsec: vOptional(vNumber),
   gpus: vOptional(
     vArray(
-      vObject<NonNullable<IMetricSample["gpus"]>[number]>({
+      vObject<NonNullable<IUsageSample["gpus"]>[number]>({
         index: vNumber,
         utilPct: vNumber,
         memUsedMiB: vNumber,
@@ -556,7 +558,7 @@ const validateSessionSeries = expect(
     sessionId: vString(SESSION_ID),
     samples: vArray(sampleShape),
   }),
-  "metric series",
+  "usage series",
 );
 
 const validateRunList = expect(
@@ -566,6 +568,7 @@ const validateRunList = expect(
         sessionId: vString(SESSION_ID),
         ...jobSpecFields,
         seq: vPositiveInt,
+        platform: vOptional(vOneOf(PLATFORMS)),
         finalState: vOneOf(SESSION_STATES),
         error: vOptional(vString()),
         startedAt: vOptional(vString()),
@@ -589,7 +592,7 @@ const validateRunList = expect(
 );
 
 const hostShape = vObject<ISshHost>({
-  name: vString(),
+  alias: vString(),
   hostname: vOptional(vString()),
   user: vOptional(vString()),
   port: vOptional(vNumber),
@@ -614,14 +617,18 @@ const validateKeyList = expect(
   "SSH key list",
 );
 
-const validateHostHealth = expect(
-  vObject<IHostHealth>({ host: vString(), ok: vBoolean, message: vString() }),
-  "host health",
+const validateSshHostHealth = expect(
+  vObject<ISshHostHealth>({
+    alias: vString(),
+    ok: vBoolean,
+    message: vString(),
+  }),
+  "SSH host health",
 );
 
 export const validateSlurmResource = expect(
   vObject<ISlurmInfo>({
-    host: vString(),
+    alias: vString(),
     accounts: vArray(vString()),
     partitions: vArray(
       vObject<IPartition>({
@@ -636,58 +643,63 @@ export const validateSlurmResource = expect(
   "Slurm discovery",
 );
 
-export type ITunnelLinkStatus =
+export type IDevTunnelsAccountStatus =
   | {
-      linked: true;
-      provider: TunnelProvider;
+      connected: true;
+      provider: DevTunnelsProvider;
       account?: string;
-      linkedAt: string;
+      connectedAt: string;
     }
-  | { linked: false };
+  | { connected: false };
 
-type ITunnelLinkPoll =
-  | { status: "pending"; intervalSeconds: number; linked: false }
-  | ({ status: "linked" } & Extract<ITunnelLinkStatus, { linked: true }>);
+type IDevTunnelsAccountPoll =
+  | { status: "pending"; intervalSeconds: number; connected: false }
+  | ({ status: "connected" } & Extract<
+      IDevTunnelsAccountStatus,
+      { connected: true }
+    >);
 
-const tunnelLinkedFields = {
-  linked: vOneOf([true] as const),
-  provider: vOneOf(["microsoft", "github"] as const),
+const connectedFields = {
+  connected: vOneOf([true] as const),
+  provider: vOneOf(DEVTUNNELS_PROVIDERS),
   account: vOptional(vString()),
-  linkedAt: vString(),
+  connectedAt: vString(),
 };
 
-const validateTunnelLinkStatus = expect(
-  vEither<ITunnelLinkStatus>(
-    vObject<Extract<ITunnelLinkStatus, { linked: true }>>(tunnelLinkedFields),
-    vObject<Extract<ITunnelLinkStatus, { linked: false }>>({
-      linked: vOneOf([false] as const),
+const validateDevTunnelsAccountStatus = expect(
+  vEither<IDevTunnelsAccountStatus>(
+    vObject<Extract<IDevTunnelsAccountStatus, { connected: true }>>(
+      connectedFields,
+    ),
+    vObject<Extract<IDevTunnelsAccountStatus, { connected: false }>>({
+      connected: vOneOf([false] as const),
     }),
   ),
-  "Dev Tunnels link",
+  "Dev Tunnels account",
 );
 
-const validateTunnelLinkStart = expect(
-  vObject<tunnel.TunnelLinkStart>({
+const validateDevTunnelsAccountStart = expect(
+  vObject<devtunnels.AuthorizationStart>({
     handle: vString(TOKEN_43),
     userCode: vString(),
     verificationUri: vString(),
     expiresInSeconds: vBoundedInt(1, 3600),
     intervalSeconds: vBoundedInt(1, 60),
   }),
-  "Dev Tunnels link start",
+  "Dev Tunnels device code",
 );
 
-const validateTunnelLinkPoll = expect(
-  vEither<ITunnelLinkPoll>(
-    vObject<Extract<ITunnelLinkPoll, { status: "pending" }>>({
+const validateDevTunnelsAccountPoll = expect(
+  vEither<IDevTunnelsAccountPoll>(
+    vObject<Extract<IDevTunnelsAccountPoll, { status: "pending" }>>({
       status: vOneOf(["pending"] as const),
       intervalSeconds: vBoundedInt(1, 60),
-      linked: vOneOf([false] as const),
+      connected: vOneOf([false] as const),
     }),
-    vObject<Extract<ITunnelLinkPoll, { status: "linked" }>>({
-      status: vOneOf(["linked"] as const),
-      ...tunnelLinkedFields,
+    vObject<Extract<IDevTunnelsAccountPoll, { status: "connected" }>>({
+      status: vOneOf(["connected"] as const),
+      ...connectedFields,
     }),
   ),
-  "Dev Tunnels link poll",
+  "Dev Tunnels account poll",
 );

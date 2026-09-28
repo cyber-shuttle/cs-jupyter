@@ -3,7 +3,7 @@
 import { clientFor, fakeAuth, sessionFixture } from "./fakes";
 import { describe, expect, it, vi } from "vitest";
 import { jsonResponse } from "../src/Common";
-import { ControlClient, UNCHANGED } from "../src/ControlClient";
+import { PlaneClient, UNCHANGED } from "../src/PlaneClient";
 
 const providerFixture = sessionFixture({
   account: "project-a",
@@ -60,19 +60,21 @@ describe("checked narrow cs-plane session JSON contract", () => {
     ).rejects.toThrow("invalid session list");
   });
 
-  it("explains a Dev Tunnel start without a linked account", async () => {
-    const client = new ControlClient(
-      "https://control.example.edu/api/v1",
+  it("explains a Dev Tunnel start without a Dev Tunnels account", async () => {
+    const client = new PlaneClient(
+      "https://plane.example.edu/api/v1",
       fakeAuth(),
       vi.fn(async () =>
         jsonResponse(
-          { error: { code: "tunnel_link_required", message: "conflict" } },
+          {
+            error: { code: "devtunnels_account_required", message: "conflict" },
+          },
           { status: 409 },
         ),
       ),
     );
     await expect(client.startSession(providerFixture.id)).rejects.toThrow(
-      "link one under Dev Tunnels",
+      "connect one under Dev Tunnels",
     );
   });
 
@@ -80,8 +82,8 @@ describe("checked narrow cs-plane session JSON contract", () => {
     for (const field of [
       "id",
       "seq",
-      "launcher",
-      "sshHost",
+      "platform",
+      "alias",
       "partition",
       "rootFolder",
       "tunnelModes",
@@ -96,7 +98,7 @@ describe("checked narrow cs-plane session JSON contract", () => {
   });
 });
 
-describe("checked narrow cs-plane metric sample JSON contract", () => {
+describe("checked narrow cs-plane usage sample JSON contract", () => {
   const at = "2026-01-01T00:00:00Z";
 
   it.each([
@@ -108,8 +110,8 @@ describe("checked narrow cs-plane metric sample JSON contract", () => {
       clientFor({
         sessionId: providerFixture.id,
         samples: [sample],
-      }).getSessionMetrics(providerFixture.id),
-    ).rejects.toThrow("invalid metric series");
+      }).getSessionUsage(providerFixture.id),
+    ).rejects.toThrow("invalid usage series");
   });
 
   it("accepts numeric memory, CPU and GPU readings", async () => {
@@ -123,15 +125,15 @@ describe("checked narrow cs-plane metric sample JSON contract", () => {
           gpus: [{ index: 0, utilPct: 50, memUsedMiB: 1, memTotalMiB: 2 }],
         },
       ],
-    }).getSessionMetrics(providerFixture.id);
+    }).getSessionUsage(providerFixture.id);
     expect(series.samples).toHaveLength(1);
   });
 });
 
 describe("checked narrow cs-plane SSH host JSON contract", () => {
-  const host = { name: "delta", extraDirectives: [], managed: true };
+  const host = { alias: "delta", extraDirectives: [], managed: true };
 
-  it("accepts a well-formed host", async () => {
+  it("accepts a well-formed SSH host", async () => {
     await expect(clientFor({ hosts: [host] }).listSshHosts()).resolves.toEqual([
       host,
     ]);
@@ -148,7 +150,7 @@ describe("checked narrow cs-plane SSH host JSON contract", () => {
 
 describe("checked narrow cs-plane Slurm discovery JSON contract", () => {
   const discovery = {
-    host: "delta",
+    alias: "delta",
     accounts: ["project-a"],
     partitions: [
       {
@@ -167,8 +169,8 @@ describe("checked narrow cs-plane Slurm discovery JSON contract", () => {
     );
   });
 
-  it("rejects a missing host", async () => {
-    const { host: _omit, ...incomplete } = discovery;
+  it("rejects a missing alias", async () => {
+    const { alias: _omit, ...incomplete } = discovery;
     await expect(clientFor(incomplete).discoverSlurm("delta")).rejects.toThrow(
       "invalid Slurm discovery",
     );
@@ -179,11 +181,12 @@ describe("checked narrow cs-plane run history JSON contract", () => {
   const run = {
     sessionId: providerFixture.id,
     seq: providerFixture.seq,
-    sshHost: "delta",
+    platform: "vscode",
+    alias: "delta",
     partition: "cpu",
     rootFolder: "$HOME/project",
     resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 },
-    tunnelModes: ["devtunnel", "websocket"],
+    tunnelModes: ["devtunnel", "link"],
     finalState: "STOPPED",
     startedAt: "2030-01-01T00:00:30Z",
     endedAt: "2030-01-01T01:00:30Z",

@@ -1,35 +1,35 @@
 // Covers the panel's session-creation wizard and SSH host list against
 // concurrent refresh and disposal. Opening and closing the wizard must not
-// restart the panel's poll loop. A stale cached credential can fail the first
-// host read, but a later sign-in must re-read hosts.
+// begin the panel's poll loop again. A stale cached credential can fail the first
+// SSH host read, but a later sign-in must re-read SSH hosts.
 import { Dialog } from "@jupyterlab/apputils";
 import { StackedPanel } from "@lumino/widgets";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CreateSessionForm } from "../src/CreateSessionForm";
 import { SshHosts } from "../src/SshHosts";
 import type { ISshHost } from "../src/Common";
-import { controlFake, panelFake, sessionListFixture } from "./fakes";
+import { planeFake, panelFake, sessionListFixture } from "./fakes";
 
 const alpha: ISshHost = {
-  name: "alpha",
+  alias: "alpha",
   hostname: "alpha.example",
   extraDirectives: [],
   managed: false,
 };
 const gamma: ISshHost = {
-  name: "gamma",
+  alias: "gamma",
   hostname: "gamma.example",
   extraDirectives: [],
   managed: false,
 };
 const createRequest = {
   idempotencyKey: "create-one",
-  sshHost: "alpha",
+  alias: "alpha",
   account: "project-a",
   partition: "cpu",
   rootFolder: "projects/new",
   resources: { cores: 1, memoryMb: 1024, wallMinutes: 60 },
-  tunnelModes: ["websocket" as const],
+  tunnelModes: ["link" as const],
 };
 
 afterEach(() => {
@@ -43,7 +43,7 @@ function harness(initialHosts: ISshHost[] = [alpha]) {
     listSshHosts: vi.fn(async (): Promise<ISshHost[]> => initialHosts),
     createSession: vi.fn(),
     startSession: vi.fn(async () => undefined),
-    getTunnelLink: vi.fn(async () => ({ linked: false })),
+    getDevTunnelsAccount: vi.fn(async () => ({ connected: false })),
   };
   const panel = panelFake(api);
   void panel.signIn();
@@ -53,7 +53,7 @@ function harness(initialHosts: ISshHost[] = [alpha]) {
   (panel as any)._modals._createForm = () => {
     const form = new CreateSessionForm(
       api as any,
-      () => (panel as any)._modals.loginDock,
+      () => (panel as any)._modals.sshAuthDock,
     );
     forms.push(form);
     return form;
@@ -73,7 +73,7 @@ function harness(initialHosts: ISshHost[] = [alpha]) {
   };
 }
 
-describe("host refresh while the session wizard is active", () => {
+describe("SSH host refresh while the session wizard is active", () => {
   it("uses fresh create modal widgets and swaps the same dialog to session detail", async () => {
     const state = harness();
     await vi.waitFor(() => expect(state.api.listSshHosts).toHaveBeenCalled());
@@ -129,7 +129,7 @@ describe("host refresh while the session wizard is active", () => {
       state.api.createSession.mockReturnValueOnce(completion.promise);
       const form = new CreateSessionForm(
         state.api as any,
-        () => (state.panel as any)._modals.loginDock,
+        () => (state.panel as any)._modals.sshAuthDock,
       );
       const body = new StackedPanel();
       body.addWidget(form);
@@ -182,7 +182,7 @@ describe("host refresh while the session wizard is active", () => {
     },
   );
 
-  it("enables Add Session after adding a host from inside the create wizard", async () => {
+  it("enables Add Session after adding an SSH host from inside the create wizard", async () => {
     const { panel, api, forms } = harness([]);
     await panel.signIn();
     await vi.waitFor(() => expect(api.listSshHosts).toHaveBeenCalled());
@@ -202,7 +202,7 @@ describe("host refresh while the session wizard is active", () => {
     panel.dispose();
   });
 
-  it("re-reads hosts when the first activation could not", async () => {
+  it("re-reads SSH hosts when the first activation could not", async () => {
     let fail = true;
     const api = {
       signIn: vi.fn(async () => undefined),
@@ -231,10 +231,10 @@ describe("host refresh while the session wizard is active", () => {
     panel.dispose();
   });
 
-  it("does not let a stale host list from a signed-out session reach the next one", async () => {
+  it("does not let a stale SSH host list from a signed-out session reach the next one", async () => {
     const gate = Promise.withResolvers<ISshHost[]>();
     let calls = 0;
-    const api = controlFake({
+    const api = planeFake({
       resumeSignIn: vi.fn(async () => {
         throw new Error("no stored credentials");
       }),
@@ -256,7 +256,7 @@ describe("host refresh while the session wizard is active", () => {
   });
 
   it("clears only the error _refreshHosts itself set, not a standing action error", async () => {
-    const api = controlFake({
+    const api = planeFake({
       listSessions: vi.fn(async () => sessionListFixture()),
       listSshHosts: vi.fn(async () => [alpha]),
     });

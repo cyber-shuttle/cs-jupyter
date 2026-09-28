@@ -1,11 +1,11 @@
 // Renders the full detail view for one session: identity, lifecycle actions,
-// usage figures and status log. A finished session's job cannot resume, so Run
-// again submits a fresh one. The status log stays visible, not behind a
+// usage figures and status log. A finished session's Slurm job cannot resume,
+// so Start submits a fresh one. The status log stays visible, not behind a
 // disclosure, since it shows when a session last said anything.
 import { PanelBoundWidget } from "./RebuildingWidget";
-import { isTerminal, TUNNEL_MODE_LABEL, type ISession } from "./Common";
+import { isTerminal, TRANSPORT_LABEL, type ISession } from "./Common";
 import type { CyberShuttlePanel } from "./CyberShuttlePanel";
-import type { ISessionLogTail } from "./ControlClient";
+import type { ISessionLogTail } from "./PlaneClient";
 import {
   button,
   countsDown,
@@ -16,7 +16,7 @@ import {
   notes,
   statePill,
 } from "./dom";
-import { sessionSummary, usagePlots } from "./metrics";
+import { sessionSummary, usagePlots } from "./usage";
 import {
   displayState,
   getActiveSessionId,
@@ -90,7 +90,7 @@ export class SessionDetail extends PanelBoundWidget {
     const header = element("div", "", "csSessionDetailHeader");
     const identity = element("div");
     identity.append(
-      element("h3", session.sshHost, "csSessionDetailTitle"),
+      element("h3", session.alias, "csSessionDetailTitle"),
       element(
         "span",
         session.account || "(no Slurm account)",
@@ -103,10 +103,10 @@ export class SessionDetail extends PanelBoundWidget {
     if (isTerminal(state)) {
       actions.appendChild(
         this._button(
-          "Run again",
+          "Start",
           "csPrimaryButton",
           busy,
-          () => void this._panel.actions.runAgain(session.id),
+          () => void this._panel.actions.start(session.id),
         ),
       );
     }
@@ -139,7 +139,7 @@ export class SessionDetail extends PanelBoundWidget {
         "Delete",
         "csDangerButton",
         busy,
-        () => void this._panel.actions.remove(session.id),
+        () => void this._panel.actions.delete(session.id),
       ),
     );
     if (busy || this._state.connectingSessionId === session.id) {
@@ -153,13 +153,15 @@ export class SessionDetail extends PanelBoundWidget {
         "Jupyter",
         this._state.jupyterReady.has(session.id) ? "ready" : "pending",
       ],
-      ["Seq", `#${session.seq}`],
-      ["Workspace", session.rootFolder],
+      ["Run", String(session.seq)],
+      ["Root folder", session.rootFolder],
       ...sessionSummary(session),
       ["Walltime", `${session.resources.wallMinutes} min`],
       [
-        "Tunnel",
-        session.tunnelModes.map((mode) => TUNNEL_MODE_LABEL[mode]).join(" + "),
+        "Transport",
+        session.tunnelModes
+          .map((transport) => TRANSPORT_LABEL[transport])
+          .join(" + "),
       ],
     ];
     if (session.resources.gpuCount) {
@@ -183,7 +185,7 @@ export class SessionDetail extends PanelBoundWidget {
       const stopping = element("div", "", "csStatus csStopping");
       stopping.append(
         element("span", "", "csSpinner"),
-        element("span", `Session ${session.sshHost} is stopping...`),
+        element("span", `Session ${session.alias} is stopping...`),
       );
       root.appendChild(stopping);
     }
@@ -204,7 +206,7 @@ export class SessionDetail extends PanelBoundWidget {
     this._logView ??= { scrollTop: 0, atBottom: true };
     const { section, scroller } = logSection(tail.lines);
     scroller.dataset.sessionId = session.id;
-    scroller.setAttribute("aria-label", `Status for ${session.sshHost}`);
+    scroller.setAttribute("aria-label", `Status for ${session.alias}`);
     scroller.setAttribute("aria-live", "polite");
     return section;
   }

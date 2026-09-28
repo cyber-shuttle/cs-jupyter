@@ -19,9 +19,9 @@ assert.ok(
   "remote adapter is missing from the distribution",
 );
 assert.equal(
-  config.cybershuttleControlApiUrl,
+  config.cybershuttlePlaneApiUrl,
   "",
-  "control endpoint must be deployment-configured",
+  "cs-plane API URL must be deployment-configured",
 );
 for (const plugin of [
   "@jupyterlab/services-extension:server-settings",

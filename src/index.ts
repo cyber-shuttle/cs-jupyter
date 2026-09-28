@@ -1,5 +1,5 @@
 // The extension's entry point: JupyterLab service-manager plugins that point
-// every service at the active session's server. It fails closed rather than
+// every service at the active session's Jupyter server. It fails closed rather than
 // falling back to an unauthenticated default server. cs-plane issues access
 // only once a session is up, so a response from it is the readiness signal.
 import type { JupyterFrontEndPlugin } from "@jupyterlab/application";
@@ -38,10 +38,10 @@ import {
 } from "@jupyterlab/services";
 import { Token } from "@lumino/coreutils";
 import {
-  ControlClient,
-  IControlClient,
+  PlaneClient,
+  IPlaneClient,
   createSessionServerSettings,
-} from "./ControlClient";
+} from "./PlaneClient";
 import { jsonResponse, requestUrl } from "./Common";
 import {
   cacheSessionAccess,
@@ -53,19 +53,19 @@ import {
 } from "./session";
 import { sessionUiPlugin } from "./session-ui";
 import { RemoteWorkspaces } from "./workspaces";
-import { walltimeStatusPlugin } from "./metrics";
+import { walltimeStatusPlugin } from "./usage";
 
 const IRemoteServerSettings = new Token<ServerConnection.ISettings>(
   "@cybershuttle/jupyter:IRemoteServerSettings",
   "Server settings for the selected READY CyberShuttle session.",
 );
 
-const controlClientPlugin: JupyterFrontEndPlugin<ControlClient> = {
-  id: "@cybershuttle/jupyter:control-client",
+const planeClientPlugin: JupyterFrontEndPlugin<PlaneClient> = {
+  id: "@cybershuttle/jupyter:plane-client",
   description: "Provide the shared cs-plane API client.",
   autoStart: true,
-  provides: IControlClient,
-  activate: () => new ControlClient(),
+  provides: IPlaneClient,
+  activate: () => new PlaneClient(),
 };
 
 function failClosedServerSettings(): ServerConnection.ISettings {
@@ -118,10 +118,10 @@ const remoteServerSettingsPlugin: ServiceManagerPlugin<
 > = {
   id: "@cybershuttle/jupyter:remote-server-settings",
   description:
-    "Provide a READY cs-plane session or the fail-closed controller bootstrap to compute managers.",
+    "Provide a READY cs-plane session or the fail-closed bootstrap to compute managers.",
   autoStart: true,
   provides: IRemoteServerSettings,
-  requires: [IControlClient],
+  requires: [IPlaneClient],
   activate: async (_app, api) => {
     try {
       const selected = selectedSession();
@@ -186,7 +186,7 @@ const kernelSpecManagerPlugin: ServiceManagerPlugin<KernelSpec.IManager> = {
 const sessionManagerPlugin: ServiceManagerPlugin<Session.IManager> = {
   id: "@cybershuttle/jupyter:session-manager",
   description:
-    "Points JupyterLab's api/sessions service at the session's server.",
+    "Points JupyterLab's api/sessions service at the session's Jupyter server.",
   autoStart: true,
   provides: ISessionManager,
   requires: [IKernelManager, IRemoteServerSettings],
@@ -234,7 +234,7 @@ const serviceManagerPlugin: ServiceManagerPlugin<ServiceManagerType.IManager> =
   {
     id: "@cybershuttle/jupyter:service-manager",
     description:
-      "Compose remote managers or fail-closed controller-only managers.",
+      "Compose remote managers or fail-closed bootstrap-only managers.",
     autoStart: true,
     provides: IServiceManager,
     requires: [
@@ -281,7 +281,7 @@ const serviceManagerPlugin: ServiceManagerPlugin<ServiceManagerType.IManager> =
   };
 
 export const remoteServicePlugins = [
-  controlClientPlugin,
+  planeClientPlugin,
   remoteServerSettingsPlugin,
   defaultDrivePlugin,
   contentsManagerPlugin,

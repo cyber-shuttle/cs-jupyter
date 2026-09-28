@@ -6,7 +6,7 @@ import {
   ISessionCreateRequest,
   ISessionValidation,
 } from "./Common";
-import { ControlClient } from "./ControlClient";
+import { PlaneClient } from "./PlaneClient";
 import { button, copyText, element } from "./dom";
 
 export interface IReviewStepHooks {
@@ -28,7 +28,7 @@ export class ReviewStep {
   private _sync: (() => void) | undefined;
   private _busy = false;
 
-  constructor(private _api: ControlClient) {}
+  constructor(private _api: PlaneClient) {}
 
   get isActive(): boolean {
     return !!this._request;
