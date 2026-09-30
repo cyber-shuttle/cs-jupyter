@@ -8,7 +8,7 @@ import { Dialog } from "@jupyterlab/apputils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ISession } from "../src/Common";
 import { CyberShuttlePanel } from "../src/CyberShuttlePanel";
-import { PlaneError } from "../src/PlaneClient";
+import { PlaneError } from "../src/Common";
 import {
   acceptDialog,
   accessFixture,
@@ -33,7 +33,7 @@ function card(panel: CyberShuttlePanel): HTMLElement {
 }
 
 async function loaded(panel: CyberShuttlePanel): Promise<void> {
-  await panel.signIn();
+  await panel.restored;
   await vi.waitFor(() => expect(card(panel)).not.toBeNull());
 }
 
@@ -372,7 +372,7 @@ describe("confirmations opened while the create wizard is open", () => {
         })),
       });
       const panel = panelFake(api);
-      await panel.signIn();
+      await panel.restored;
       await vi.waitFor(() =>
         expect(panel.state.sessions.map((each) => each.id)).toContain(base.id),
       );
@@ -395,7 +395,7 @@ describe("confirmations opened while the create wizard is open", () => {
       listSessions: vi.fn(async () => sessionListFixture([base, other])),
     });
     const panel = panelFake(api);
-    await panel.signIn();
+    await panel.restored;
     await vi.waitFor(() =>
       expect(panel.state.sessions.map((each) => each.id)).toEqual([
         base.id,

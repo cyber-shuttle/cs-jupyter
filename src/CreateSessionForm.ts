@@ -144,7 +144,7 @@ export class CreateSessionForm extends Widget {
     this.addClass("csSessionPanel");
     this.hide();
     this._discovery = new SlurmDiscovery(this._api, sshAuthDock);
-    this._review = new ReviewStep(this._api);
+    this._review = new ReviewStep(this._api, sshAuthDock);
     this._devTunnelsConnected = this._api.getDevTunnelsAccount().then(
       ({ connected }) => connected,
       () => false,

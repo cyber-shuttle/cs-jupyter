@@ -23,17 +23,10 @@ export class SessionList extends PanelBoundWidget {
   readonly sshHostsRequested = new Signal<this, void>(this);
   readonly runHistoryRequested = new Signal<this, void>(this);
 
-  private _createBlocked = "Add an SSH host before creating a session.";
-
   constructor(panel: CyberShuttlePanel) {
     super(panel);
     this.id = "cybershuttle-session-list";
     this.addClass("csSessionPanel");
-    this._render();
-  }
-
-  setCreateBlocked(reason: string): void {
-    this._createBlocked = reason;
     this._render();
   }
 
@@ -85,7 +78,7 @@ export class SessionList extends PanelBoundWidget {
 
     section.append(
       ...notes([
-        [this._createBlocked, "csStatus"],
+        [this._state.createBlocked, "csStatus"],
         [this._state.error, "csError"],
         [this._state.updatesStatus, "csStatus"],
       ]),
@@ -115,8 +108,8 @@ export class SessionList extends PanelBoundWidget {
     );
     add.setAttribute("aria-label", "Add Session");
     add.dataset.sessionAction = "add-session";
-    add.disabled = !!this._createBlocked || this._state.loading;
-    add.title = this._createBlocked || "Add Session";
+    add.disabled = !!this._state.createBlocked || this._state.loading;
+    add.title = this._state.createBlocked || "Add Session";
     add.append(
       element("div", "+", "jp-LauncherCard-icon csSessionAddIcon"),
       element("div", "Add Session", "jp-LauncherCard-label"),

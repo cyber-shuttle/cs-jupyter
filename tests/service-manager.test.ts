@@ -98,7 +98,6 @@ describe("shared cs-plane service", () => {
     for (const id of [
       "@cybershuttle/jupyter:remote-server-settings",
       "@cybershuttle/jupyter:session-ui",
-      "@cybershuttle/jupyter:walltime-status",
     ]) {
       expect(plugins.find((plugin) => plugin.id === id)?.requires).toContain(
         IPlaneClient,
@@ -143,11 +142,7 @@ describe("remote service manager registry", () => {
     manager.dispose();
   });
 
-  it("does not trust cached session access without current authorization", async () => {
-    window.sessionStorage.setItem(
-      `cybershuttle.session-access.v1.${id}`,
-      JSON.stringify(accessFixture(id, 1)),
-    );
+  it("fails closed when cs-plane refuses session access", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(null, { status: 401 })),

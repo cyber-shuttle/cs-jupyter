@@ -279,7 +279,7 @@ describe("run history view", () => {
       startSession: vi.fn(() => new Promise<never>(() => {})),
     });
     const panel = panelFake(api);
-    await panel.signIn();
+    await panel.restored;
     await vi.waitFor(() => expect(panel.state.sessions).toHaveLength(1));
 
     void panel.actions.start(stopped.id);

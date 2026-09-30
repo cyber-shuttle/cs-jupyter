@@ -1,5 +1,6 @@
-// Types, identifier and URL validation, and the Validator vocabulary
-// (vString, vNumber, vObject, ...) cs-plane response shapes are built from.
+// Types, identifier and URL validation, cs-plane's error envelope, and the
+// Validator vocabulary (vString, vNumber, vObject, ...) cs-plane response
+// shapes are built from.
 // The shapes are cs-plane's own, generated into src/api by `bun run types`;
 // each validator is typed against one, so a field cs-plane adds, drops or
 // makes optional fails the build. vObject ignores keys it does not list, so a
@@ -175,6 +176,42 @@ export function base64UrlEncode(bytes: Uint8Array): string {
 
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+export class PlaneError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message);
+  }
+}
+
+export const failsWith =
+  (code: string) =>
+  (error: unknown): boolean =>
+    error instanceof PlaneError && error.code === code;
+
+export async function parseJson(response: Response): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    throw new Error("cs-plane returned invalid JSON.");
+  }
+}
+
+export async function planeError(response: Response): Promise<PlaneError> {
+  const value = await response.json().catch(() => undefined);
+  const error =
+    isPlainObject(value) && isPlainObject(value.error) ? value.error : {};
+  return new PlaneError(
+    typeof error.code === "string" ? error.code : "request_failed",
+    typeof error.message === "string"
+      ? error.message
+      : `cs-plane returned ${response.status}`,
+    response.status,
+  );
 }
 
 export type Validator<T> = (value: unknown) => value is T;

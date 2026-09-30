@@ -7,6 +7,7 @@ import {
   ISessionValidation,
 } from "./Common";
 import { PlaneClient } from "./PlaneClient";
+import { withSshAuthentication, type SshAuthDock } from "./ssh";
 import { button, copyText, element } from "./dom";
 
 export interface IReviewStepHooks {
@@ -28,7 +29,10 @@ export class ReviewStep {
   private _sync: (() => void) | undefined;
   private _busy = false;
 
-  constructor(private _api: PlaneClient) {}
+  constructor(
+    private _api: PlaneClient,
+    private _sshAuthDock: () => SshAuthDock,
+  ) {}
 
   get isActive(): boolean {
     return !!this._request;
@@ -77,9 +81,11 @@ export class ReviewStep {
     this._validating = true;
     hooks.onChange();
     try {
-      const validation = await this._api.validateCreateRequest(
-        request,
-        abort.signal,
+      const validation = await withSshAuthentication(
+        this._sshAuthDock,
+        this._api,
+        request.alias,
+        () => this._api.validateCreateRequest(request, abort.signal),
       );
       if (current()) {
         this._validation = validation;

@@ -9,10 +9,10 @@ import type { ReadonlyPartialJSONObject } from "@lumino/coreutils";
 import type { IRun, ISession } from "../src/Common";
 import type {
   IPlaneAuth,
+  ISessionAccess,
   ISessionList,
   ISessionLogTail,
 } from "../src/PlaneClient";
-import type { ISessionAccess } from "../src/session";
 import { PlaneClient } from "../src/PlaneClient";
 import { CyberShuttlePanel } from "../src/CyberShuttlePanel";
 import { jsonResponse } from "../src/Common";

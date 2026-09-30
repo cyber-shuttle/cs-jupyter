@@ -1,14 +1,18 @@
 // Covers the panel's session-creation wizard and SSH host list against
 // concurrent refresh and disposal. Opening and closing the wizard must not
-// begin the panel's poll loop again. A stale cached credential can fail the first
-// SSH host read, but a later sign-in must re-read SSH hosts.
+// begin the panel's poll loop again.
 import { Dialog } from "@jupyterlab/apputils";
 import { StackedPanel } from "@lumino/widgets";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CreateSessionForm } from "../src/CreateSessionForm";
 import { SshHosts } from "../src/SshHosts";
 import type { ISshHost } from "../src/Common";
-import { planeFake, panelFake, sessionListFixture } from "./fakes";
+import {
+  planeFake,
+  panelFake,
+  sessionFixture,
+  sessionListFixture,
+} from "./fakes";
 
 const alpha: ISshHost = {
   alias: "alpha",
@@ -38,15 +42,16 @@ afterEach(() => {
 
 function harness(initialHosts: ISshHost[] = [alpha]) {
   const api = {
-    signIn: vi.fn(async () => undefined),
+    resumeSignIn: vi.fn(async () => undefined),
     listSessions: vi.fn(async () => sessionListFixture()),
     listSshHosts: vi.fn(async (): Promise<ISshHost[]> => initialHosts),
     createSession: vi.fn(),
-    startSession: vi.fn(async () => undefined),
+    startSession: vi.fn(async (id: string) =>
+      sessionFixture({ id, state: "QUEUED" }),
+    ),
     getDevTunnelsAccount: vi.fn(async () => ({ connected: false })),
   };
   const panel = panelFake(api);
-  void panel.signIn();
   const forms: CreateSessionForm[] = [];
   const hostWidgets: SshHosts[] = [];
   const hostRenders: ReturnType<typeof vi.spyOn>[] = [];
@@ -93,9 +98,7 @@ describe("SSH host refresh while the session wizard is active", () => {
     );
     expect(state.api.startSession).toHaveBeenCalledWith("s-111111111111");
     await vi.waitFor(() =>
-      expect(document.body.textContent).toContain(
-        "Waiting for live session state…",
-      ),
+      expect(document.body.querySelector(".csSessionDetail")).not.toBeNull(),
     );
     expect([Dialog.tracker.size, first.isDisposed]).toEqual([1, false]);
 
@@ -184,7 +187,7 @@ describe("SSH host refresh while the session wizard is active", () => {
 
   it("enables Add Session after adding an SSH host from inside the create wizard", async () => {
     const { panel, api, forms } = harness([]);
-    await panel.signIn();
+    await panel.restored;
     await vi.waitFor(() => expect(api.listSshHosts).toHaveBeenCalled());
     const addButton = (): HTMLButtonElement =>
       panel.node.querySelector<HTMLButtonElement>(
@@ -202,56 +205,18 @@ describe("SSH host refresh while the session wizard is active", () => {
     panel.dispose();
   });
 
-  it("re-reads SSH hosts when the first activation could not", async () => {
-    let fail = true;
-    const api = {
-      signIn: vi.fn(async () => undefined),
-      resumeSignIn: vi.fn(async () => undefined),
-      listSessions: vi.fn(async () => sessionListFixture()),
-      listSshHosts: vi.fn(async () => {
-        if (fail) {
-          throw new Error("cs-plane returned 401");
-        }
-        return [alpha];
-      }),
-    };
-    const panel = panelFake(api);
-
-    await panel.resume();
-    await vi.waitFor(() => expect(api.listSshHosts).toHaveBeenCalled());
-    expect(panel.state.error).toContain("401");
-    const afterResume = api.listSshHosts.mock.calls.length;
-
-    fail = false;
-    await panel.signIn();
-    await vi.waitFor(() =>
-      expect(api.listSshHosts.mock.calls.length).toBeGreaterThan(afterResume),
-    );
-    await vi.waitFor(() => expect(panel.state.error).toBe(""));
-    panel.dispose();
-  });
-
-  it("does not let a stale SSH host list from a signed-out session reach the next one", async () => {
+  it("does not let a stale SSH host list reach a signed-out panel", async () => {
     const gate = Promise.withResolvers<ISshHost[]>();
-    let calls = 0;
     const api = planeFake({
-      resumeSignIn: vi.fn(async () => {
-        throw new Error("no stored credentials");
-      }),
       listSessions: vi.fn(async () => sessionListFixture()),
-      listSshHosts: vi.fn(() => {
-        calls++;
-        return calls === 1 ? gate.promise : Promise.resolve([gamma]);
-      }),
+      listSshHosts: vi.fn(() => gate.promise),
     });
     const panel = panelFake(api);
-    void panel.signIn();
-    await vi.waitFor(() => expect(calls).toBe(1));
+    await vi.waitFor(() => expect(api.listSshHosts).toHaveBeenCalled());
     panel.signOut();
     gate.resolve([alpha]);
     await new Promise((done) => setTimeout(done));
-    await panel.signIn();
-    await vi.waitFor(() => expect((panel as any)._hosts).toEqual([gamma]));
+    expect((panel as any)._hosts).toBeUndefined();
     panel.dispose();
   });
 
@@ -261,7 +226,7 @@ describe("SSH host refresh while the session wizard is active", () => {
       listSshHosts: vi.fn(async () => [alpha]),
     });
     const panel = panelFake(api);
-    await panel.signIn();
+    await panel.restored;
     await vi.waitFor(() => expect(api.listSshHosts).toHaveBeenCalled());
     (panel as any)._error = "Stop failed: session is busy.";
     await (panel as any)._refreshHosts();
