@@ -3,8 +3,8 @@
 // awaits that operation and retries once. SSH host switches and cancellation
 // invalidate the in-flight discovery without taking ownership of the dock.
 import { errorMessage, ISlurmInfo, ISshHost } from "./Common";
-import { PlaneClient, needsSshAuthentication } from "./PlaneClient";
-import type { SshAuthDock } from "./ssh";
+import { PlaneClient } from "./PlaneClient";
+import { withSshAuthentication, type SshAuthDock } from "./ssh";
 import { button, element, field, fillOptions, select } from "./dom";
 
 interface ISlurmDiscoveryHooks {
@@ -127,9 +127,7 @@ export class SlurmDiscovery {
       this.stop();
       operationArea.hidden = true;
     };
-    const startDiscovery = async (
-      allowSshAuthentication = true,
-    ): Promise<void> => {
+    const startDiscovery = async (): Promise<void> => {
       const alias = this.alias;
       clearDependentState();
       renderPhase("Querying Slurm…", `Connecting to ${alias}.`, true);
@@ -139,38 +137,21 @@ export class SlurmDiscovery {
       const current = (): boolean =>
         !abort.signal.aborted && this.alias === alias && !hooks.isDisposed();
       try {
-        const value = await this._api.discoverSlurm(alias, abort.signal);
+        const value = await withSshAuthentication(
+          this._sshAuthDock,
+          this._api,
+          alias,
+          () => {
+            abort.signal.throwIfAborted();
+            return this._api.discoverSlurm(alias, abort.signal);
+          },
+        );
         if (current()) {
           applyDiscovery(value);
         }
       } catch (error) {
-        if (!current()) {
-          return;
-        }
-        if (!needsSshAuthentication(error)) {
-          showFailure(errorMessage(error));
-          return;
-        }
-        if (!allowSshAuthentication) {
-          showFailure(
-            `${errorMessage(error)} Authentication was already attempted; select Retry to try again.`,
-          );
-          return;
-        }
-        renderPhase(`SSH authentication — ${alias}`, undefined, true);
-        try {
-          await this._sshAuthDock().authenticate(
-            alias,
-            this._api.sshAuthWebSocket(alias),
-          );
-        } catch (authError) {
-          if (current()) {
-            showFailure(errorMessage(authError));
-          }
-          return;
-        }
         if (current()) {
-          await startDiscovery(false);
+          showFailure(errorMessage(error));
         }
       }
     };

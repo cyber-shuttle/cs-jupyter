@@ -17,8 +17,7 @@ import { PlaneClient, ISessionLogTail, UNCHANGED } from "./PlaneClient";
 import { PanelBoundWidget } from "./RebuildingWidget";
 import { SessionController } from "./SessionController";
 import {
-  clearSessionAccess,
-  loadSessionAccess,
+  getActiveSession,
   getActiveSessionId,
   RUN_REPORT_KEY,
   sessionHomeUrl,
@@ -27,7 +26,8 @@ import {
 import { SessionActions } from "./session-actions";
 import { SessionList } from "./SessionList";
 import { SessionModals } from "./modals";
-import { button, element } from "./dom";
+import { accountingState } from "./usage";
+import { button, countsDown, element, remainingMs } from "./dom";
 
 const SESSION_POLL_INTERVAL_MS = 1000;
 
@@ -63,7 +63,7 @@ export class CyberShuttleHeader extends PanelBoundWidget {
 
   private _identityControl(): HTMLElement {
     const holder = element("div", "", "csIdentity");
-    const { signedIn, signingIn, account } = this._state;
+    const { signedIn, signingIn, identity } = this._state;
     const trigger = button(
       "",
       `csTextButton csIdentityButton ${signedIn ? "csAccountButton" : "csSignInButton"}`,
@@ -73,7 +73,7 @@ export class CyberShuttleHeader extends PanelBoundWidget {
       element(
         "span",
         signedIn
-          ? (account ?? "Account")
+          ? (identity ?? "Account")
           : signingIn
             ? "Signing in…"
             : "Sign in",
@@ -142,7 +142,6 @@ export class CyberShuttlePanel extends StackedPanel {
   readonly restored: Promise<void>;
 
   readonly header: CyberShuttleHeader;
-  private _list: SessionList;
   private _pollTimer: number | undefined;
   private _polling = false;
   private _sessions: ISession[] = [];
@@ -162,35 +161,30 @@ export class CyberShuttlePanel extends StackedPanel {
 
   constructor(
     private _api: PlaneClient,
-    private _controller: SessionController,
+    controller: SessionController,
   ) {
     super();
     this.id = "cybershuttle-session-panel";
     this.addClass("csShell");
-    this._actions = new SessionActions(_api, {
+    this._actions = new SessionActions(_api, controller, {
       isDisposed: () => this.isDisposed,
       emitState: () => this._emitState(),
       onError: (message) => (this._error = message),
       sessions: () => this._sessions,
       replaceSessions: (sessions) => (this._sessions = sessions),
-      currentSessionId: () => getActiveSessionId(),
-      select: (sessionId, current) =>
-        this._controller.select(sessionId, current),
       sshAuthDock: () => this._modals.sshAuthDock,
       rejectDetail: () => this._modals.rejectDetail(),
     });
     this._modals = new SessionModals(this, _api);
     this.header = new CyberShuttleHeader(this);
-    this._list = new SessionList(this);
-    this.addWidget(this._list);
-    this._list.sessionRequested.connect(
+    const list = new SessionList(this);
+    this.addWidget(list);
+    list.sessionRequested.connect(
       (_sender, id) => void this._modals.openSession(id),
     );
-    this._list.createRequested.connect(() => void this.openCreate());
-    this._list.sshHostsRequested.connect(() => void this.openSshHosts());
-    this._list.runHistoryRequested.connect(
-      () => void this._modals.openRunHistory(),
-    );
+    list.createRequested.connect(() => void this.openCreate());
+    list.sshHostsRequested.connect(() => void this.openSshHosts());
+    list.runHistoryRequested.connect(() => void this._modals.openRunHistory());
     this.header.signInRequested.connect(() => void this.signIn());
     this.header.signOutRequested.connect(() => this.signOut());
     this.header.sshKeysRequested.connect(() => void this._modals.openSshKeys());
@@ -198,7 +192,7 @@ export class CyberShuttlePanel extends StackedPanel {
       () => void this._modals.openDevTunnelsAccount(),
     );
     this._emitState();
-    this.restored = this.resume();
+    this.restored = this._resume();
   }
 
   get state(): ISessionUiState {
@@ -210,12 +204,17 @@ export class CyberShuttlePanel extends StackedPanel {
       loading: this._loading,
       updatesStatus: this._updatesStatus,
       error: this._error,
+      createBlocked: this._hosts?.length
+        ? ""
+        : this._hosts === undefined && this._hostsError !== undefined
+          ? "SSH hosts are temporarily unavailable."
+          : "Add an SSH host before creating a session.",
       busySessionIds: this._actions.busySessionIds,
       connectingSessionId: this._actions.connectingSessionId,
       jupyterReady: new Set(this._actions.jupyterReady),
       signedIn: this._signedIn,
       signingIn: this._signInPromise !== undefined,
-      account: this._signedIn ? this._api.account : undefined,
+      identity: this._signedIn ? this._api.identity : undefined,
     };
   }
 
@@ -241,17 +240,29 @@ export class CyberShuttlePanel extends StackedPanel {
         this._actions.releaseSession(session.id);
       }
     }
-    const active = getActiveSessionId();
-    const live = active ? next.get(active) : undefined;
-    if (
-      live?.state === "READY" &&
-      live.seq !== loadSessionAccess(active!)?.seq
-    ) {
-      clearSessionAccess(active!);
+    const active = getActiveSession();
+    const live = active && next.get(active.id);
+    if (live?.state === "READY" && live.seq !== active!.seq) {
       window.location.reload();
     }
     this._sessions = sessions;
     this._emitState();
+  }
+
+  // Every tick, since walltime runs out without the list changing.
+  private _leaveIfEnded(): boolean {
+    const active = getActiveSession();
+    const live =
+      active && this._sessions.find((session) => session.id === active.id);
+    if (
+      !live ||
+      !(isTerminal(live.state) || remainingMs(live, Date.now()) === 0)
+    ) {
+      return false;
+    }
+    sessionStorage.setItem(RUN_REPORT_KEY, `${live.id}/${live.seq}`);
+    window.location.replace(sessionHomeUrl());
+    return true;
   }
 
   private _setSessionLogs(tails: readonly ISessionLogTail[]): void {
@@ -294,7 +305,11 @@ export class CyberShuttlePanel extends StackedPanel {
         this._setSessions(list.sessions);
         this._setSessionLogs(list.logs);
       }
-      await Promise.all([this._pollSamples(epoch), this._pollRuns(epoch)]);
+      if (this._leaveIfEnded()) return;
+      await Promise.all([
+        this._pollSamples(epoch),
+        this._pollRuns(epoch, list !== UNCHANGED),
+      ]);
       if (this._stale(epoch)) {
         return;
       }
@@ -326,7 +341,15 @@ export class CyberShuttlePanel extends StackedPanel {
     }
   }
 
-  private async _pollRuns(epoch: number): Promise<void> {
+  private async _pollRuns(epoch: number, listChanged: boolean): Promise<void> {
+    const now = Date.now();
+    if (
+      !listChanged &&
+      !this._modals.runHistoryOpen &&
+      !this._runs.some((run) => accountingState(run, now) === "pending")
+    ) {
+      return;
+    }
     try {
       const runs = await this._api.listRuns();
       if (this._stale(epoch) || unchanged(runs, this._runs)) {
@@ -338,7 +361,7 @@ export class CyberShuttlePanel extends StackedPanel {
   }
 
   private async _pollSamples(epoch: number): Promise<void> {
-    const live = this._sessions.filter((session) => !isTerminal(session.state));
+    const live = this._sessions.filter(countsDown);
     await Promise.all(
       live.map((session) => this._pollSample(session.id, epoch)),
     );
@@ -375,29 +398,18 @@ export class CyberShuttlePanel extends StackedPanel {
   signIn(): Promise<void> {
     if (!this._signInPromise) {
       this._error = "";
-      this._signInPromise = this._signIn().finally(() => {
-        this._signInPromise = undefined;
-        if (!this.isDisposed) this._emitState();
-      });
+      this._signInPromise = this._api
+        .signIn()
+        .catch((error) => {
+          this._error = errorMessage(error);
+        })
+        .finally(() => {
+          this._signInPromise = undefined;
+          if (!this.isDisposed) this._emitState();
+        });
       this._emitState();
     }
     return this._signInPromise;
-  }
-
-  private async _signIn(): Promise<void> {
-    try {
-      await this._api.signIn();
-      if (this.isDisposed) return;
-      this._signedIn = true;
-      await this._activateSignIn();
-    } catch (error) {
-      if (this.isDisposed) return;
-      if (error instanceof AuthInteractionRequiredError) {
-        this._requireAuthentication();
-      } else {
-        this._error = errorMessage(error);
-      }
-    }
   }
 
   private _requireAuthentication(): void {
@@ -423,16 +435,22 @@ export class CyberShuttlePanel extends StackedPanel {
     if (getActiveSessionId()) window.location.replace(sessionHomeUrl());
   }
 
-  private async _activateSignIn(): Promise<void> {
-    this._setUpdatesStatus("");
-    this._pollTimer ??= window.setInterval(
+  private async _resume(): Promise<void> {
+    try {
+      await this._api.resumeSignIn();
+    } catch (error) {
+      if (!(error instanceof AuthInteractionRequiredError)) {
+        this._error = errorMessage(error);
+        this._emitState();
+      }
+      return;
+    }
+    if (this.isDisposed) return;
+    this._signedIn = true;
+    this._pollTimer = window.setInterval(
       () => void this._poll(),
       SESSION_POLL_INTERVAL_MS,
     );
-    if (this._hosts !== undefined) {
-      void this._poll();
-      return;
-    }
     this._loading = true;
     this._emitState();
     await Promise.all([this._poll(), this._refreshHosts()]);
@@ -441,17 +459,6 @@ export class CyberShuttlePanel extends StackedPanel {
     if (run && this._signedIn) void this._modals.openRunHistory(run);
     this._loading = false;
     this._emitState();
-  }
-
-  async resume(): Promise<void> {
-    try {
-      await this._api.resumeSignIn();
-    } catch {
-      return;
-    }
-    if (this.isDisposed) return;
-    this._signedIn = true;
-    await this._activateSignIn();
   }
 
   dispose(): void {
@@ -477,15 +484,9 @@ export class CyberShuttlePanel extends StackedPanel {
       }
       this._hostsError = undefined;
       this._emitState();
-      this._list.setCreateBlocked(
-        hosts.length ? "" : "Add an SSH host before creating a session.",
-      );
     } catch (error) {
       if (this._stale(epoch)) {
         return;
-      }
-      if (this._hosts === undefined) {
-        this._list.setCreateBlocked("SSH hosts are temporarily unavailable.");
       }
       this._hostsError = errorMessage(error);
       this._error = this._hostsError;

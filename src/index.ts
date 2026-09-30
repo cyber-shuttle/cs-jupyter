@@ -44,16 +44,13 @@ import {
 } from "./PlaneClient";
 import { jsonResponse, requestUrl } from "./Common";
 import {
-  cacheSessionAccess,
-  clearAllSessionAccess,
   getActiveSessionId,
   selectedSession,
   sessionHomeUrl,
-  setActiveSessionId,
+  setActiveSession,
 } from "./session";
 import { sessionUiPlugin } from "./session-ui";
 import { RemoteWorkspaces } from "./workspaces";
-import { walltimeStatusPlugin } from "./usage";
 
 const IRemoteServerSettings = new Token<ServerConnection.ISettings>(
   "@cybershuttle/jupyter:IRemoteServerSettings",
@@ -129,16 +126,14 @@ const remoteServerSettingsPlugin: ServiceManagerPlugin<
         throw new Error("No session selected.");
       }
       const access = await api.getSessionAccess(selected.sessionId);
-      cacheSessionAccess(access);
       PageConfig.setOption("terminalsAvailable", "true");
-      setActiveSessionId(selected.sessionId);
+      setActiveSession({ id: access.sessionId, seq: access.seq });
       return createSessionServerSettings(access);
     } catch {
       PageConfig.setOption("terminalsAvailable", "false");
-      setActiveSessionId(undefined);
+      setActiveSession(undefined);
       const query = new URLSearchParams(window.location.search);
       if (["session", "workspace", "path"].some((key) => query.has(key))) {
-        clearAllSessionAccess();
         window.history.replaceState(window.history.state, "", sessionHomeUrl());
       }
       return failClosedServerSettings();
@@ -227,7 +222,7 @@ const workspaceManagerPlugin: ServiceManagerPlugin<Workspace.IManager> = {
   provides: IWorkspaceManager,
   requires: [IRemoteServerSettings],
   activate: (_app, serverSettings) =>
-    new RemoteWorkspaces(serverSettings, selectedSession() !== undefined),
+    new RemoteWorkspaces(serverSettings, getActiveSessionId() !== undefined),
 };
 
 const serviceManagerPlugin: ServiceManagerPlugin<ServiceManagerType.IManager> =
@@ -297,5 +292,4 @@ export default [
   ...remoteServicePlugins,
   remoteTerminalUiPlugin,
   sessionUiPlugin,
-  walltimeStatusPlugin,
 ];

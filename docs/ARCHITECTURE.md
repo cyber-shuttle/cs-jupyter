@@ -52,14 +52,16 @@ keeps the credential.
 | `STOPPING`                         | Polled                                                                                              |
 | `STOPPED`, `FAILED`                | Terminal. **Start** submits a new Slurm job for the same session, shown `SUBMITTING` until answered |
 
-Every second the Launcher reads `sessions`, then `sessions/{id}/usage` for each live session and `runs`.
+Every second the Launcher reads `sessions`, `sessions/{id}/usage` for each `STARTING` or `READY` session, and
+`runs` when the list changed, **Run History** is open or a run's accounting is pending.
 
-Once a session is `READY`, the Launcher caches its access response, with the run it was granted for, in
-`sessionStorage`. **Connect** reloads with `?session=<id>&workspace=<id>`; only the session ID enters the URL.
-On load `src/index.ts` requests fresh access, requires its Jupyter URI to equal
-`sessions/<id>/jupyter/` under the cs-plane API URL, and points JupyterLab's contents, kernels, kernelspecs,
-sessions and terminals managers at it. A `401` or `403` from Jupyter drops the grant; sign-out clears all grants
-and leaves the session page.
+Once a session is `READY`, the Launcher requests its access once per run and records in memory only that Jupyter
+is up. **Connect** reloads with `?session=<id>&workspace=<id>`; only the session ID enters the URL. On load
+`src/index.ts` requests fresh access, requires its Jupyter URI to equal `sessions/<id>/jupyter/` under the
+cs-plane API URL, and points JupyterLab's contents, kernels, kernelspecs, sessions and terminals managers at it.
+A Jupyter `401` or `403` reloads the page for fresh access; another before Jupyter next succeeds is reported. The
+session page returns to the Launcher on sign-out, and with the run's report once the session ends or its walltime
+runs out.
 
 The JupyterLab layout is stored in the session's home at `.cybershuttle/workspaces/<id>.json`, replacing
 JupyterLite's browser-local workspace. Linkspan, launched by cs-plane, builds the Python environment and starts
@@ -69,8 +71,7 @@ Jupyter on the compute node; nothing from this repository runs there.
 
 - Deadline = `startedAt` + `resources.wallMinutes`, ticked locally each second, since a queued session's poll
   returns `304` for minutes.
-- The status-bar countdown polls `GET sessions/{id}` every 30 s itself, because JupyterLab disposes the Launcher
-  once anything opens from it.
+- The status-bar countdown reads the Launcher panel, which lives as long as the page.
 - Every surface warns below ten minutes.
 - CPU usage is plotted against Slurm's granted cores when reported, else the requested cores.
 

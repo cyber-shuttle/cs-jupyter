@@ -32,5 +32,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - SSH host entries, health, Slurm discovery, sessions and runs name the SSH host `alias` (was `name`, `host`, `sshHost`).
   - Dev Tunnels account fields `linked`/`linkedAt` are now `connected`/`connectedAt`; a completed poll reports
     status `connected`.
+- A Dev Tunnel session refused for lack of a Dev Tunnels account shows cs-plane's message.
+- Listed session resources need only be positive integers, not meet the create form's minimums.
+- Slurm discovery refused again after SSH authentication reports cs-plane's message alone.
+
+### Fixed
+
+- Adding a session and validating its Slurm script answer an SSH authentication challenge and retry once.
+- A failed sign-in callback is reported, not silently dropped.
+- The Launcher no longer reads usage for queued sessions or run history every second.
+- A session page refused by Jupyter reloads for fresh access, and reports a second refusal before Jupyter next
+  succeeds instead of looping.
 
 [Unreleased]: https://github.com/cyber-shuttle/cs-jupyter/commits/main

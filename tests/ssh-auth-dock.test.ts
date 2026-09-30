@@ -5,7 +5,7 @@
 // dock, a fixed overlay, vanishes once SSH authentication succeeds and returns
 // for the next one on the same instance.
 import { describe, expect, it, vi } from "vitest";
-import { PlaneError } from "../src/PlaneClient";
+import { PlaneError } from "../src/Common";
 import { SshAuthDock } from "../src/ssh";
 import {
   FakeOperation,
@@ -43,7 +43,7 @@ async function opened(
   const panel = panelFake(api);
   (panel as any)._modals._sshAuthDockWidget = () =>
     new SshAuthDock(() => operation);
-  await panel.signIn();
+  await panel.restored;
   await vi.waitFor(() => expect(panel.state.sessions.length).toBe(1));
   const open = panel.modals.openSession(base.id);
   await vi.waitFor(() =>

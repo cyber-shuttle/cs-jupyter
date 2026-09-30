@@ -5,7 +5,8 @@
 // entries are read-only.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ISessionCreateRequest } from "../src/Common";
-import { PlaneError, validateSlurmResource } from "../src/PlaneClient";
+import { PlaneError } from "../src/Common";
+import { validateSlurmResource } from "../src/PlaneClient";
 import { CreateSessionForm } from "../src/CreateSessionForm";
 import { SshHosts } from "../src/SshHosts";
 import { SshKeys } from "../src/SshKeys";
@@ -294,7 +295,7 @@ describe("SSH CRUD and session-first creation", () => {
       new PlaneError("ssh_authentication_required", "Still required"),
     );
     expect(operation.starts).toHaveLength(1);
-    expect(form.node.textContent).toContain("already attempted");
+    expect(form.node.textContent).toContain("Still required");
     expect(options(form)?.hidden).toBe(true);
   });
 

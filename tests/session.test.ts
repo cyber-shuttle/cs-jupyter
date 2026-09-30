@@ -8,11 +8,7 @@ import {
   installSessionCommandGuard,
   SessionController,
 } from "../src/SessionController";
-import {
-  cacheSessionAccess,
-  selectedSession,
-  sessionLiteUrl,
-} from "../src/session";
+import { selectedSession, sessionLiteUrl } from "../src/session";
 import {
   accessFixture,
   fakeAuth,
@@ -116,17 +112,6 @@ describe("shared cs-plane client", () => {
     );
   });
 
-  it("clears every cached session access on sign-out", () => {
-    cacheSessionAccess(access);
-    cacheSessionAccess(accessFixture("s-111111111111", 1));
-    sessionStorage.setItem("unrelated", "keep");
-
-    makeClient(vi.fn()).signOut();
-
-    expect(sessionStorage.length).toBe(1);
-    expect(sessionStorage.getItem("unrelated")).toBe("keep");
-  });
-
   it("accepts an empty 204 response when deleting a session", async () => {
     const fetch = vi.fn(
       async () => new Response(null, { status: 204 }),
@@ -139,26 +124,6 @@ describe("shared cs-plane client", () => {
     expect(`${init?.method} ${new URL(String(input)).pathname}`).toBe(
       `DELETE /gateway/api/v1/sessions/${session.id}`,
     );
-  });
-
-  it("clears session access only after a successful Stop API", async () => {
-    const fetch = vi
-      .fn<typeof globalThis.fetch>()
-      .mockResolvedValueOnce(
-        jsonResponse(
-          { error: { code: "request_failed", message: "failed" } },
-          { status: 500 },
-        ),
-      )
-      .mockResolvedValueOnce(jsonResponse(session));
-    const client = makeClient(fetch);
-    const key = `cybershuttle.session-access.v1.${session.id}`;
-
-    cacheSessionAccess(access);
-    await expect(client.stopSession(session.id)).rejects.toThrow("failed");
-    expect(window.sessionStorage.getItem(key)).not.toBeNull();
-    await client.stopSession(session.id);
-    expect(window.sessionStorage.getItem(key)).toBeNull();
   });
 
   it("rejects a malformed id before any session request is sent", async () => {
@@ -218,14 +183,20 @@ describe("shared cs-plane client", () => {
   });
 
   it.each([401, 403])(
-    "invalidates cached application access after Jupyter HTTP %i",
+    "reloads once per run for fresh access after Jupyter HTTP %i",
     async (status) => {
-      cacheSessionAccess(access);
-      const settings = createSessionServerSettings(access, {
-        fetch: vi.fn(async () => new Response(null, { status })) as any,
-      });
-      await settings.fetch(new URL("api/status", settings.baseUrl).href);
-      expect(window.sessionStorage.length).toBe(0);
+      const reload = vi.fn();
+      const refusing = () =>
+        createSessionServerSettings(access, {
+          fetch: vi.fn(async () => new Response(null, { status })) as any,
+          reload,
+        });
+      const request = (settings: ReturnType<typeof refusing>) =>
+        settings.fetch(new URL("api/status", settings.baseUrl).href);
+      await request(refusing());
+      const again = await request(refusing());
+      expect(reload).toHaveBeenCalledOnce();
+      expect((await again.json()).message).toContain("reopen the session");
     },
   );
 });

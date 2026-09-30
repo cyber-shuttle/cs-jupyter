@@ -7,6 +7,8 @@
 import type { OAuthConfigResponse, TokenResponse } from "./api/oauth";
 import {
   isPlainObject,
+  parseJson,
+  planeError,
   vBoundedInt,
   vNumber,
   vObject,
@@ -94,7 +96,7 @@ function readStored<T>(key: string, shape: Validator<T>): T | undefined {
   }
 }
 
-function accountFromIdToken(idToken: string): string | undefined {
+function identityFromIdToken(idToken: string): string | undefined {
   const payload = idToken.split(".")[1];
   if (!payload) return undefined;
   try {
@@ -150,8 +152,8 @@ export class AuthClient {
     }
   }
 
-  get account(): string | undefined {
-    return this._credentials && accountFromIdToken(this._credentials.idToken);
+  get identity(): string | undefined {
+    return this._credentials && identityFromIdToken(this._credentials.idToken);
   }
 
   async acquireToken(): Promise<OAuthCredentials> {
@@ -300,18 +302,8 @@ export class AuthClient {
         ? new Error("cs-plane sign-in request timed out.")
         : error;
     });
-    const value: unknown = await response.json().catch(() => {
-      throw new Error("cs-plane returned invalid JSON.");
-    });
-    if (!response.ok) {
-      const error =
-        isPlainObject(value) && isPlainObject(value.error) ? value.error : {};
-      throw new Error(
-        typeof error.message === "string"
-          ? error.message
-          : `cs-plane sign-in failed (${response.status}${typeof error.code === "string" ? `: ${error.code}` : ""}).`,
-      );
-    }
+    if (!response.ok) throw await planeError(response);
+    const value = await parseJson(response);
     if (!shape(value)) {
       throw new Error("cs-plane returned an invalid sign-in response.");
     }

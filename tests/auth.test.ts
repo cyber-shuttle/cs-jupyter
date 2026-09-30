@@ -139,7 +139,7 @@ describe("AuthClient callback exchange", () => {
     const auth = new AuthClient(planeApiUrl, dependencies);
 
     await expect(auth.acquireToken()).resolves.toEqual({ idToken });
-    expect(auth.account).toBe("user@example.edu");
+    expect(auth.identity).toBe("user@example.edu");
     expect(window.location.search).toBe("");
     expect(sessionStorage.getItem("cybershuttle.oauth.pkce.v1")).toBeNull();
     expect(
@@ -331,7 +331,7 @@ describe("AuthClient account claim", () => {
       fetch: fetchSequence([]),
       now: () => 0,
     });
-    expect(auth.account).toBe(expected);
+    expect(auth.identity).toBe(expected);
   });
 });
 
@@ -349,7 +349,7 @@ describe("AuthClient credential persistence", () => {
       fetch: fetchSequence([]),
       now: () => 1_000,
     });
-    expect(auth.account).toBeUndefined();
+    expect(auth.identity).toBeUndefined();
     await expect(auth.acquireToken()).rejects.toBeInstanceOf(
       AuthInteractionRequiredError,
     );
@@ -366,7 +366,7 @@ describe("AuthClient credential persistence", () => {
       now: () => 1_000,
     });
     await expect(auth.acquireToken()).resolves.toEqual({ idToken });
-    expect(auth.account).toBe("person@example.edu");
+    expect(auth.identity).toBe("person@example.edu");
   });
 });
 

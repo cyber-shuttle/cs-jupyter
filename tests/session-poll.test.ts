@@ -1,13 +1,12 @@
 // Exercises the panel's session poll loop: cadence, failure recovery, session and
 // log replacement, and resume on reload. A tick firing while the previous read
-// is outstanding must not stack a second one. A sign-out and sign-in cycle, or a
-// rebuilt panel, must see the full list again, not a 304.
+// is outstanding must not stack a second one. A panel rebuilt after sign-out
+// must see the full list again, not a 304.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthInteractionRequiredError } from "../src/AuthClient";
 import { PlaneClient, UNCHANGED } from "../src/PlaneClient";
 import { jsonResponse, type IRun } from "../src/Common";
-import { cacheSessionAccess } from "../src/session";
-import { setActiveSessionId } from "../src/session";
+import { setActiveSession } from "../src/session";
 import {
   accessFixture,
   planeFake,
@@ -21,29 +20,17 @@ import {
 } from "./fakes";
 
 const session = sessionFixture({ state: "QUEUED" });
+const starting = { ...session, state: "STARTING" as const };
 
-async function signingInWhileInFlight() {
+async function resumingWhileInFlight() {
   const inFlight =
     Promise.withResolvers<ReturnType<typeof sessionListFixture>>();
   const api = planeFake({
     listSessions: vi.fn(() => inFlight.promise),
   });
   const panel = panelFake(api);
-  const signedIn = panel.signIn();
-  await Promise.resolve();
-  return { inFlight, api, panel, signedIn };
-}
-
-function cacheAccess(
-  sessionId: string,
-  seq: number,
-  token = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-): void {
-  cacheSessionAccess(
-    accessFixture(sessionId, seq, {
-      jupyter: { ...accessFixture(sessionId, seq).jupyter, token },
-    }),
-  );
+  await vi.waitFor(() => expect(api.listSessions).toHaveBeenCalled());
+  return { inFlight, api, panel, resumed: panel.restored };
 }
 
 beforeEach(() => {
@@ -52,19 +39,17 @@ beforeEach(() => {
 });
 
 describe("session polling", () => {
-  it("waits for an explicit sign-in before reading anything", async () => {
+  it("waits for an explicit sign-in, which leaves the page, before reading anything", async () => {
     const signIn = Promise.withResolvers<void>();
     const api = planeFake({
       signIn: vi.fn(() => signIn.promise),
       resumeSignIn: vi.fn(async () => {
-        throw new Error("no session to resume");
+        throw new AuthInteractionRequiredError();
       }),
     });
     const panel = panelFake(api);
-    await Promise.resolve();
-    expect(api.signIn).not.toHaveBeenCalled();
-    expect(api.listSessions).not.toHaveBeenCalled();
-    expect(api.listSshHosts).not.toHaveBeenCalled();
+    await panel.restored;
+    expect(panel.state.error).toBe("");
 
     panel.header.node
       .querySelector<HTMLButtonElement>(".csSignInButton")!
@@ -74,27 +59,21 @@ describe("session polling", () => {
     expect(panel.state.signingIn).toBe(true);
     signIn.resolve();
     await second;
-    expect(panel.state.signedIn).toBe(true);
-    expect(api.listSessions).toHaveBeenCalled();
-    expect(api.listSshHosts).toHaveBeenCalledOnce();
+    expect(api.listSessions).not.toHaveBeenCalled();
+    expect(api.listSshHosts).not.toHaveBeenCalled();
     panel.dispose();
   });
 
-  it("stops polling when the sign-in lapses and resumes after signing in again", async () => {
+  it("stops polling when the sign-in lapses", async () => {
     const api = planeFake({
       listSessions: vi
         .fn()
-        .mockRejectedValueOnce(new AuthInteractionRequiredError("expired"))
-        .mockResolvedValue(sessionListFixture([session])),
+        .mockRejectedValueOnce(new AuthInteractionRequiredError("expired")),
     });
     const panel = panelFake(api);
-    await panel.signIn();
+    await panel.restored;
     expect(panel.state.signedIn).toBe(false);
     expect(panel.state.updatesStatus).toContain("Sign in again");
-
-    await panel.signIn();
-    await pollPanel(panel);
-    expect(panel.state.sessions.map((item) => item.id)).toEqual([session.id]);
     panel.dispose();
   });
 
@@ -106,7 +85,7 @@ describe("session polling", () => {
         .mockRejectedValueOnce(new Error("cs-plane unreachable")),
     });
     const panel = panelFake(api);
-    await panel.signIn();
+    await panel.restored;
     await pollPanel(panel);
     await pollPanel(panel);
     expect(panel.state.updatesStatus).toBe("Session updates unavailable.");
@@ -115,13 +94,13 @@ describe("session polling", () => {
   });
 
   it("runs one poll at a time and stops on disposal", async () => {
-    const { inFlight, api, panel, signedIn } = await signingInWhileInFlight();
+    const { inFlight, api, panel, resumed } = await resumingWhileInFlight();
     const calls = api.listSessions.mock.calls.length;
     void pollPanel(panel);
     void pollPanel(panel);
     expect(api.listSessions.mock.calls.length).toBe(calls);
     inFlight.resolve(sessionListFixture([session]));
-    await signedIn;
+    await resumed;
 
     panel.dispose();
     const afterDisposal = api.listSessions.mock.calls.length;
@@ -133,7 +112,7 @@ describe("session polling", () => {
     const other = { ...session, id: "s-111111111111" };
     const api = planeFake();
     const panel = panelFake(api);
-    await panel.signIn();
+    await panel.restored;
 
     api.listSessions.mockResolvedValue(
       sessionListFixture(
@@ -166,67 +145,59 @@ describe("session polling", () => {
     panel.dispose();
   });
 
-  it("clears terminal and superseded access without touching other sessions", async () => {
-    const other = { ...session, id: "s-111111111111" };
+  it("leaves the page with a run report once the attached session ends", async () => {
     const api = planeFake();
-    setActiveSessionId(session.id);
+    setActiveSession({ id: session.id, seq: session.seq });
     const panel = panelFake(api);
-    await panel.signIn();
-    const key = `cybershuttle.session-access.v1.${session.id}`;
-    const otherKey = `cybershuttle.session-access.v1.${other.id}`;
-    const report = async (...sessions: object[]): Promise<void> => {
-      api.listSessions.mockResolvedValue(sessionListFixture(sessions as any));
-      await pollPanel(panel);
-    };
-
-    cacheAccess(session.id, session.seq);
-    cacheAccess(other.id, other.seq, "B".repeat(43));
-    window.localStorage.setItem(key, "unrelated-local-value");
-
-    await report({ ...session, state: "READY" }, { ...other, state: "READY" });
-    expect(window.sessionStorage.getItem(key)).not.toBeNull();
-    expect(window.sessionStorage.getItem(otherKey)).not.toBeNull();
-
-    await report(
-      { ...session, state: "STARTING" },
-      { ...other, state: "READY" },
+    await panel.restored;
+    api.listSessions.mockResolvedValue(
+      sessionListFixture([{ ...session, state: "STOPPED" }]),
     );
-    expect(window.sessionStorage.getItem(key)).not.toBeNull();
-
-    await report(
-      { ...session, state: "STOPPED" },
-      { ...other, state: "READY" },
+    await pollPanel(panel);
+    expect(sessionStorage.getItem("cybershuttle.run-report.v1")).toBe(
+      `${session.id}/${session.seq}`,
     );
-    expect(window.sessionStorage.getItem(key)).toBeNull();
-    expect(window.sessionStorage.getItem(otherKey)).not.toBeNull();
-    expect(window.localStorage.getItem(key)).toBe("unrelated-local-value");
-
-    cacheAccess(session.id, session.seq);
-    await report(
-      { ...session, seq: 2, state: "READY" },
-      { ...other, state: "READY" },
-    );
-    expect(window.sessionStorage.getItem(key)).toBeNull();
-    expect(window.sessionStorage.getItem(otherKey)).not.toBeNull();
-
-    cacheAccess(session.id, session.seq);
-    await report({ ...session, state: "FAILED" }, { ...other, state: "READY" });
-    expect(window.sessionStorage.getItem(key)).toBeNull();
-    expect(window.sessionStorage.getItem(otherKey)).not.toBeNull();
     panel.dispose();
-    setActiveSessionId(undefined);
+    setActiveSession(undefined);
+  });
+
+  it("leaves the page once the attached run's walltime runs out, with no change in the list", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    sessionStorage.removeItem("cybershuttle.run-report.v1");
+    const running = {
+      ...session,
+      state: "READY" as const,
+      startedAt: new Date().toISOString(),
+      resources: { ...session.resources, wallMinutes: 1 },
+    };
+    const api = planeFake();
+    setActiveSession({ id: running.id, seq: running.seq });
+    api.listSessions.mockResolvedValue(sessionListFixture([running]));
+    const panel = panelFake(api);
+    await panel.restored;
+    await pollPanel(panel);
+    expect(sessionStorage.getItem("cybershuttle.run-report.v1")).toBeNull();
+
+    vi.setSystemTime(Date.now() + 61_000);
+    await pollPanel(panel);
+    expect(sessionStorage.getItem("cybershuttle.run-report.v1")).toBe(
+      `${running.id}/${running.seq}`,
+    );
+    panel.dispose();
+    setActiveSession(undefined);
+    vi.useRealTimers();
   });
 
   it("emits state when a poll drops a session no longer tracked, clearing its samples", async () => {
     const api = planeFake({
-      listSessions: vi.fn(async () => sessionListFixture([session])),
+      listSessions: vi.fn(async () => sessionListFixture([starting])),
       getSessionUsage: vi.fn(async () => ({
         sessionId: session.id,
         samples: [{ at: "2026-01-01T00:00:00Z", memBytes: 1024 }],
       })),
     });
     const panel = panelFake(api);
-    await panel.signIn();
+    await panel.restored;
     await vi.waitFor(() =>
       expect(panel.state.samples.get(session.id)).toBeDefined(),
     );
@@ -246,10 +217,10 @@ describe("session polling", () => {
 
 describe("sign-out during an in-flight poll", () => {
   it("does not let a listSessions read that was already in flight refill state after sign-out", async () => {
-    const { inFlight, panel, signedIn } = await signingInWhileInFlight();
+    const { inFlight, panel, resumed } = await resumingWhileInFlight();
     panel.signOut();
     inFlight.resolve(sessionListFixture([session]));
-    await signedIn;
+    await resumed;
     await Promise.resolve();
 
     expect(panel.state.sessions).toHaveLength(0);
@@ -258,7 +229,7 @@ describe("sign-out during an in-flight poll", () => {
 
   it("does not let runs or samples in flight when sign-out fired refill state", async () => {
     const api = planeFake({
-      listSessions: vi.fn(async () => sessionListFixture([session])),
+      listSessions: vi.fn(async () => sessionListFixture([starting])),
       listRuns: vi.fn(async (): Promise<IRun[]> => []),
       getSessionUsage: vi.fn(
         async (): Promise<{
@@ -271,7 +242,7 @@ describe("sign-out during an in-flight poll", () => {
       ),
     });
     const panel = panelFake(api);
-    await panel.signIn();
+    await panel.restored;
 
     const runsInFlight = Promise.withResolvers<IRun[]>();
     const samplesInFlight = Promise.withResolvers<{
@@ -318,7 +289,7 @@ describe("polling an unchanged list", () => {
           .mockResolvedValue(access),
       });
       const panel = panelFake(api);
-      await panel.signIn();
+      await panel.restored;
       await vi.waitFor(() =>
         expect(api.getSessionAccess).toHaveBeenCalledTimes(1),
       );
@@ -351,7 +322,7 @@ describe("polling an unchanged list", () => {
         getSessionAccess,
       });
       const panel = panelFake(api);
-      await panel.signIn();
+      await panel.restored;
       for (let i = 0; i < 10; i++) {
         now.mockReturnValue(i * 1000);
         await pollPanel(panel);
@@ -361,6 +332,26 @@ describe("polling an unchanged list", () => {
     } finally {
       now.mockRestore();
     }
+  });
+});
+
+describe("run history reads", () => {
+  it("reads runs only when the list changes or Run History is open", async () => {
+    const api = planeFake({
+      listSessions: vi
+        .fn()
+        .mockResolvedValueOnce(sessionListFixture([session]))
+        .mockResolvedValue(UNCHANGED),
+      listRuns: vi.fn(async (): Promise<IRun[]> => []),
+    });
+    const panel = panelFake(api);
+    await panel.restored;
+    await pollPanel(panel);
+    expect(api.listRuns).toHaveBeenCalledOnce();
+    panel.modals.runHistoryOpen = true;
+    await pollPanel(panel);
+    expect(api.listRuns).toHaveBeenCalledTimes(2);
+    panel.dispose();
   });
 });
 
@@ -402,10 +393,6 @@ describe("conditional polling across sessions", () => {
 
     panel.signOut();
     expect(panel.state.sessions).toHaveLength(0);
-    await panel.signIn();
-    expect(panel.state.sessions.map((item) => item.id)).toEqual([
-      "s-012345abcdef",
-    ]);
     panel.dispose();
 
     const rebuilt = panelFake(plane);
@@ -430,16 +417,15 @@ describe("session resume", () => {
     panel.dispose();
   });
 
-  it("stays signed out when no credential survived the reload", async () => {
+  it("reports a failed sign-in callback", async () => {
     const api = planeFake({
       resumeSignIn: vi.fn(async () => {
-        throw new AuthInteractionRequiredError();
+        throw new Error("Sign-in state did not match; try signing in again.");
       }),
     });
     const panel = panelFake(api);
-    await vi.waitFor(() => expect(api.resumeSignIn).toHaveBeenCalled());
-    expect(panel.state.signedIn).toBe(false);
-    expect(api.listSessions).not.toHaveBeenCalled();
+    await panel.restored;
+    expect(panel.state.error).toContain("Sign-in state did not match");
     panel.dispose();
   });
 });

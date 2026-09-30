@@ -32,6 +32,7 @@ const launch = (dialog: Dialog<unknown>): Promise<unknown> =>
   dialog.launch().catch(() => undefined);
 
 export class SessionModals {
+  runHistoryOpen = false;
   private _detailDialogs = new Set<Dialog<unknown>>();
   private _dialogBody: Panel | undefined;
   private _sshAuthDock: SshAuthDock | undefined;
@@ -130,7 +131,9 @@ export class SessionModals {
   }
 
   async openRunHistory(open?: string): Promise<void> {
+    this.runHistoryOpen = true;
     await launch(openDialog("Run History", new RunHistory(this._panel, open)));
+    this.runHistoryOpen = false;
   }
 
   private async _createInDialog(
@@ -142,8 +145,7 @@ export class SessionModals {
     form.setError("");
     form.setBusy(true);
     try {
-      const session = await this._api.createSession(request);
-      await this._api.startSession(session.id);
+      const session = await this._panel.actions.create(request);
       if (body.isDisposed || form.isDisposed) {
         return;
       }

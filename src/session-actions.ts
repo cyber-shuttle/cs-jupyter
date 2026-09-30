@@ -1,21 +1,20 @@
-// The panel's session-lifecycle verbs: connect, start, stop, delete, and
-// Jupyter access once a session is READY. Stop and delete both cancel the
-// session's Slurm job and confirm first; an SSH authentication challenge
-// retries once.
+// The panel's session-lifecycle verbs: create, connect, start, stop, delete,
+// and Jupyter readiness once a session is READY. Readiness means cs-plane
+// granted access for the current run; this page's own session starts ready,
+// and the page a connect opens fetches access again. Stop and delete both
+// cancel the session's Slurm job and confirm first.
 import { Dialog, showDialog } from "@jupyterlab/apputils";
-import { errorMessage, ISession, isTerminal } from "./Common";
 import {
-  accessUnavailable,
-  PlaneClient,
+  errorMessage,
+  ISession,
+  ISessionCreateRequest,
+  isTerminal,
   PlaneError,
-  needsSshAuthentication,
-} from "./PlaneClient";
-import type { SshAuthDock } from "./ssh";
-import {
-  cacheSessionAccess,
-  clearSessionAccess,
-  loadSessionAccess,
-} from "./session";
+} from "./Common";
+import { accessUnavailable, PlaneClient } from "./PlaneClient";
+import type { SessionController } from "./SessionController";
+import { withSshAuthentication, type SshAuthDock } from "./ssh";
+import { getActiveSessionId } from "./session";
 
 interface ISessionActionsHooks {
   isDisposed: () => boolean;
@@ -23,8 +22,6 @@ interface ISessionActionsHooks {
   onError: (message: string) => void;
   sessions: () => readonly ISession[];
   replaceSessions: (sessions: ISession[]) => void;
-  currentSessionId: () => string | undefined;
-  select: (sessionId: string, current: () => boolean) => Promise<void>;
   sshAuthDock: () => SshAuthDock;
   rejectDetail: () => void;
 }
@@ -84,8 +81,12 @@ export class SessionActions {
 
   constructor(
     private _api: PlaneClient,
+    private _controller: SessionController,
     private _hooks: ISessionActionsHooks,
-  ) {}
+  ) {
+    const active = getActiveSessionId();
+    if (active) this._jupyterReady.add(active);
+  }
 
   get busySessionIds(): ReadonlyMap<string, BusyKind> {
     return this._busySessionIds;
@@ -122,15 +123,11 @@ export class SessionActions {
   }
 
   releaseSession(id: string): void {
-    if (
-      this._connectingSessionId === id ||
-      this._hooks.currentSessionId() === id
-    ) {
+    if (this._connectingSessionId === id || getActiveSessionId() === id) {
       this._selection++;
       this._connectingSessionId = undefined;
     }
     this.releaseJupyter(id);
-    clearSessionAccess(id);
   }
 
   private _beginJupyter(session: ISession): IJupyterOperation {
@@ -232,13 +229,12 @@ export class SessionActions {
     session: ISession,
     operation: IJupyterOperation,
   ): Promise<void> {
-    if (!loadSessionAccess(session.id, session.seq)) {
+    if (!this._jupyterReady.has(session.id)) {
       const access = await this._api.getSessionAccess(session.id);
       if (!this._jupyterOperationCurrent(operation)) return;
       if (access.seq !== operation.seq) {
         throw new Error("Session access belongs to another run.");
       }
-      cacheSessionAccess(access);
     }
     if (!this._jupyterOperationCurrent(operation)) return;
     this._jupyterReady.add(session.id);
@@ -262,16 +258,16 @@ export class SessionActions {
     try {
       try {
         await this._ensureAccess(session, operation);
-      } catch (error) {
-        if (this._jupyterOperations.get(session.id) === operation) {
-          clearSessionAccess(session.id);
-        }
-        throw error;
       } finally {
         this._finishJupyter(operation);
         release();
       }
-      if (current()) await this._hooks.select(session.id, current);
+      if (current()) {
+        if (!this._jupyterReady.has(session.id)) {
+          throw new Error("Session must be READY.");
+        }
+        await this._controller.select(session, current);
+      }
     } catch (error) {
       if (current()) {
         this._hooks.onError(
@@ -297,6 +293,24 @@ export class SessionActions {
         kind: "start",
       });
     }
+  }
+
+  async create(request: ISessionCreateRequest): Promise<ISession> {
+    const session = await this._api.createSession(request);
+    const { ok, error } = await this._act(
+      session,
+      (id) => this._api.startSession(id),
+      {
+        kind: "start",
+        report: () => false,
+        apply: (acted) => [
+          ...this._hooks.sessions().filter((each) => each.id !== acted.id),
+          acted,
+        ],
+      },
+    );
+    if (!ok) throw error;
+    return session;
   }
 
   async stop(sessionId: string): Promise<void> {
@@ -346,18 +360,15 @@ export class SessionActions {
       selection === this._selection && !this._hooks.isDisposed();
     const release = this._busy(session.id, kind);
     try {
-      const acted = await act(session.id).catch(async (error) => {
-        if (!allowSshAuthentication || !needsSshAuthentication(error)) {
-          throw error;
-        }
-        await this._hooks
-          .sshAuthDock()
-          .authenticate(
+      const call = () => act(session.id);
+      const acted = await (allowSshAuthentication
+        ? withSshAuthentication(
+            this._hooks.sshAuthDock,
+            this._api,
             session.alias,
-            this._api.sshAuthWebSocket(session.alias),
-          );
-        return act(session.id);
-      });
+            call,
+          )
+        : call());
       if (current()) {
         this._hooks.replaceSessions(apply(acted));
       }

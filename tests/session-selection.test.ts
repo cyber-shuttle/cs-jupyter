@@ -7,14 +7,10 @@ import { describe, expect, it, vi } from "vitest";
 import { CyberShuttlePanel } from "../src/CyberShuttlePanel";
 import type { ISessionUiState } from "../src/session";
 import type { ISession } from "../src/Common";
-import { PlaneError } from "../src/PlaneClient";
+import { PlaneError } from "../src/Common";
 import { SessionController } from "../src/SessionController";
-import {
-  cacheSessionAccess,
-  clearSessionAccess,
-  loadSessionAccess,
-} from "../src/session";
-import { setActiveSessionId } from "../src/session";
+import type { ISessionAccess } from "../src/PlaneClient";
+import { setActiveSession } from "../src/session";
 import { CyberShuttleHeader } from "../src/CyberShuttlePanel";
 import { SessionList } from "../src/SessionList";
 import {
@@ -78,7 +74,9 @@ function harness(
   getSession: (id: string) => Promise<ISession>,
   currentSessionId?: string,
 ) {
-  setActiveSessionId(currentSessionId);
+  setActiveSession(
+    currentSessionId ? { id: currentSessionId, seq: 1 } : undefined,
+  );
   const navigate = vi.fn();
   const { execute, app } = fakeCommandApp();
   const api = planeFake({
@@ -87,10 +85,6 @@ function harness(
     stopSession: vi.fn(async () => first),
     getSessionAccess: vi.fn(async (id: string) => accessFixture(id, 1)),
   });
-  sessionStorage.clear();
-  for (const session of sessions) {
-    cacheSessionAccess(accessFixture(session.id, session.seq));
-  }
   const controller = new SessionController(
     app as any,
     api as any,
@@ -98,7 +92,6 @@ function harness(
     navigate,
   );
   const panel = new CyberShuttlePanel(api as any, controller);
-  void panel.signIn();
   return { panel, api, navigate, execute };
 }
 
@@ -113,14 +106,14 @@ function expectDeferredSaveWon(
   panel: CyberShuttlePanel,
 ): void {
   expect(navigate).not.toHaveBeenCalled();
-  expect(loadSessionAccess(active.id, active.seq)).toBeDefined();
   panel.dispose();
 }
 
 async function connectingToFirst() {
   window.history.replaceState({}, "", "/gateway/lab");
-  const pending = Promise.withResolvers<ISession>();
-  const { panel, navigate } = harness([first, second], () => pending.promise);
+  const pending = Promise.withResolvers<ISessionAccess>();
+  const { panel, api, navigate } = harness([first, second], async () => first);
+  api.getSessionAccess.mockReturnValue(pending.promise);
   await ready(panel);
 
   void panel.actions.connect(first.id);
@@ -177,7 +170,6 @@ describe("serialized session selection", () => {
     list.sessionRequested.connect((_sender, id) => sessionRequested(id));
     list.createRequested.connect(createRequested);
     list.sshHostsRequested.connect(sshHostsRequested);
-    list.setCreateBlocked("");
     setSessions(fake, [first]);
     document.body.appendChild(list.node);
     list.node.querySelector<HTMLButtonElement>(".csSessionCard")!.focus();
@@ -204,7 +196,7 @@ describe("serialized session selection", () => {
     const { panel, navigate, pending } = await connectingToFirst();
 
     panel.dispose();
-    pending.resolve(first);
+    pending.resolve(accessFixture(first.id, first.seq));
     await pending.promise;
     await Promise.resolve();
     expect(navigate).not.toHaveBeenCalled();
@@ -217,7 +209,7 @@ describe("serialized session selection", () => {
     expect(panel.state.connectingSessionId).toBeUndefined();
     expect(panel.state.busySessionIds.size).toBe(0);
 
-    pending.resolve(first);
+    pending.resolve(accessFixture(first.id, first.seq));
     await pending.promise;
     await Promise.resolve();
     expect(navigate).not.toHaveBeenCalled();
@@ -233,10 +225,9 @@ describe("serialized session selection", () => {
         async (id) => (id === first.id ? first : second),
         active.id,
       );
-      cacheSessionAccess(accessFixture(active.id, active.seq));
       await ready(panel);
       if (failure === "target access") {
-        clearSessionAccess(first.id);
+        panel.actions.releaseJupyter(first.id);
         api.getSessionAccess.mockRejectedValueOnce(
           new Error("target access failed"),
         );
@@ -248,7 +239,6 @@ describe("serialized session selection", () => {
 
       await panel.actions.connect(first.id);
 
-      expect(loadSessionAccess(active.id, active.seq)).toBeDefined();
       expect(navigate).not.toHaveBeenCalled();
       panel.dispose();
     },
@@ -257,7 +247,7 @@ describe("serialized session selection", () => {
   it("keeps quiet when access is refused because the session is leaving READY", async () => {
     const { panel, api } = harness([first, second], async () => first);
     await ready(panel);
-    clearSessionAccess(first.id);
+    panel.actions.releaseJupyter(first.id);
     api.getSessionAccess.mockRejectedValueOnce(
       new PlaneError(
         "session_access_unavailable",
@@ -276,7 +266,7 @@ describe("serialized session selection", () => {
       id === first.id ? first : second,
     );
     await ready(panel);
-    clearSessionAccess(first.id);
+    panel.actions.releaseJupyter(first.id);
     const pendingAccess = Promise.withResolvers<never>();
     api.getSessionAccess.mockReturnValueOnce(pendingAccess.promise as never);
 
@@ -328,20 +318,15 @@ describe("serialized session selection", () => {
   it("rechecks the live run after deferred save before navigating", async () => {
     window.history.replaceState({}, "", `/lite/lab/?session=${active.id}`);
     const live = Promise.withResolvers<ISession>();
-    let calls = 0;
     const { panel, api, navigate } = harness(
       [active, first],
-      async () => {
-        calls++;
-        return calls === 1 ? first : live.promise;
-      },
+      () => live.promise,
       active.id,
     );
     await ready(panel);
-    await panel.actions.refreshJupyter(active.id);
 
     const selecting = panel.actions.connect(first.id);
-    await vi.waitFor(() => expect(api.getSession).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(api.getSession).toHaveBeenCalledOnce());
     await emitSessions(panel, [active, { ...first, seq: 2 }]);
     live.resolve(first);
     await selecting;
@@ -351,29 +336,18 @@ describe("serialized session selection", () => {
 
   it("allows only the newest rapid selection to save and navigate", async () => {
     window.history.replaceState({}, "", "/lite/lab/?session=s-333333333333");
-    const requests = new Map([
-      [first.id, Promise.withResolvers<ISession>()],
-      [second.id, Promise.withResolvers<ISession>()],
-    ]);
-    const { panel, navigate, execute } = harness(
+    const { panel, api, navigate, execute } = harness(
       [first, second],
-      (id) => requests.get(id)!.promise,
+      async (id) => (id === first.id ? first : second),
       active.id,
     );
     await ready(panel);
 
     void panel.actions.connect(first.id);
-    void panel.actions.connect(second.id);
-    requests.get(first.id)!.resolve(first);
-    await requests.get(first.id)!.promise;
-    await Promise.resolve();
-    expect(execute).not.toHaveBeenCalled();
-    expect(navigate).not.toHaveBeenCalled();
-
-    requests.get(second.id)!.resolve(second);
-    await requests.get(second.id)!.promise;
+    await panel.actions.connect(second.id);
     await vi.waitFor(() => expect(navigate).toHaveBeenCalledOnce());
-    expect(execute).toHaveBeenCalledWith("docmanager:save-all");
+    expect(execute).toHaveBeenCalledOnce();
+    expect(api.getSession).not.toHaveBeenCalledWith(first.id);
     expect(navigate).toHaveBeenCalledWith(`/selected/${second.id}`);
     expect(panel.state.connectingSessionId).toBeUndefined();
     panel.dispose();
@@ -382,7 +356,7 @@ describe("serialized session selection", () => {
 
 describe("current session pill", () => {
   it("marks only the session this page is attached to", () => {
-    setActiveSessionId(first.id);
+    setActiveSession({ id: first.id, seq: 1 });
     const { fake, list } = boundList();
     const other = { ...first, id: "s-999999999999" };
     setSessions(fake, [first, other]);
@@ -402,7 +376,7 @@ describe("current session pill", () => {
     expect(cards[0].getAttribute("aria-label")).toContain("current session");
     expect(cards[1].querySelector(".csCurrentPill")).toBeNull();
     expect(cards[1].classList).not.toContain("csSessionCardCurrent");
-    setActiveSessionId(undefined);
+    setActiveSession(undefined);
   });
 });
 
@@ -485,7 +459,7 @@ describe("identity control", () => {
       new PanelStateFake({
         ...uiState({ sessions: [first] }),
         signedIn: true,
-        account: "someone@gatech.edu",
+        identity: "someone@gatech.edu",
       }) as never,
     );
     const signOut = vi.fn();

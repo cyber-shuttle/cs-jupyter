@@ -1,25 +1,19 @@
 // Turns raw usage samples and Slurm accounting into series, summaries,
 // CPU/MEM/GPU usage plots (USAGE_SLOTS wide, mirroring cs-plane's window)
 // and the status-bar walltime countdown for the session this page is
-// attached to. It reads cs-plane directly since JupyterLab disposes the
-// Launcher, and the panel in it, once anything opens, and hides for a queued,
-// stopping or finished session.
-import type { JupyterFrontEndPlugin } from "@jupyterlab/application";
-import { IStatusBar } from "@jupyterlab/statusbar";
-import { Widget } from "@lumino/widgets";
+// attached to, drawn from the panel's state and hidden for a queued, stopping
+// or finished session.
 import type { IUsageSample, IRun, IRunStats, ISession } from "./Common";
-import { isTerminal } from "./Common";
-import { PlaneClient, IPlaneClient } from "./PlaneClient";
+import type { CyberShuttlePanel } from "./CyberShuttlePanel";
 import {
-  Clock,
   CLOCK_GLYPH,
   countsDown,
   element,
   formatRemaining,
   remainingBadge,
-  remainingMs,
 } from "./dom";
-import { RUN_REPORT_KEY, selectedSession, sessionHomeUrl } from "./session";
+import { PanelBoundWidget } from "./RebuildingWidget";
+import { getActiveSessionId } from "./session";
 
 export function cpuCoreSeries(samples: readonly IUsageSample[]): number[] {
   return samples.flatMap((sample, index) => {
@@ -217,63 +211,34 @@ const latest = (values: number[]): number | undefined =>
 const peak = (values: number[]): number | undefined =>
   values.length ? Math.max(...values) : undefined;
 
-const WALLTIME_REFRESH_MS = 30_000;
-
-export class WalltimeStatus extends Widget {
-  private _session: ISession | undefined;
-  private _clock = new Clock(() => this._render());
-  private _refresh: number | undefined;
-
-  constructor(
-    private _api: PlaneClient,
-    private _sessionId: string,
-    private _leave = () => window.location.replace(sessionHomeUrl()),
-  ) {
-    super();
+export class WalltimeStatus extends PanelBoundWidget {
+  constructor(panel: CyberShuttlePanel) {
+    super(panel);
     this.addClass("csWalltimeStatus");
     this._render();
-    void this._reload();
-    this._refresh = window.setInterval(
-      () => void this._reload(),
-      WALLTIME_REFRESH_MS,
+  }
+
+  private _session(): ISession | undefined {
+    const session = this._state.sessions.find(
+      (each) => each.id === getActiveSessionId(),
     );
+    return session && countsDown(session) ? session : undefined;
   }
 
-  dispose(): void {
-    if (this.isDisposed) {
-      return;
-    }
-    this._clock.stop();
-    window.clearInterval(this._refresh);
-    super.dispose();
+  protected _counting(): boolean {
+    return this._session() !== undefined;
   }
 
-  private async _reload(): Promise<void> {
-    try {
-      const session = await this._api.getSession(this._sessionId);
-      if (this.isDisposed) return;
-      if (isTerminal(session.state) || remainingMs(session, Date.now()) === 0) {
-        sessionStorage.setItem(RUN_REPORT_KEY, `${session.id}/${session.seq}`);
-        this._leave();
-        return;
-      }
-      this._session = session;
-      this._render();
-    } catch {}
-  }
-
-  private _render(): void {
-    const session = this._session;
-    const counting = !!session && countsDown(session);
-    this._clock.sync(counting);
-    this.setHidden(!counting);
-    if (!session || !counting) {
+  protected _rebuild(): void {
+    const session = this._session();
+    this.setHidden(!session);
+    this.node.textContent = "";
+    if (!session) {
       return;
     }
     const { label, low } = remainingBadge(session, Date.now());
     this.toggleClass("csWalltimeStatusLow", low);
     const caption = `${session.alias}: ${label} of the session's ${session.resources.wallMinutes} minutes left`;
-    this.node.textContent = "";
     const item = element("span", "", "csWalltimeStatusItem");
     item.innerHTML = CLOCK_GLYPH;
     item.append(element("span", label));
@@ -281,22 +246,3 @@ export class WalltimeStatus extends Widget {
     this.node.appendChild(item);
   }
 }
-
-export const walltimeStatusPlugin: JupyterFrontEndPlugin<void> = {
-  id: "@cybershuttle/jupyter:walltime-status",
-  description:
-    "Count the selected session's remaining walltime down in the status bar.",
-  autoStart: true,
-  requires: [IStatusBar, IPlaneClient],
-  activate: (_app, statusBar: IStatusBar, api: PlaneClient) => {
-    const selected = selectedSession();
-    if (!selected) {
-      return;
-    }
-    statusBar.registerStatusItem("@cybershuttle/jupyter:walltime-status", {
-      align: "right",
-      rank: 100,
-      item: new WalltimeStatus(api, selected.sessionId),
-    });
-  },
-};

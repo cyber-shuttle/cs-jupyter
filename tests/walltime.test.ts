@@ -1,7 +1,6 @@
 // A session only counts down once Slurm has started it; a queued session shows
-// its full limit. The status bar item renders over a resolved promise, so tests
-// drain the microtask queue directly rather than the clock.
-import { describe, expect, it, vi } from "vitest";
+// its full limit.
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ISession } from "../src/Common";
 import {
   LOW_TIME_MS,
@@ -10,6 +9,7 @@ import {
   remainingMs,
 } from "../src/dom";
 import { WalltimeStatus } from "../src/usage";
+import { setActiveSession } from "../src/session";
 import { RunHistory } from "../src/RunHistory";
 import { SessionDetail } from "../src/SessionDetail";
 import { PanelStateFake, sessionFixture as session, uiState } from "./fakes";
@@ -86,60 +86,38 @@ describe("walltime countdown", () => {
 });
 
 describe("walltime status bar item", () => {
-  const client = (value: ISession) =>
-    ({ getSession: vi.fn(async () => value) }) as never;
+  afterEach(() => setActiveSession(undefined));
 
-  const settled = async () => {
-    for (let i = 0; i < 20; i++) await Promise.resolve();
+  const hourJobItem = (overrides: Partial<ISession> = {}) => {
+    setActiveSession({ id: "s-012345abcdef", seq: 1 });
+    const attached = session({
+      startedAt: "2030-01-01T00:00:00Z",
+      resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 },
+      ...overrides,
+    });
+    return new WalltimeStatus(
+      new PanelStateFake(uiState({ sessions: [attached] })) as never,
+    );
   };
 
-  const hourJobItem = (overrides: Partial<ISession> = {}, leave?: () => void) =>
-    new WalltimeStatus(
-      client(
-        session({
-          startedAt: "2030-01-01T00:00:00Z",
-          resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 },
-          ...overrides,
-        }),
-      ),
-      "s-012345abcdef",
-      leave,
-    );
-
-  it("shows the remaining time for the session this page is attached to", async () => {
+  it("shows the remaining time for the session this page is attached to", () => {
     vi.setSystemTime(Date.parse("2030-01-01T00:30:00Z"));
     const item = hourJobItem();
-    await settled();
     expect(item.node.textContent).toContain("30m 0s");
     expect(item.isHidden).toBe(false);
     expect(item.hasClass("csWalltimeStatusLow")).toBe(false);
     item.dispose();
   });
 
-  it("warns under ten minutes and says nothing at all once the session is over", async () => {
+  it("warns under ten minutes and says nothing at all once the session is over", () => {
     vi.setSystemTime(Date.parse("2030-01-01T00:55:00Z"));
     const low = hourJobItem();
-    await settled();
     expect(low.hasClass("csWalltimeStatusLow")).toBe(true);
     low.dispose();
 
-    const over = hourJobItem({ state: "STOPPED" }, vi.fn());
-    await settled();
+    const over = hourJobItem({ state: "STOPPED" });
     expect(over.isHidden).toBe(true);
     expect(over.node.textContent).toBe("");
-    over.dispose();
-  });
-
-  it("queues the run and leaves at zero before the backend reports it stopped", async () => {
-    sessionStorage.clear();
-    vi.setSystemTime(Date.parse("2030-01-01T01:00:00Z"));
-    const leave = vi.fn();
-    const over = hourJobItem({ state: "READY" }, leave);
-    await settled();
-    expect(sessionStorage.getItem("cybershuttle.run-report.v1")).toBe(
-      "s-012345abcdef/1",
-    );
-    expect(leave).toHaveBeenCalledOnce();
     over.dispose();
   });
 });

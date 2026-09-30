@@ -1,9 +1,11 @@
 // Mounts the CyberShuttle panel into JupyterLab's Launcher. The header goes in
 // the Launcher's fixed content header, the sessions in the scrolling body, where
 // a React re-render can drop the foreign node, so a mutation observer re-mounts
-// it and release tolerates a node already gone from the document.
+// it and release tolerates a node already gone from the document. The walltime
+// status item draws from the same panel.
 import type { JupyterFrontEndPlugin } from "@jupyterlab/application";
 import { Dialog, ICommandPalette, showDialog } from "@jupyterlab/apputils";
+import { IStatusBar } from "@jupyterlab/statusbar";
 import type { ReactWidget } from "@jupyterlab/ui-components";
 import { BoxPanel, Widget } from "@lumino/widgets";
 import { PlaneClient, IPlaneClient } from "./PlaneClient";
@@ -14,6 +16,7 @@ import {
 } from "./SessionController";
 import { detach, mount } from "./dom";
 import { getActiveSessionId, sessionLiteUrl } from "./session";
+import { WalltimeStatus } from "./usage";
 
 const SELECT_SESSION_COMMAND = "@cybershuttle/jupyter:select-session";
 
@@ -39,10 +42,25 @@ export const sessionUiPlugin: JupyterFrontEndPlugin<void> = {
   description: "Mount the CyberShuttle session panel into the Launcher.",
   autoStart: true,
   requires: [IPlaneClient],
-  optional: [ICommandPalette],
-  activate: async (app, api: PlaneClient, palette: ICommandPalette | null) => {
+  optional: [ICommandPalette, IStatusBar],
+  activate: async (
+    app,
+    api: PlaneClient,
+    palette: ICommandPalette | null,
+    statusBar: IStatusBar | null,
+  ) => {
     const controller = new SessionController(app, api, sessionLiteUrl);
-    let panel: CyberShuttlePanel | undefined;
+    const panel = new CyberShuttlePanel(api, controller);
+    void Promise.all([app.restored, panel.restored]).then(() => {
+      if (!panel.state.signedIn && !location.search) void offerSignIn(panel);
+    });
+    if (getActiveSessionId()) {
+      statusBar?.registerStatusItem("@cybershuttle/jupyter:walltime-status", {
+        align: "right",
+        rank: 100,
+        item: new WalltimeStatus(panel),
+      });
+    }
     let current: MainWidget | undefined;
     const asLauncher = (widget: Widget | null): MainWidget | undefined =>
       (widget as MainWidget | null)?.content?.hasClass("jp-Launcher")
@@ -53,11 +71,11 @@ export const sessionUiPlugin: JupyterFrontEndPlugin<void> = {
       const content = launcher.content.node.querySelector<HTMLElement>(
         ".jp-Launcher-content",
       );
-      if (panel && content) mount(panel, content);
+      if (content) mount(panel, content);
     };
 
     const releaseFrom = (launcher: MainWidget): void => {
-      if (!panel || !launcher.node.contains(panel.node)) {
+      if (!launcher.node.contains(panel.node)) {
         return;
       }
       if (panel.header.parent === launcher.contentHeader) {
@@ -68,15 +86,6 @@ export const sessionUiPlugin: JupyterFrontEndPlugin<void> = {
 
     const wiredLaunchers = new WeakSet<MainWidget>();
     const attachLauncher = (launcher: MainWidget): void => {
-      if (!panel || panel.isDisposed) {
-        panel = new CyberShuttlePanel(api, controller);
-        const candidate = panel;
-        void candidate.restored.then(() => {
-          if (!candidate.state.signedIn && !location.search) {
-            void offerSignIn(candidate);
-          }
-        });
-      }
       if (panel.header.parent !== launcher.contentHeader) {
         launcher.contentHeader.addWidget(panel.header);
         BoxPanel.setSizeBasis(panel.header, launcherHeaderHeight);

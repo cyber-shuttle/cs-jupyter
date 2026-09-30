@@ -1,7 +1,8 @@
 // SSH authentication end to end: the token-bearing WebSocket connector, the
 // terminal that renders an operation's transcript, and the dock that holds it
-// during SSH authentication. A WebSocket cannot carry an Authorization header,
-// so the ID token travels as a subprotocol, refreshed on each open. The console is
+// while withSshAuthentication answers a challenge and retries the refused call
+// once. A WebSocket cannot carry an Authorization header, so the ID token
+// travels as a subprotocol, refreshed on each open. The console is
 // credential-blind, passing prompts and replies straight through to SSH, and
 // the dock attaches to document.body rather than the session detail dialog so
 // closing that dialog cannot destroy it.
@@ -10,12 +11,14 @@ import { Terminal } from "@xterm/xterm";
 import { Widget } from "@lumino/widgets";
 import {
   assertSecureOrLoopback,
+  failsWith,
   parseUrl,
   type ITokenProvider,
   base64UrlEncode,
   type Narrow,
 } from "./Common";
 import type { ServerFrame as WireServerFrame } from "./api/frames";
+import type { PlaneClient } from "./PlaneClient";
 import { element } from "./dom";
 
 const CYBERSHUTTLE_WEBSOCKET_PROTOCOL = "cybershuttle.v1";
@@ -398,5 +401,20 @@ export class SshAuthDock extends Widget {
     const reject = this._pending;
     this._pending = undefined;
     reject?.(reason);
+  }
+}
+
+export async function withSshAuthentication<T>(
+  dock: () => SshAuthDock,
+  api: Pick<PlaneClient, "sshAuthWebSocket">,
+  alias: string,
+  call: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await call();
+  } catch (error) {
+    if (!failsWith("ssh_authentication_required")(error)) throw error;
+    await dock().authenticate(alias, api.sshAuthWebSocket(alias));
+    return call();
   }
 }

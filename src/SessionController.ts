@@ -1,15 +1,12 @@
 // Opens the JupyterLite page for a chosen session. It guards file-open and
 // kernel commands so they refuse to run outside an active session. Switching
 // sessions saves all open documents first, then re-reads the session from
-// cs-plane.
+// cs-plane, since the save can outlast the run the caller chose.
 import type { JupyterFrontEnd } from "@jupyterlab/application";
 import type { Widget } from "@lumino/widgets";
+import type { ISession } from "./Common";
 import { PlaneClient } from "./PlaneClient";
-import {
-  clearSessionAccess,
-  getActiveSessionId,
-  loadSessionAccess,
-} from "./session";
+import { getActiveSessionId } from "./session";
 
 type SessionDestination = (sessionId: string, documentPath?: string) => string;
 
@@ -32,19 +29,9 @@ export class SessionController {
     this._requestedDocumentPath = path;
   }
 
-  async select(sessionId: string, isCurrent: () => boolean): Promise<void> {
-    const session = await this._api.getSession(sessionId);
-    if (!isCurrent()) {
-      return;
-    }
-    if (session.state !== "READY") {
-      throw new Error("Session must be READY.");
-    }
-    if (session.id === getActiveSessionId()) return;
-    if (!loadSessionAccess(session.id, session.seq)) {
-      throw new Error("Jupyter access is not available for selection.");
-    }
+  async select(session: ISession, isCurrent: () => boolean): Promise<void> {
     const previous = getActiveSessionId();
+    if (session.id === previous) return;
     if (previous) {
       if (!this._app.commands.hasCommand("docmanager:save-all")) {
         throw new Error(
@@ -52,26 +39,16 @@ export class SessionController {
         );
       }
       await this._app.commands.execute("docmanager:save-all");
-      if (!isCurrent()) {
-        return;
-      }
+      if (!isCurrent()) return;
       const live = await this._api.getSession(session.id);
       if (!isCurrent()) return;
-      if (
-        live.id !== session.id ||
-        live.seq !== session.seq ||
-        live.state !== "READY" ||
-        !loadSessionAccess(live.id, live.seq)
-      ) {
+      if (live.seq !== session.seq || live.state !== "READY") {
         throw new Error("Session changed before selection completed.");
       }
     }
     const documentPath =
       this._requestedDocumentPath ?? this._activeDocumentContext()?.path;
     this._requestedDocumentPath = undefined;
-    if (previous && previous !== session.id) {
-      clearSessionAccess(previous);
-    }
     this._navigate(this._destination(session.id, documentPath));
   }
 

@@ -20,7 +20,7 @@ may reach a session; findings about those decisions belong to
 
 | Property                                                                                                                                         | Code                                  |
 | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------- |
-| Sign-in tokens and session grants live only in per-tab `sessionStorage`, never `localStorage`                                                    | `src/AuthClient.ts`, `src/session.ts` |
+| Sign-in tokens live only in per-tab `sessionStorage`, never `localStorage`; session grants stay in memory                                        | `src/AuthClient.ts`, `src/index.ts`   |
 | cs-plane calls are pinned to the configured origin; the ID token never enters a URL, log or error; the SSH WebSocket carries it as a subprotocol | `src/PlaneClient.ts`, `src/ssh.ts`    |
 | A session's Jupyter URI must be `sessions/<id>/jupyter/` under the configured cs-plane API URL                                                   | `src/PlaneClient.ts`                  |
 | Responses are validated; a missing or mistyped field fails, and grants and tokens also refuse unknown keys                                       | `src/PlaneClient.ts`, `src/Common.ts` |

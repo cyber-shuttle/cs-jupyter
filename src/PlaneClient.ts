@@ -14,12 +14,6 @@ import type * as devtunnels from "./api/devtunnels";
 import { AuthClient } from "./AuthClient";
 import { OAuthWebSocketFactory, type OAuthWebSocketConnector } from "./ssh";
 import {
-  clearAllSessionAccess,
-  clearSessionAccess,
-  type ISessionAccess,
-  validateSessionAccess,
-} from "./session";
-import {
   IGres,
   ILogLine,
   IUsageSample,
@@ -43,8 +37,11 @@ import {
   TRANSPORTS,
   VALIDATION_STATUSES,
   expect,
+  failsWith,
   isPlainObject,
   jsonResponse,
+  parseJson,
+  planeError,
   requestUrl,
   vArray,
   vBoolean,
@@ -69,6 +66,8 @@ export type ISessionLogTail = Narrow<
   { lines: ILogLine[] }
 >;
 
+export type ISessionAccess = plane.SessionAccessResponse;
+
 export const UNCHANGED = Symbol("cs-plane session list unchanged");
 
 export type ISessionList = Narrow<
@@ -78,25 +77,9 @@ export type ISessionList = Narrow<
 
 export interface IPlaneAuth extends ITokenProvider {
   signIn(): Promise<void>;
-  readonly account?: string | undefined;
+  readonly identity?: string | undefined;
 }
 
-export class PlaneError extends Error {
-  constructor(
-    readonly code: string,
-    message: string,
-    readonly status?: number,
-  ) {
-    super(message);
-  }
-}
-
-const failsWith =
-  (code: string) =>
-  (error: unknown): boolean =>
-    error instanceof PlaneError && error.code === code;
-
-export const needsSshAuthentication = failsWith("ssh_authentication_required");
 export const accessUnavailable = failsWith("session_access_unavailable");
 
 const json = (body: unknown, method = "POST"): RequestInit => ({
@@ -182,14 +165,13 @@ export class PlaneClient {
     await this._auth.acquireToken();
   }
 
-  get account(): string | undefined {
-    return this._auth.account;
+  get identity(): string | undefined {
+    return this._auth.identity;
   }
 
   signOut(): void {
     this._sessionsTag = undefined;
     this._auth.invalidateToken?.();
-    clearAllSessionAccess();
   }
 
   async listSshHosts(): Promise<ISshHost[]> {
@@ -318,17 +300,17 @@ export class PlaneClient {
   }
 
   startSession(id: string): Promise<ISession> {
-    return this._sessionAction(id, "start");
+    return this._sessionAt(id, "/start", { method: "POST" });
   }
 
   stopSession(id: string): Promise<ISession> {
-    return this._sessionAction(id, "stop");
+    return this._sessionAt(id, "/stop", { method: "POST" });
   }
 
   async deleteSession(id: string): Promise<void> {
-    const sessionId = validSessionId(id);
-    await this._request(`sessions/${encoded(sessionId)}`, { method: "DELETE" });
-    clearSessionAccess(sessionId);
+    await this._request(`sessions/${encoded(validSessionId(id))}`, {
+      method: "DELETE",
+    });
   }
 
   async getSessionUsage(id: string): Promise<ISessionSeries> {
@@ -349,9 +331,10 @@ export class PlaneClient {
 
   async getSessionAccess(id: string): Promise<ISessionAccess> {
     const sessionId = validSessionId(id);
-    const access = validateSessionAccess(
-      await this._request(`sessions/${encoded(sessionId)}/access`),
-    );
+    const access = await this._request(`sessions/${encoded(sessionId)}/access`);
+    if (!accessShape(access) || !(Date.parse(access.expiresAt) > Date.now())) {
+      throw new Error("Session access is invalid or expired.");
+    }
     if (
       access.jupyter.uri !==
       URLExt.join(this._base, `sessions/${encoded(sessionId)}/jupyter/`)
@@ -359,12 +342,6 @@ export class PlaneClient {
       throw new Error("cs-plane named a Jupyter proxy outside its own API.");
     }
     return owned(access, access.sessionId, sessionId, "access");
-  }
-
-  private async _sessionAction(id: string, verb: string): Promise<ISession> {
-    const session = await this._sessionAt(id, `/${verb}`, { method: "POST" });
-    clearSessionAccess(session.id);
-    return session;
   }
 
   private async _sessionAt(
@@ -382,21 +359,7 @@ export class PlaneClient {
   private async _send(path: string, init: RequestInit = {}): Promise<Response> {
     const response = await this._fetch(URLExt.join(this._base, path), init);
     if (!response.ok && response.status !== 304) {
-      let message = `cs-plane returned ${response.status}`;
-      let code = "request_failed";
-      try {
-        const value = await response.json();
-        if (isPlainObject(value) && isPlainObject(value.error)) {
-          if (typeof value.error.code === "string") code = value.error.code;
-          if (typeof value.error.message === "string") {
-            message = value.error.message;
-          }
-          if (code === "devtunnels_account_required")
-            message =
-              "Dev Tunnel needs a Dev Tunnels account: connect one under Dev Tunnels in the account menu, or choose Link.";
-        }
-      } catch {}
-      throw new PlaneError(code, message, response.status);
+      throw await planeError(response);
     }
     return response;
   }
@@ -407,14 +370,6 @@ export class PlaneClient {
   ): Promise<unknown> {
     const response = await this._send(path, init);
     return response.status === 204 ? undefined : parseJson(response);
-  }
-}
-
-async function parseJson(response: Response): Promise<unknown> {
-  try {
-    return await response.json();
-  } catch {
-    throw new Error("cs-plane returned invalid JSON.");
   }
 }
 
@@ -435,19 +390,34 @@ async function withoutUnreachableKernelSpecLogos(
   });
 }
 
+const JUPYTER_RELOAD_KEY = "cybershuttle.jupyter-reload.v1";
+
 export function createSessionServerSettings(
-  descriptor: ISessionAccess,
-  options: { fetch?: typeof globalThis.fetch } = {},
+  access: ISessionAccess,
+  {
+    fetch: browserFetch = globalThis.fetch.bind(globalThis),
+    reload = () => window.location.reload(),
+  }: { fetch?: typeof globalThis.fetch; reload?: () => void } = {},
 ): ServerConnection.ISettings {
-  const access = validateSessionAccess(descriptor);
   const baseUrl = access.jupyter.uri;
-  const browserFetch = options.fetch ?? globalThis.fetch.bind(globalThis);
-  const invalidatingFetch: typeof globalThis.fetch = async (input, init) => {
+  const run = `${access.sessionId}/${access.seq}`;
+  const reloadingFetch: typeof globalThis.fetch = async (input, init) => {
     const response = await browserFetch(input, init);
     if (response.status === 401 || response.status === 403) {
-      clearSessionAccess(access.sessionId);
+      if (sessionStorage.getItem(JUPYTER_RELOAD_KEY) === run) {
+        return jsonResponse(
+          {
+            message:
+              "Jupyter refused this session's access again; reopen the session from the Launcher.",
+          },
+          { status: response.status },
+        );
+      }
+      sessionStorage.setItem(JUPYTER_RELOAD_KEY, run);
+      reload();
       return response;
     }
+    if (response.ok) sessionStorage.removeItem(JUPYTER_RELOAD_KEY);
     if (response.ok && requestUrl(input).includes("/api/kernelspecs")) {
       return withoutUnreachableKernelSpecLogos(response);
     }
@@ -456,7 +426,7 @@ export function createSessionServerSettings(
   return ServerConnection.makeSettings({
     appendToken: true,
     baseUrl,
-    fetch: invalidatingFetch,
+    fetch: reloadingFetch,
     token: access.jupyter.token,
     wsUrl: baseUrl.replace(/^http/, "ws"),
   });
@@ -476,6 +446,16 @@ function checkLogBudget(lines: ILogLine[]): void {
     }
   }
 }
+
+const accessShape = vObject<ISessionAccess>(
+  {
+    sessionId: vString(SESSION_ID),
+    seq: vPositiveInt,
+    expiresAt: vString(),
+    jupyter: vObject({ uri: vString(), token: vString(TOKEN_43) }, true),
+  },
+  true,
+);
 
 const validateSessionValidation = expect(
   vObject<ISessionValidation>({
@@ -506,9 +486,9 @@ const jobSpecFields = {
   partition: vString(),
   rootFolder: vString(),
   resources: vObject<ISession["resources"]>({
-    cores: vBoundedInt(2, Number.MAX_SAFE_INTEGER),
-    memoryMb: vBoundedInt(4096, Number.MAX_SAFE_INTEGER),
-    wallMinutes: vBoundedInt(1, 525600),
+    cores: vPositiveInt,
+    memoryMb: vPositiveInt,
+    wallMinutes: vPositiveInt,
     gpuType: vOptional(vString()),
     gpuCount: vOptional(vPositiveInt),
   }),

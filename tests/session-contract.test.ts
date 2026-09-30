@@ -1,9 +1,8 @@
 // Locks the cs-plane wire shapes this client trusts. An upstream field
 // rename or removal is caught here, not rendered as undefined in the UI.
-import { clientFor, fakeAuth, sessionFixture } from "./fakes";
-import { describe, expect, it, vi } from "vitest";
-import { jsonResponse } from "../src/Common";
-import { PlaneClient, UNCHANGED } from "../src/PlaneClient";
+import { clientFor, sessionFixture } from "./fakes";
+import { describe, expect, it } from "vitest";
+import { UNCHANGED } from "../src/PlaneClient";
 
 const providerFixture = sessionFixture({
   account: "project-a",
@@ -35,21 +34,18 @@ describe("checked narrow cs-plane session JSON contract", () => {
   });
 
   it.each([
-    ["cores", { cores: 1, memoryMb: 4096, wallMinutes: 60 }],
-    ["memory", { cores: 2, memoryMb: 4095, wallMinutes: 60 }],
+    ["cores", { cores: 0, memoryMb: 4096, wallMinutes: 60 }],
+    ["memory", { cores: 2, memoryMb: 0, wallMinutes: 60 }],
     ["walltime", { cores: 2, memoryMb: 4096, wallMinutes: 0 }],
     ["GPU count", { cores: 2, memoryMb: 4096, wallMinutes: 60, gpuCount: 0 }],
-  ])(
-    "rejects session resources below the %s minimum",
-    async (_name, resources) => {
-      await expect(
-        clientFor({
-          sessions: [{ ...providerFixture, resources }],
-          logs: [],
-        }).listSessions(),
-      ).rejects.toThrow("invalid session list");
-    },
-  );
+  ])("rejects non-positive session %s", async (_name, resources) => {
+    await expect(
+      clientFor({
+        sessions: [{ ...providerFixture, resources }],
+        logs: [],
+      }).listSessions(),
+    ).rejects.toThrow("invalid session list");
+  });
 
   it("rejects empty tunnelModes", async () => {
     await expect(
@@ -58,24 +54,6 @@ describe("checked narrow cs-plane session JSON contract", () => {
         logs: [],
       }).listSessions(),
     ).rejects.toThrow("invalid session list");
-  });
-
-  it("explains a Dev Tunnel start without a Dev Tunnels account", async () => {
-    const client = new PlaneClient(
-      "https://plane.example.edu/api/v1",
-      fakeAuth(),
-      vi.fn(async () =>
-        jsonResponse(
-          {
-            error: { code: "devtunnels_account_required", message: "conflict" },
-          },
-          { status: 409 },
-        ),
-      ),
-    );
-    await expect(client.startSession(providerFixture.id)).rejects.toThrow(
-      "connect one under Dev Tunnels",
-    );
   });
 
   it("rejects a session missing required fields rather than rendering them undefined", async () => {

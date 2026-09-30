@@ -1,22 +1,11 @@
-// A session's identity, on-screen state, and cached Jupyter access. Identity
-// in the URL is the sessionId or nothing; the run number stays in cs-plane
-// and arrives with the session record. displayState is the one place that
+// A session's URL and on-screen state. The URL carries the sessionId or
+// nothing; the run number stays in cs-plane and arrives with the session
+// record. The active session is the one this page attached to, with the run
+// its Jupyter access was granted for. displayState is the one place that
 // overlays a terminal session being started with SUBMITTING for display.
-// Cached Jupyter access carries the run it was granted for, so a caller that
-// knows the live run can refuse a stale grant, and its Jupyter URI is that
-// session's cs-plane proxy path.
 import type { IUsageSample, IRun, ISession, SessionState } from "./Common";
-import {
-  SESSION_ID,
-  TOKEN_43,
-  isTerminal,
-  vObject,
-  vPositiveInt,
-  vString,
-  validSessionId,
-} from "./Common";
+import { SESSION_ID, isTerminal, validSessionId } from "./Common";
 import type { ISessionLogTail } from "./PlaneClient";
-import type { SessionAccessResponse } from "./api/session";
 
 export function selectedSession(
   search = window.location.search,
@@ -52,14 +41,20 @@ export function sessionLiteUrl(
   return url.toString();
 }
 
-let activeSession: string | undefined;
+type IActiveSession = Pick<ISession, "id" | "seq">;
 
-export function setActiveSessionId(id: string | undefined): void {
-  activeSession = id;
+let activeSession: IActiveSession | undefined;
+
+export function setActiveSession(session: IActiveSession | undefined): void {
+  activeSession = session;
+}
+
+export function getActiveSession(): IActiveSession | undefined {
+  return activeSession;
 }
 
 export function getActiveSessionId(): string | undefined {
-  return activeSession;
+  return activeSession?.id;
 }
 
 type IBusySessionIds = ReadonlyMap<string, "start" | "action">;
@@ -72,12 +67,13 @@ export interface ISessionUiState {
   readonly loading: boolean;
   readonly updatesStatus: string;
   readonly error: string;
+  readonly createBlocked: string;
   readonly busySessionIds: IBusySessionIds;
   readonly connectingSessionId: string | undefined;
   readonly jupyterReady: ReadonlySet<string>;
   readonly signedIn: boolean;
   readonly signingIn: boolean;
-  readonly account: string | undefined;
+  readonly identity: string | undefined;
 }
 
 export const emptyState = (): ISessionUiState => ({
@@ -88,12 +84,13 @@ export const emptyState = (): ISessionUiState => ({
   loading: false,
   updatesStatus: "",
   error: "",
+  createBlocked: "",
   busySessionIds: new Map(),
   connectingSessionId: undefined,
   jupyterReady: new Set(),
   signedIn: false,
   signingIn: false,
-  account: undefined,
+  identity: undefined,
 });
 
 export function displayState(
@@ -105,70 +102,4 @@ export function displayState(
     : session.state;
 }
 
-const ACCESS_CACHE_PREFIX = "cybershuttle.session-access.v1.";
 export const RUN_REPORT_KEY = "cybershuttle.run-report.v1";
-
-export type ISessionAccess = SessionAccessResponse;
-
-const accessShape = vObject<ISessionAccess>(
-  {
-    sessionId: vString(SESSION_ID),
-    seq: vPositiveInt,
-    expiresAt: vString(),
-    jupyter: vObject({ uri: vString(), token: vString(TOKEN_43) }, true),
-  },
-  true,
-);
-
-export function validateSessionAccess(value: unknown): ISessionAccess {
-  if (!accessShape(value) || !(Date.parse(value.expiresAt) > Date.now())) {
-    throw new Error("Session access is invalid or expired.");
-  }
-  return value;
-}
-
-export function cacheSessionAccess(access: ISessionAccess): void {
-  const valid = validateSessionAccess(access);
-  sessionStorage.setItem(
-    accessCacheKey(valid.sessionId),
-    JSON.stringify(valid),
-  );
-}
-
-export function loadSessionAccess(
-  sessionId: string,
-  seq?: number,
-): ISessionAccess | undefined {
-  const key = accessCacheKey(sessionId);
-  const raw = sessionStorage.getItem(key);
-  if (!raw) return undefined;
-  try {
-    const access = validateSessionAccess(JSON.parse(raw));
-    if (
-      access.sessionId !== sessionId ||
-      (seq !== undefined && access.seq !== seq)
-    ) {
-      sessionStorage.removeItem(key);
-      return undefined;
-    }
-    return access;
-  } catch {
-    sessionStorage.removeItem(key);
-    return undefined;
-  }
-}
-
-export function clearSessionAccess(sessionId: string): void {
-  sessionStorage.removeItem(accessCacheKey(sessionId));
-}
-
-export function clearAllSessionAccess(): void {
-  for (let index = sessionStorage.length - 1; index >= 0; index--) {
-    const key = sessionStorage.key(index);
-    if (key?.startsWith(ACCESS_CACHE_PREFIX)) sessionStorage.removeItem(key);
-  }
-}
-
-function accessCacheKey(sessionId: string): string {
-  return `${ACCESS_CACHE_PREFIX}${validSessionId(sessionId)}`;
-}
