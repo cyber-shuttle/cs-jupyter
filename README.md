@@ -8,7 +8,7 @@ terminals run on a [Slurm](https://slurm.schedmd.com/) compute node. You sign in
 [cs-plane](https://github.com/cyber-shuttle/cs-plane) for a session, and JupyterLab talks to the Jupyter server
 inside that job. Nothing computes locally: until a session is `READY` the application fails closed.
 
-Pre-release 0.1.0.
+Pre-release 0.1.1.
 
 ## Requirements
 
