@@ -1,10 +1,14 @@
-// A session's URL and on-screen state. The URL carries the sessionId or
-// nothing; the run number stays in cs-plane and arrives with the session
-// record. The active session is the one this page attached to, with the run
-// its Jupyter access was granted for. displayState is the one place that
-// overlays a terminal session being started with SUBMITTING for display.
-import type { IUsageSample, IRun, ISession, SessionState } from "./Common";
-import { SESSION_ID, isTerminal, validSessionId } from "./Common";
+// A session's URL and on-screen state. The URL carries the session id or
+// nothing. The active session is the one this page attached to. displayState
+// is the one place that overlays a session being launched with SUBMITTED.
+import type {
+  IDeployment,
+  IUsageSample,
+  ISession,
+  SessionState,
+  Schemas,
+} from "./Common";
+import { UUID, clusterLabel, isTerminal } from "./Common";
 import type { ISessionLogTail } from "./PlaneClient";
 
 export function selectedSession(
@@ -13,7 +17,7 @@ export function selectedSession(
   const query = new URLSearchParams(search);
   const sessionId = query.get("session") ?? "";
   const workspace = query.get("workspace") ?? "";
-  return SESSION_ID.test(sessionId) && workspace === sessionId
+  return UUID.test(sessionId) && workspace === sessionId
     ? { sessionId }
     : undefined;
 }
@@ -30,31 +34,24 @@ export function sessionLiteUrl(
   documentPath?: string,
   location: Pick<Location, "href"> = window.location,
 ): string {
-  const id = validSessionId(sessionId);
   const url = new URL(location.href);
   url.search = "";
-  url.searchParams.set("session", id);
-  url.searchParams.set("workspace", id);
+  url.searchParams.set("session", sessionId);
+  url.searchParams.set("workspace", sessionId);
   documentPath
     ? url.searchParams.set("path", documentPath)
     : url.searchParams.delete("path");
   return url.toString();
 }
 
-type IActiveSession = Pick<ISession, "id" | "seq">;
+let activeSessionId: string | undefined;
 
-let activeSession: IActiveSession | undefined;
-
-export function setActiveSession(session: IActiveSession | undefined): void {
-  activeSession = session;
-}
-
-export function getActiveSession(): IActiveSession | undefined {
-  return activeSession;
+export function setActiveSession(id: string | undefined): void {
+  activeSessionId = id;
 }
 
 export function getActiveSessionId(): string | undefined {
-  return activeSession?.id;
+  return activeSessionId;
 }
 
 type IBusySessionIds = ReadonlyMap<string, "start" | "action">;
@@ -63,7 +60,9 @@ export interface ISessionUiState {
   readonly sessions: readonly ISession[];
   readonly logs: ReadonlyMap<string, ISessionLogTail>;
   readonly samples: ReadonlyMap<string, readonly IUsageSample[]>;
-  readonly runs: readonly IRun[];
+  readonly runs: readonly ISession[];
+  readonly clusters: readonly Schemas["SlurmClusterConfigResponse"][];
+  readonly deployments: readonly IDeployment[];
   readonly loading: boolean;
   readonly updatesStatus: string;
   readonly error: string;
@@ -81,6 +80,8 @@ export const emptyState = (): ISessionUiState => ({
   logs: new Map(),
   samples: new Map(),
   runs: [],
+  clusters: [],
+  deployments: [],
   loading: false,
   updatesStatus: "",
   error: "",
@@ -98,8 +99,20 @@ export function displayState(
   busy: IBusySessionIds,
 ): SessionState {
   return busy.get(session.id) === "start" && isTerminal(session.state)
-    ? "SUBMITTING"
+    ? "SUBMITTED"
     : session.state;
 }
 
 export const RUN_REPORT_KEY = "cybershuttle.run-report.v1";
+
+export const sessionTitle = (
+  state: Pick<ISessionUiState, "clusters" | "deployments">,
+  session: Pick<ISession, "configId" | "deploymentId">,
+): string =>
+  [
+    clusterLabel(state.clusters, session.configId),
+    state.deployments.find((each) => each.deploymentId === session.deploymentId)
+      ?.name,
+  ]
+    .filter(Boolean)
+    .join(" · ");

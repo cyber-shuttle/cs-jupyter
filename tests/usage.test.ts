@@ -2,19 +2,16 @@
 // cgroup CPU counter only climbs, so cores-busy comes from the rate between two
 // readings. RunHistory must keep keyboard focus on an open disclosure across the
 // sample poll that rebuilds it.
-import { describe, expect, it, vi } from "vitest";
-import type { IUsageSample, IRun, ISession } from "../src/Common";
+import { describe, expect, it } from "vitest";
+import type { IUsageSample, ISession } from "../src/Common";
 import {
-  planeFake,
   PanelStateFake,
-  panelFake,
+  processId,
   runFixture,
   sessionFixture,
-  sessionListFixture,
   uiState,
 } from "./fakes";
 import {
-  accountingState,
   cpuCoreSeries,
   gpuUsage,
   memoryGigabytes,
@@ -29,7 +26,7 @@ const sample = (
   seconds: number,
   over: Partial<IUsageSample> = {},
 ): IUsageSample => ({
-  at: new Date(Date.UTC(2030, 0, 1, 0, 0, seconds)).toISOString(),
+  at: Date.UTC(2030, 0, 1, 0, 0, seconds),
   ...over,
 });
 
@@ -66,10 +63,7 @@ describe("resource samples", () => {
     expect(
       gpuUsage([
         sample(0, {
-          gpus: [
-            { index: 0, utilPct: 12, memUsedMiB: 0, memTotalMiB: 0 },
-            { index: 1, utilPct: 88, memUsedMiB: 0, memTotalMiB: 0 },
-          ],
+          gpus: [{ utilPct: 12 }, { utilPct: 88 }],
         }),
       ]),
     ).toEqual([88]);
@@ -97,17 +91,6 @@ describe("resource samples", () => {
     );
     expect(graphs.map((graph) => graph.label)).toEqual(["CPU", "MEM"]);
   });
-
-  it("graphs a finished run's CPU against Slurm's granted cores, not the request", () => {
-    const graphs = resourceGraphs(
-      {
-        resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 },
-        stats: { cores: 64 },
-      },
-      [sample(0)],
-    );
-    expect(graphs[0].ceiling).toBe(64);
-  });
 });
 
 describe("sparkline", () => {
@@ -122,77 +105,24 @@ describe("sparkline", () => {
 });
 
 describe("run report", () => {
-  it("reports what Slurm's accounting said once it landed", () => {
-    const rows = new Map(
-      runSummary(
-        runFixture({
-          stats: {
-            elapsedSeconds: 5400,
-            maxRss: "2.0 GB",
-            requestedMemory: "4.0 GB",
-            cpuEfficiencyPct: 49.6,
-            memoryEfficiencyPct: 50,
-          },
-        }),
-      ),
-    );
-    expect(rows.get("Ran for")).toBe("1h 30m");
-    expect(rows.get("Peak memory")).toBe("2.0 GB");
-    expect(rows.get("CPU used")).toBe("50% of requested");
-    expect(rows.get("Outcome")).toBe("STOPPED");
-  });
-
-  it("labels Slurm's granted cores distinctly from the requested cores", () => {
-    const rows = new Map(
-      runSummary(
-        runFixture({
-          resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 },
-          stats: { cores: 64, elapsedSeconds: 60 },
-        }),
-      ),
-    );
-    expect(rows.get("Granted cores")).toBe("64");
-    expect(rows.has("Cores")).toBe(false);
-  });
-
-  it("falls back to the wall-clock span and claims no figures it lacks", () => {
+  it("reports the outcome and the wall-clock span", () => {
     const rows = new Map(runSummary(runFixture()));
     expect(rows.get("Ran for")).toBe("1h 0m");
-    expect(rows.has("Peak memory")).toBe(false);
-    expect(rows.has("CPU used")).toBe(false);
-  });
-});
-
-describe("accounting state", () => {
-  const ran = (endedAt: string, stats?: IRun["stats"]): IRun =>
-    ({ endedAt, stats }) as IRun;
-
-  it("is pending only while the flush could still land", () => {
-    const now = Date.parse("2030-01-01T01:00:00Z");
-    expect(accountingState(ran("2030-01-01T00:59:00Z"), now)).toBe("pending");
-    expect(accountingState(ran("2030-01-01T00:00:00Z"), now)).toBe("never");
-    expect(
-      accountingState(ran("2030-01-01T00:00:00Z", { maxRss: "1.0 GB" }), now),
-    ).toBe("present");
+    expect(rows.get("Outcome")).toBe("CANCELLED");
   });
 });
 
 describe("usage plots", () => {
   const session = {
-    id: "s-012345abcdef",
     resources: { cores: 8, memoryMb: 16384, wallMinutes: 60, gpuCount: 2 },
   } as never;
   const samples: IUsageSample[] = [
-    { at: "2030-01-01T00:00:00Z", memBytes: 1024 ** 3, cpuUsageUsec: 0 },
-    {
-      at: "2030-01-01T00:00:05Z",
-      memBytes: 2 * 1024 ** 3,
-      cpuUsageUsec: 10_000_000,
-    },
+    sample(0, { memBytes: 1024 ** 3, cpuUsageUsec: 0 }),
+    sample(5, { memBytes: 2 * 1024 ** 3, cpuUsageUsec: 10_000_000 }),
   ];
 
-  it("stacks titled CPU, MEM and GPU plots, calling out the latest reading live and the peak when finished", async () => {
-    const row = usagePlots(session, samples, "latest");
+  it("stacks titled CPU, MEM and GPU plots, calling out the latest reading", async () => {
+    const row = usagePlots(session, samples);
     expect(
       [...row.querySelectorAll(".csUsageTitle")].map((n) => n.textContent),
     ).toEqual(["CPU", "MEM", "GPU"]);
@@ -202,34 +132,27 @@ describe("usage plots", () => {
     );
     expect(row.querySelectorAll(".csPlotLine").length).toBe(3);
     expect(row.textContent).toContain("2.0 / 16.0 GB");
-    const done = usagePlots(session, samples, "peak");
-    expect(done.textContent).toContain("peak 2.0 / 16.0 GB");
   });
 });
 
 describe("run history view", () => {
-  const finished = runFixture({
-    stats: { maxRss: "2.0 GB", elapsedSeconds: 3600 },
-  });
+  const finished = runFixture();
 
   const live = sessionFixture({
-    id: "s-999999999999",
-    seq: 2,
-    alias: "deltaTest",
+    id: processId(2),
     resources: { cores: 4, memoryMb: 8192, wallMinutes: 120 },
     startedAt: "2030-01-01T00:00:00Z",
   });
 
-  const panelWith = (runs: IRun[], sessions: ISession[]) =>
+  const panelWith = (runs: ISession[], sessions: ISession[]) =>
     new PanelStateFake(uiState({ runs, sessions })) as never;
 
-  it("lists finished runs with their report", async () => {
-    const history = new RunHistory(
-      panelWith([finished], []),
-      `${finished.sessionId}/${finished.seq}`,
-    );
-    expect(history.node.textContent).toContain("delta");
-    expect(history.node.textContent).toContain("2.0 GB");
+  it("lists finished runs with their report, reading the opened one's detail", async () => {
+    const panel = new PanelStateFake(uiState({ runs: [finished] }));
+    const history = new RunHistory(panel as never, finished.id);
+    expect(panel.logWatchers).toContainEqual(new Set([finished.id]));
+    expect(history.node.textContent).toContain("hpc-a");
+    expect(history.node.textContent).toContain("1h 0m");
     expect(history.node.querySelector("details")?.open).toBe(true);
     expect(history.node.querySelector(".csRunReport")).not.toBeNull();
     history.dispose();
@@ -240,64 +163,15 @@ describe("run history view", () => {
     const pills = [...history.node.querySelectorAll(".csSessionState")].map(
       (node) => node.textContent,
     );
-    expect(pills).toEqual(["READY", "STOPPED"]);
+    expect(pills).toEqual(["READY", "CANCELLED"]);
     expect(history.node.textContent).not.toContain("not started yet");
     history.dispose();
   });
 
-  it("filters runs by the platform that launched them", async () => {
-    const vscode = runFixture({
-      sessionId: "s-888888888888",
-      platform: "vscode",
-    });
-    const history = new RunHistory(panelWith([finished, vscode], [live]));
-    const shown = () => history.node.querySelectorAll("details").length;
-    expect(shown()).toBe(3);
-    history.node
-      .querySelector<HTMLButtonElement>(
-        '[data-session-action="platform-vscode"]',
-      )!
-      .click();
-    expect(shown()).toBe(1);
-    history.dispose();
-  });
-
   it("does not list a terminal session as if it were still going", async () => {
-    const stopped = { ...live, state: "STOPPED" } as ISession;
+    const stopped = { ...live, state: "CANCELLED" } as ISession;
     const history = new RunHistory(panelWith([], [stopped]));
     expect(history.node.textContent).toContain("No runs yet.");
     history.dispose();
-  });
-
-  it("keeps distinct keys for a starting session and its finished run", async () => {
-    const stopped = sessionFixture({ state: "STOPPED" });
-    const api = planeFake({
-      listSessions: vi.fn(async () => sessionListFixture([stopped])),
-      listRuns: vi.fn(async () => [
-        runFixture({ sessionId: stopped.id, seq: stopped.seq }),
-      ]),
-      startSession: vi.fn(() => new Promise<never>(() => {})),
-    });
-    const panel = panelFake(api);
-    await panel.restored;
-    await vi.waitFor(() => expect(panel.state.sessions).toHaveLength(1));
-
-    void panel.actions.start(stopped.id);
-    await vi.waitFor(() =>
-      expect(panel.state.busySessionIds.has(stopped.id)).toBe(true),
-    );
-
-    const history = new RunHistory(panel);
-    document.body.appendChild(history.node);
-    const keys = [
-      ...history.node.querySelectorAll<HTMLElement>(
-        "summary[data-session-action]",
-      ),
-    ].map((node) => node.dataset.sessionAction);
-    expect(keys).toEqual([`${stopped.id}/${stopped.seq}`]);
-    expect(history.node.textContent).toContain("SUBMITTING");
-
-    history.dispose();
-    panel.dispose();
   });
 });

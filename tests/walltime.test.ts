@@ -53,12 +53,11 @@ describe("walltime countdown", () => {
 
   it("counts down only for a started session", () => {
     for (const [state, want] of [
-      ["STARTING", true],
+      ["CREATED", false],
+      ["RUNNING", true],
       ["READY", true],
-      ["QUEUED", false],
-      ["SUBMITTING", false],
-      ["STOPPING", false],
-      ["STOPPED", false],
+      ["SUBMITTED", false],
+      ["CANCELLED", false],
       ["FAILED", false],
     ] as const) {
       expect(countsDown(session({ state }))).toBe(want);
@@ -89,7 +88,7 @@ describe("walltime status bar item", () => {
   afterEach(() => setActiveSession(undefined));
 
   const hourJobItem = (overrides: Partial<ISession> = {}) => {
-    setActiveSession({ id: "s-012345abcdef", seq: 1 });
+    setActiveSession(session().id);
     const attached = session({
       startedAt: "2030-01-01T00:00:00Z",
       resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 },
@@ -115,7 +114,7 @@ describe("walltime status bar item", () => {
     expect(low.hasClass("csWalltimeStatusLow")).toBe(true);
     low.dispose();
 
-    const over = hourJobItem({ state: "STOPPED" });
+    const over = hourJobItem({ state: "CANCELLED" });
     expect(over.isHidden).toBe(true);
     expect(over.node.textContent).toBe("");
     over.dispose();

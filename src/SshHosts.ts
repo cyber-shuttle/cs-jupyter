@@ -1,9 +1,8 @@
-// SSH host management dialog: list, add, edit, check and delete entries in
-// ~/.ssh/config. Only entries cs-plane itself wrote can be edited or deleted.
-// Deletion confirms inline, since JupyterLab would otherwise queue a second
-// dialog behind the one already open.
+// Compute host dialog: list, add and delete the caller's cluster configs. Only
+// owned ones delete. Deletion confirms inline, since JupyterLab would otherwise
+// queue a second dialog behind the one already open.
 import { RemoteListWidget } from "./RebuildingWidget";
-import { errorMessage, ISshHostHealth, ISshHost, ISshKey } from "./Common";
+import { configLogin, configName, type Schemas } from "./Common";
 import { PlaneClient } from "./PlaneClient";
 import {
   addSection,
@@ -17,21 +16,12 @@ import {
   select,
 } from "./dom";
 
-interface ISshHostDraft {
-  editing: string;
-  alias: string;
-  command: string;
-  keyId: string;
-}
-
-type ISshHostHealthCheck = Partial<ISshHostHealth> & { busy: boolean };
-
 export class SshHosts extends RemoteListWidget {
-  private _hosts: ISshHost[] = [];
-  private _keys: ISshKey[] = [];
-  private _form: ISshHostDraft | undefined;
+  private _hosts: Schemas["SlurmClusterConfigResponse"][] = [];
+  private _clusters: Schemas["SlurmClusterResponse"][] = [];
+  private _credentials: Schemas["SSHCredentialResponse"][] = [];
+  private _form: Schemas["SlurmClusterConfigRequest"] | undefined;
   private _open = new Set<string>();
-  private _health = new Map<string, ISshHostHealthCheck>();
 
   constructor(private _api: PlaneClient) {
     super();
@@ -42,46 +32,31 @@ export class SshHosts extends RemoteListWidget {
 
   async refresh(): Promise<void> {
     await this._refreshing(async () => {
-      [this._hosts, this._keys] = await Promise.all([
-        this._api.listSshHosts(),
-        this._api.listSshKeys(),
+      [this._hosts, this._clusters, this._credentials] = await Promise.all([
+        this._api.listConfigs(),
+        this._api.listSlurmClusters(),
+        this._api.listCredentials(),
       ]);
     });
   }
 
-  private async _save(form: ISshHostDraft): Promise<void> {
+  private async _save(
+    form: Schemas["SlurmClusterConfigRequest"],
+  ): Promise<void> {
     await this._submitForm(async () => {
-      await (form.editing
-        ? this._api.updateSshHost(form.editing, form.command.trim(), form.keyId)
-        : this._api.addSshHost(
-            form.alias.trim(),
-            form.command.trim(),
-            form.keyId,
-          ));
+      await this._api.addComputeHost({
+        ...form,
+        loginUser: form.loginUser.trim(),
+        workRoot: form.workRoot.trim(),
+      });
       this._form = undefined;
     });
-  }
-
-  private _openForm(form: ISshHostDraft | undefined): void {
-    this._form = form;
-    this._formError = "";
-    this._sync();
-  }
-
-  private async _checkHealth(host: ISshHost): Promise<void> {
-    this._health.set(host.alias, { busy: true });
-    this._sync();
-    const result = await this._api
-      .sshHostHealth(host.alias)
-      .catch((error) => ({ ok: false, message: errorMessage(error) }));
-    this._health.set(host.alias, { busy: false, ...result });
-    this._sync();
   }
 
   protected _rebuild(): void {
     this.node.textContent = "";
     const { root, scroll, card } = dialogBody(
-      "SSH hosts come from your SSH configuration. Add one here, or edit ~/.ssh/config directly.",
+      "Sessions run on a compute host: your login on a cluster.",
       this._error,
     );
     scroll.appendChild(this._addSection());
@@ -90,7 +65,7 @@ export class SshHosts extends RemoteListWidget {
     }
     if (!this._busy && this._hosts.length === 0) {
       card.appendChild(
-        element("div", "No SSH hosts are configured.", "csStatus"),
+        element("div", "No compute hosts are configured.", "csStatus"),
       );
     }
     scroll.appendChild(card);
@@ -98,74 +73,77 @@ export class SshHosts extends RemoteListWidget {
   }
 
   private _addSection(): HTMLElement {
-    const adding = this._form?.editing === "";
     return addSection(
-      "Add SSH Host",
-      "add-ssh-host-toggle",
-      adding && this._form ? this._pasteForm(this._form) : undefined,
-      () =>
-        this._openForm(
-          adding
-            ? undefined
-            : { editing: "", alias: "", command: "", keyId: "" },
-        ),
+      "Add Compute Host",
+      "add-compute-host-toggle",
+      this._form && this._addForm(this._form),
+      () => {
+        this._form = this._form
+          ? undefined
+          : {
+              slurmClusterId: this._clusters[0]?.slurmClusterId ?? "",
+              loginUser: "",
+              workRoot: "",
+              sshCredentialId: this._credentials[0]?.sshCredentialId ?? "",
+            };
+        this._formError = "";
+        this._sync();
+      },
     );
   }
 
-  private _pasteForm(draft: ISshHostDraft): HTMLElement {
+  private _addForm(draft: Schemas["SlurmClusterConfigRequest"]): HTMLElement {
     const form = element("form", "", "csForm csSshAddForm");
-    const command = element("input", "", "csInput");
-    command.name = "sshHostCommand";
-    command.dataset.sessionAction = "ssh-host-command";
-    command.required = true;
-    command.placeholder = "ssh -p 2222 me@delta.example.edu";
-    command.value = draft.command;
-    command.oninput = () => (draft.command = command.value);
+    const cluster = select(
+      "computeHostCluster",
+      this._clusters.map((each) => [
+        each.slurmClusterId,
+        `${each.clusterName} (${each.headnodeHost}:${each.headnodePort})`,
+      ]),
+    );
+    cluster.dataset.sessionAction = "compute-host-cluster";
+    cluster.value = draft.slurmClusterId;
+    cluster.onchange = () => (draft.slurmClusterId = cluster.value);
+    const loginUser = element("input", "", "csInput");
+    loginUser.name = "computeHostLoginUser";
+    loginUser.dataset.sessionAction = "compute-host-login-user";
+    loginUser.required = true;
+    loginUser.placeholder = "me";
+    loginUser.value = draft.loginUser;
+    loginUser.oninput = () => (draft.loginUser = loginUser.value);
+    const workRoot = element("input", "", "csInput");
+    workRoot.name = "computeHostWorkRoot";
+    workRoot.dataset.sessionAction = "compute-host-work-root";
+    workRoot.required = true;
+    workRoot.placeholder = "/home/me/cybershuttle";
+    workRoot.value = draft.workRoot;
+    workRoot.oninput = () => (draft.workRoot = workRoot.value);
+    const credential = select(
+      "computeHostCredential",
+      this._credentials.map((each) => [
+        each.sshCredentialId,
+        each.sshCredentialName,
+      ]),
+    );
+    credential.dataset.sessionAction = "compute-host-credential";
+    credential.value = draft.sshCredentialId;
+    credential.onchange = () => (draft.sshCredentialId = credential.value);
     const help = element(
       "div",
-      "Paste the ssh command that already works. Hostname, user, port, identity, jump host, and -o options are kept.",
-      "csFieldHelp",
-    );
-    const key = select(
-      "sshHostKey",
-      [
-        ["", "None"],
-        ...this._keys.map((stored): [string, string] => [stored.id, stored.id]),
-      ],
-      false,
-    );
-    key.dataset.sessionAction = "ssh-host-key";
-    key.value = draft.keyId;
-    key.onchange = () => (draft.keyId = key.value);
-    const keyHelp = element(
-      "div",
-      "SSH authentication to this SSH host uses the stored SSH key in place of any -i identity.",
+      "Logins to this compute host use the credential; add one under Credentials.",
       "csFieldHelp",
     );
     const [error, footer] = formFooter(
       this._formError,
-      this._saving
-        ? "Saving…"
-        : draft.editing
-          ? "Save changes"
-          : "Save SSH host",
+      this._saving ? "Saving…" : "Save compute host",
       this._saving,
     );
-    if (!draft.editing) {
-      const alias = element("input", "", "csInput");
-      alias.name = "alias";
-      alias.dataset.sessionAction = "ssh-host-alias";
-      alias.required = true;
-      alias.placeholder = "delta";
-      alias.value = draft.alias;
-      alias.oninput = () => (draft.alias = alias.value);
-      form.appendChild(field("Alias", alias));
-    }
     form.append(
-      field("SSH command", command),
+      field("Cluster", cluster),
+      field("Login user", loginUser),
+      field("Work root", workRoot),
+      field("Credential", credential),
       help,
-      field("SSH key", key),
-      keyHelp,
       error,
       footer,
     );
@@ -178,20 +156,32 @@ export class SshHosts extends RemoteListWidget {
     return form;
   }
 
-  private _hostEntry(host: ISshHost): HTMLElement {
+  private _hostEntry(host: Schemas["SlurmClusterConfigResponse"]): HTMLElement {
+    const id = host.slurmClusterConfigId;
+    const owned = !host.permission;
     const del = button("Delete", "csDangerButton");
-    del.dataset.sessionAction = `delete-${host.alias}`;
-    del.disabled = !host.managed;
+    del.dataset.sessionAction = `delete-${id}`;
+    del.disabled = !owned;
+    if (!owned) del.title = "This compute host is shared with you.";
     del.onclick = (event) => {
       event.preventDefault();
-      this._confirm(host.alias);
+      this._open.add(id);
+      this._confirm(id);
     };
-    const { entry, body } = disclosure(host.alias, this._open, [
-      element("span", host.alias, "csCardTitle"),
-      element("span", hostTarget(host), "csMeta csSshHostTarget"),
-      ...(this._confirming === host.alias ? [] : [del]),
+    const { entry, body } = disclosure(id, this._open, [
+      element("span", configName(host), "csCardTitle"),
+      element(
+        "span",
+        `${configLogin(host)} · ${owned ? "Owned" : "Shared"}`,
+        "csMeta csSshHostTarget",
+      ),
+      ...(this._confirming === id ? [] : [del]),
     ]);
-    for (const [key, value] of hostArguments(host)) {
+    for (const [key, value] of [
+      ["Login user", host.loginUser],
+      ["Work root", host.workRoot],
+      ["Credential", host.sshCredential?.sshCredentialName ?? ""],
+    ]) {
       const row = element("div", "", "csSshArgRow");
       row.append(
         element("span", key, "csSshArgKey"),
@@ -199,99 +189,18 @@ export class SshHosts extends RemoteListWidget {
       );
       body.appendChild(row);
     }
-    const health = this._health.get(host.alias);
-    if (health) {
-      body.appendChild(
-        element(
-          "div",
-          health.busy ? "Connecting…" : (health.message ?? ""),
-          `csSshHostStatus${health.busy ? "" : health.ok ? " csValidationPassed" : " csValidationFailed"}`,
-          { role: "status" },
-        ),
-      );
-    }
-    const actions = element("div", "", "csSshHostActions");
-    if (this._confirming === host.alias) {
+    if (this._confirming === id) {
+      const actions = element("div", "", "csSshHostActions");
       actions.append(
         ...confirmDelete(
-          "Delete this entry from ~/.ssh/config?",
-          host.alias,
+          "Delete this compute host?",
+          id,
           () => this._confirm(""),
-          () =>
-            void this._deleteItem(() => this._api.deleteSshHost(host.alias)),
+          () => void this._deleteItem(() => this._api.deleteComputeHost(id)),
         ),
       );
       body.appendChild(actions);
-      return entry;
-    }
-    const editing = this._form?.editing === host.alias;
-    const healthButton = button(
-      "Check health",
-      "csSecondaryButton",
-      () => void this._checkHealth(host),
-    );
-    healthButton.dataset.sessionAction = `health-${host.alias}`;
-    healthButton.disabled = health?.busy ?? false;
-    const edit = button(editing ? "Cancel" : "Edit", "csSecondaryButton", () =>
-      this._openForm(
-        editing
-          ? undefined
-          : {
-              editing: host.alias,
-              alias: host.alias,
-              command: hostCommand(host),
-              keyId: host.keyId ?? "",
-            },
-      ),
-    );
-    edit.dataset.sessionAction = `edit-${host.alias}`;
-    edit.disabled = !host.managed;
-    if (!host.managed) {
-      const own = "This SSH host comes from your own SSH configuration.";
-      edit.title = own;
-      del.title = own;
-    }
-    actions.append(edit, healthButton);
-    body.appendChild(actions);
-    if (this._form && editing) {
-      body.appendChild(this._pasteForm(this._form));
     }
     return entry;
   }
-}
-
-function hostTarget(host: ISshHost): string {
-  const target = [host.user && `${host.user}@`, host.hostname]
-    .filter(Boolean)
-    .join("");
-  return target || "Uses SSH defaults";
-}
-
-function hostArguments(host: ISshHost): Array<[string, string]> {
-  const rows: Array<[string, string]> = [];
-  if (host.hostname) rows.push(["HostName", host.hostname]);
-  if (host.user) rows.push(["User", host.user]);
-  if (host.port && host.port !== 22) {
-    rows.push(["Port", String(host.port)]);
-  }
-  if (host.keyId) rows.push(["SSH key", host.keyId]);
-  for (const directive of host.extraDirectives) {
-    const [key, ...rest] = directive.trim().split(/\s+/);
-    rows.push([key, rest.join(" ")]);
-  }
-  return rows;
-}
-
-function hostCommand(host: ISshHost): string {
-  const parts = ["ssh"];
-  if (host.port && host.port !== 22) parts.push("-p", String(host.port));
-  for (const [key, value] of hostArguments(host)) {
-    if (["HostName", "User", "Port", "SSH key"].includes(key)) continue;
-    parts.push(
-      ...(key === "ProxyJump" ? ["-J", value] : ["-o", `${key}=${value}`]),
-    );
-  }
-  const target = host.hostname || host.alias;
-  parts.push(host.user ? `${host.user}@${target}` : target);
-  return parts.join(" ");
 }

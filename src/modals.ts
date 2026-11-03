@@ -1,16 +1,9 @@
-// The panel's dialogs: session detail, Add Session, SSH Hosts, SSH Keys, Dev
-// Tunnels and Run History. Each is one view, closed by the dialog's own
-// control, with the view's action instead of a footer. The SSH authentication
-// dock sits at the top of the open dialog but is never the dialog's child,
-// since closing it would destroy the dock; it parks on the body when the
-// dialog goes.
+// The panel's dialogs: session detail, Add Session, Compute Hosts, Credentials
+// and Run History. Each is one view, closed by the dialog's own control, with
+// the view's action instead of a footer.
 import { Dialog } from "@jupyterlab/apputils";
 import { Panel, Widget } from "@lumino/widgets";
-import {
-  errorMessage,
-  type ISessionCreateRequest,
-  type ISshHost,
-} from "./Common";
+import { errorMessage, type IDeployment, type Schemas } from "./Common";
 import { type PlaneClient } from "./PlaneClient";
 import type { CyberShuttlePanel } from "./CyberShuttlePanel";
 import { CreateSessionForm } from "./CreateSessionForm";
@@ -19,9 +12,6 @@ import { RunHistory } from "./RunHistory";
 import { SessionDetail } from "./SessionDetail";
 import { SshHosts } from "./SshHosts";
 import { SshKeys } from "./SshKeys";
-import { SshAuthDock } from "./ssh";
-import { DevTunnelsAccount } from "./DevTunnelsAccount";
-import { mount } from "./dom";
 
 function openDialog(title: string, widget: Widget): Dialog<unknown> {
   widget.addClass("csWorkspaceDialog");
@@ -32,25 +22,12 @@ const launch = (dialog: Dialog<unknown>): Promise<unknown> =>
   dialog.launch().catch(() => undefined);
 
 export class SessionModals {
-  runHistoryOpen = false;
   private _detailDialogs = new Set<Dialog<unknown>>();
-  private _dialogBody: Panel | undefined;
-  private _sshAuthDock: SshAuthDock | undefined;
-  private _createForm: () => CreateSessionForm = () =>
-    new CreateSessionForm(this._api, () => this.sshAuthDock);
-  private _sshHostsWidget: () => SshHosts = () => new SshHosts(this._api);
-  private _sshAuthDockWidget: () => SshAuthDock = () => new SshAuthDock();
 
   constructor(
     private _panel: CyberShuttlePanel,
     private _api: PlaneClient,
   ) {}
-
-  get sshAuthDock(): SshAuthDock {
-    this._sshAuthDock ??= this._sshAuthDockWidget();
-    mount(this._sshAuthDock, this._dialogBody?.node ?? document.body);
-    return this._sshAuthDock;
-  }
 
   rejectDetail(): void {
     for (const dialog of this._detailDialogs) {
@@ -58,22 +35,8 @@ export class SessionModals {
     }
   }
 
-  dispose(): void {
-    this._sshAuthDock?.dispose();
-  }
-
-  private async _launchTracked(
-    dialog: Dialog<unknown>,
-    body: Panel,
-  ): Promise<void> {
+  private async _launchTracked(dialog: Dialog<unknown>): Promise<void> {
     this._detailDialogs.add(dialog);
-    this._dialogBody = body;
-    dialog.disposed.connect(() => {
-      if (this._dialogBody === body) this._dialogBody = undefined;
-      if (this._sshAuthDock?.node.parentElement === body.node) {
-        mount(this._sshAuthDock, document.body);
-      }
-    });
     try {
       await launch(dialog);
     } finally {
@@ -84,14 +47,17 @@ export class SessionModals {
   async openSession(sessionId: string): Promise<void> {
     const body = new Panel();
     body.addWidget(new SessionDetail(this._panel, sessionId));
-    await this._launchTracked(openDialog("CyberShuttle Session", body), body);
+    await this._launchTracked(openDialog("CyberShuttle Session", body));
   }
 
-  async openCreate(hosts: readonly ISshHost[]): Promise<void> {
+  async openCreate(
+    clusters: readonly Schemas["SlurmClusterConfigResponse"][],
+    deployments: readonly IDeployment[],
+  ): Promise<void> {
     const body = new Panel();
-    const form = this._createForm();
+    const form = new CreateSessionForm(this._api);
     body.addWidget(form);
-    form.setHosts([...hosts]);
+    form.setClusters([...clusters], [...deployments]);
     const dialog = openDialog("Add Session", body);
     const show = (widget: Widget): void => {
       for (const child of body.widgets) {
@@ -99,27 +65,19 @@ export class SessionModals {
       }
       widget.activate();
     };
-    form.sshHostsRequested.connect(() => {
-      dialog.reject();
-      void this._panel.openSshHosts();
-    });
     form.createRequested.connect((_sender, intent) => {
       void this._createInDialog(intent, form, body, show);
     });
     show(form);
-    await this._launchTracked(dialog, body);
+    await this._launchTracked(dialog);
   }
 
   async openSshHosts(): Promise<void> {
-    await this._openRefreshing("SSH Hosts", this._sshHostsWidget());
+    await this._openRefreshing("Compute Hosts", new SshHosts(this._api));
   }
 
   async openSshKeys(): Promise<void> {
-    await this._openRefreshing("SSH Keys", new SshKeys(this._api));
-  }
-
-  async openDevTunnelsAccount(): Promise<void> {
-    await this._openRefreshing("Dev Tunnels", new DevTunnelsAccount(this._api));
+    await this._openRefreshing("Credentials", new SshKeys(this._api));
   }
 
   private async _openRefreshing(
@@ -131,13 +89,11 @@ export class SessionModals {
   }
 
   async openRunHistory(open?: string): Promise<void> {
-    this.runHistoryOpen = true;
     await launch(openDialog("Run History", new RunHistory(this._panel, open)));
-    this.runHistoryOpen = false;
   }
 
   private async _createInDialog(
-    request: ISessionCreateRequest,
+    request: Schemas["BatchProcessRequest"],
     form: CreateSessionForm,
     body: Panel,
     show: (widget: Widget) => void,

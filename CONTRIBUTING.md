@@ -7,7 +7,7 @@ No CLA or sign-off. The [Code of Conduct](CODE_OF_CONDUCT.md) applies. Vulnerabi
 ## Setup
 
 Requires [Bun](https://bun.com/), [uv](https://docs.astral.sh/uv/), Python 3.11+, and for `test:browser` only,
-Chromium (`bunx playwright install --with-deps chromium`).
+an installed Google Chrome.
 
 ```bash
 git clone https://github.com/cyber-shuttle/cs-jupyter.git && cd cs-jupyter
@@ -34,7 +34,8 @@ bun run dev
 | `bun run lint`            | `typecheck`, then `prettier --check .`                                         |
 | `bun run test`            | Vitest unit tests (`tests/**/*.test.ts`, jsdom)                                |
 | `bun run test:dist`       | Assert the static contract of the built `dist/`                                |
-| `bun run test:browser`    | Playwright run of `dist/` against fake cs-plane and Jupyter servers            |
+| `bun run test:browser`    | Playwright run of `dist/` against fake CyberShuttle API and Jupyter servers    |
+| `bun run types`           | `src/api/airavata.ts` from `$AIRAVATA_SPEC`, `../airavata` or `.airavata-ref`  |
 | `bun run test:all`        | `test`, `test:dist`, `test:browser`                                            |
 
 `test:dist`, `test:browser` and `test:all` need a prior `bun run build`.
@@ -55,11 +56,11 @@ Each `src/` file opens with a doc comment stating its role. Entry points:
 | Path                             | Role                                                             |
 | -------------------------------- | ---------------------------------------------------------------- |
 | `src/index.ts`                   | Extension plugins; fail-closed server settings                   |
-| `src/PlaneClient.ts`             | cs-plane REST/WebSocket client and response validation           |
-| `src/Common.ts`                  | Shared types, `Validator` vocabulary, identifier and URL rules   |
-| `src/AuthClient.ts`              | CILogon sign-in with PKCE through cs-plane                       |
+| `src/PlaneClient.ts`             | CyberShuttle API client                                          |
+| `src/Common.ts`                  | Shared types, typed client, URL rules                            |
+| `src/AuthClient.ts`              | CILogon sign-in with PKCE through the CyberShuttle API           |
 | `src/CyberShuttlePanel.ts`       | Panel in the Launcher: poll, sign-in state, dialogs              |
-| `tests/session-contract.test.ts` | Pins the cs-plane wire contract; change it with `PlaneClient.ts` |
+| `tests/session-contract.test.ts` | Pins the HTTP API wire contract; change it with `PlaneClient.ts` |
 | `jupyter-lite.json`              | PageConfig of the built site                                     |
 | `jupyter_lite_config.json`       | JupyterLite build configuration                                  |
 

@@ -40,10 +40,10 @@ body:
     validations:
       required: true
   - type: input
-    id: cs-plane
+    id: api-version
     attributes:
-      label: cs-plane version
-      description: Output of `cs version` for the deployment you are using.
+      label: CyberShuttle API version
+      description: The commit the CyberShuttle API you use runs.
     validations:
       required: true
   - type: input

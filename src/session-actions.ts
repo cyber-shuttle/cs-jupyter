@@ -1,19 +1,17 @@
-// The panel's session-lifecycle verbs: create, connect, start, stop, delete,
-// and Jupyter readiness once a session is READY. Readiness means cs-plane
-// granted access for the current run; this page's own session starts ready,
-// and the page a connect opens fetches access again. Stop and delete both
-// cancel the session's Slurm job and confirm first.
+// The panel's session-lifecycle verbs: create, connect, start, stop, and
+// Jupyter readiness once a session's job runs. Readiness means the CyberShuttle
+// API granted access; this page's own session starts ready, and the page a
+// connect opens fetches access again. Stop confirms first.
 import { Dialog, showDialog } from "@jupyterlab/apputils";
 import {
+  clusterLabel,
   errorMessage,
   ISession,
-  ISessionCreateRequest,
-  isTerminal,
-  PlaneError,
+  isRunning,
+  type Schemas,
 } from "./Common";
 import { accessUnavailable, PlaneClient } from "./PlaneClient";
 import type { SessionController } from "./SessionController";
-import { withSshAuthentication, type SshAuthDock } from "./ssh";
 import { getActiveSessionId } from "./session";
 
 interface ISessionActionsHooks {
@@ -21,36 +19,22 @@ interface ISessionActionsHooks {
   emitState: () => void;
   onError: (message: string) => void;
   sessions: () => readonly ISession[];
+  clusters: () => readonly Schemas["SlurmClusterConfigResponse"][];
   replaceSessions: (sessions: ISession[]) => void;
-  sshAuthDock: () => SshAuthDock;
   rejectDetail: () => void;
 }
 
 interface IJupyterOperation {
   sessionId: string;
-  seq: number;
   selection: number;
 }
 
 interface IAccessBackoff {
   ms: number;
   retryAt: number;
-  seq: number;
 }
 
 type BusyKind = "start" | "action";
-
-const deleteMissing = (error: unknown): boolean =>
-  error instanceof PlaneError &&
-  (error.status === 404 || error.code === "session_not_found");
-
-const transientDeleteFailure = (error: unknown): boolean =>
-  error instanceof TypeError ||
-  (error instanceof PlaneError &&
-    (error.code === "session_not_stopped" ||
-      error.status === 408 ||
-      error.status === 429 ||
-      (error.status !== undefined && error.status >= 500)));
 
 async function confirm(
   title: string,
@@ -72,7 +56,6 @@ export class SessionActions {
   private _selection = 0;
   private _busySessionIds = new Map<string, BusyKind>();
   private _busyTokens = new Map<string, number>();
-  private _pendingDeletes = new Set<string>();
   private _connectingSessionId: string | undefined;
   private _jupyterReady = new Set<string>();
   private _jupyterOperations = new Map<string, IJupyterOperation>();
@@ -117,6 +100,10 @@ export class SessionActions {
     return session;
   }
 
+  private _label(session: ISession): string {
+    return clusterLabel(this._hooks.clusters(), session.configId);
+  }
+
   releaseJupyter(id: string): void {
     this._abortJupyter(id);
     this._jupyterReady.delete(id);
@@ -132,11 +119,7 @@ export class SessionActions {
 
   private _beginJupyter(session: ISession): IJupyterOperation {
     this._abortJupyter(session.id);
-    const operation = {
-      sessionId: session.id,
-      seq: session.seq,
-      selection: this._selection,
-    };
+    const operation = { sessionId: session.id, selection: this._selection };
     this._jupyterOperations.set(session.id, operation);
     return operation;
   }
@@ -147,8 +130,8 @@ export class SessionActions {
       !this._hooks.isDisposed() &&
       this._jupyterOperations.get(operation.sessionId) === operation &&
       operation.selection === this._selection &&
-      session?.seq === operation.seq &&
-      session.state === "READY"
+      session !== undefined &&
+      isRunning(session.state)
     );
   }
 
@@ -185,14 +168,11 @@ export class SessionActions {
 
   async refreshJupyter(sessionId: string): Promise<void> {
     const session = this._session(sessionId);
-    if (!session || session.state !== "READY") {
+    if (!session || !isRunning(session.state)) {
       this._accessBackoff.delete(sessionId);
       return;
     }
-    const backoff = this._accessBackoff.get(sessionId);
-    if (backoff?.seq !== session.seq) {
-      this._accessBackoff.delete(sessionId);
-    } else if (Date.now() < backoff.retryAt) {
+    if (Date.now() < (this._accessBackoff.get(sessionId)?.retryAt ?? 0)) {
       return;
     }
     const operation = this._beginJupyter(session);
@@ -211,11 +191,7 @@ export class SessionActions {
         (this._accessBackoff.get(sessionId)?.ms ?? 500) * 2,
         30000,
       );
-      this._accessBackoff.set(sessionId, {
-        ms,
-        retryAt: Date.now() + ms,
-        seq: session.seq,
-      });
+      this._accessBackoff.set(sessionId, { ms, retryAt: Date.now() + ms });
       const message = accessUnavailable(error) ? "" : errorMessage(error);
       this._lastAccessError = message || undefined;
       this._hooks.onError(message);
@@ -230,11 +206,7 @@ export class SessionActions {
     operation: IJupyterOperation,
   ): Promise<void> {
     if (!this._jupyterReady.has(session.id)) {
-      const access = await this._api.getSessionAccess(session.id);
-      if (!this._jupyterOperationCurrent(operation)) return;
-      if (access.seq !== operation.seq) {
-        throw new Error("Session access belongs to another run.");
-      }
+      await this._api.getSessionAccess(session.id);
     }
     if (!this._jupyterOperationCurrent(operation)) return;
     this._jupyterReady.add(session.id);
@@ -295,7 +267,7 @@ export class SessionActions {
     }
   }
 
-  async create(request: ISessionCreateRequest): Promise<ISession> {
+  async create(request: Schemas["BatchProcessRequest"]): Promise<ISession> {
     const session = await this._api.createSession(request);
     const { ok, error } = await this._act(
       session,
@@ -321,7 +293,7 @@ export class SessionActions {
     this._hooks.rejectDetail();
     const confirmed = await confirm(
       "Stop session",
-      `Cancels the Slurm job on ${session.alias}. Anything unsaved in this session's kernels and terminals is lost.`,
+      `Cancels the Slurm job on ${this._label(session)}. Anything unsaved in this session's kernels and terminals is lost.`,
       "Stop",
     );
     if (!confirmed || this._hooks.isDisposed()) {
@@ -336,8 +308,6 @@ export class SessionActions {
     options: {
       apply?: (acted: ISession) => ISession[];
       report?: (error: unknown) => boolean;
-      allowSshAuthentication?: boolean;
-      clearError?: boolean;
       kind?: BusyKind;
     } = {},
   ): Promise<{ ok: boolean; error?: unknown }> {
@@ -347,28 +317,16 @@ export class SessionActions {
           .sessions()
           .map((each) => (each.id === acted.id ? acted : each)),
       report = () => true,
-      allowSshAuthentication = true,
-      clearError = true,
       kind = "action",
     } = options;
-    if (clearError) {
-      this._hooks.onError("");
-    }
+    this._hooks.onError("");
     this.releaseSession(session.id);
     const selection = this._selection;
     const current = (): boolean =>
       selection === this._selection && !this._hooks.isDisposed();
     const release = this._busy(session.id, kind);
     try {
-      const call = () => act(session.id);
-      const acted = await (allowSshAuthentication
-        ? withSshAuthentication(
-            this._hooks.sshAuthDock,
-            this._api,
-            session.alias,
-            call,
-          )
-        : call());
+      const acted = await act(session.id);
       if (current()) {
         this._hooks.replaceSessions(apply(acted));
       }
@@ -377,8 +335,6 @@ export class SessionActions {
       if (current()) {
         if (report(error)) {
           this._hooks.onError(errorMessage(error));
-        } else if (clearError) {
-          this._hooks.onError("");
         }
         this._hooks.emitState();
       }
@@ -388,85 +344,12 @@ export class SessionActions {
     }
   }
 
-  async delete(sessionId: string): Promise<void> {
-    const session = this._selectedSession(sessionId);
-    if (!session) {
-      return;
-    }
-    const live = !isTerminal(session.state);
-    this._hooks.rejectDetail();
-    const confirmed = await confirm(
-      live ? "Stop and delete session" : "Delete session",
-      live
-        ? `${session.rootFolder} on ${session.alias} is ${session.state.toLowerCase()}. Its Slurm job will be stopped now and the session deleted after it ends.`
-        : `Delete ${session.rootFolder} on ${session.alias}? It has already ended.`,
-      live ? "Stop and delete" : "Delete",
-    );
-    if (!confirmed || this._hooks.isDisposed()) {
-      return;
-    }
-    if (live) {
-      const { ok } = await this._act(session, (id) =>
-        this._api.stopSession(id),
-      );
-      if (ok && this._hooks.sessions().some((each) => each.id === sessionId)) {
-        this._pendingDeletes.add(sessionId);
-      }
-      return;
-    }
-    await this._deleteTerminal(session, false);
-  }
-
-  async retryPendingDeletes(): Promise<void> {
-    for (const sessionId of [...this._pendingDeletes]) {
-      const session = this._session(sessionId);
-      if (!session) {
-        this._pendingDeletes.delete(sessionId);
-      } else if (isTerminal(session.state)) {
-        await this._deleteTerminal(session, true);
-      }
-    }
-  }
-
-  private async _deleteTerminal(
-    session: ISession,
-    retry: boolean,
-  ): Promise<void> {
-    if (this._busySessionIds.has(session.id)) {
-      return;
-    }
-    const { ok, error } = await this._act(
-      session,
-      async (id) => {
-        await this._api.deleteSession(id).catch((error) => {
-          if (!deleteMissing(error)) {
-            throw error;
-          }
-        });
-        return session;
-      },
-      {
-        clearError: !retry,
-        allowSshAuthentication: false,
-        apply: () =>
-          this._hooks.sessions().filter((each) => each.id !== session.id),
-        report: (error) => !transientDeleteFailure(error),
-      },
-    );
-    if (!ok && transientDeleteFailure(error)) {
-      this._pendingDeletes.add(session.id);
-    } else {
-      this._pendingDeletes.delete(session.id);
-    }
-  }
-
   dispose(): void {
     this._selection++;
     this._abortAllJupyter();
     this._connectingSessionId = undefined;
     this._busySessionIds = new Map();
     this._busyTokens = new Map();
-    this._pendingDeletes = new Set();
     this._jupyterReady = new Set();
     this._lastAccessError = undefined;
   }

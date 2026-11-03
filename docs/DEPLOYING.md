@@ -1,9 +1,9 @@
 # Deploying
 
 A deployment is the built `dist/` served as static files over HTTPS, plus one configuration key naming its
-cs-plane. cs-plane is deployed separately, for example by [cs-infra](https://github.com/cyber-shuttle/cs-infra);
-the CILogon client is configured there. Any path works: the build uses relative URLs
-(`base_url` is empty in `jupyter_lite_config.json`).
+CyberShuttle API. The CyberShuttle API is deployed separately, for example by
+[cs-infra](https://github.com/cyber-shuttle/cs-infra); the CILogon client is configured there. Any path works:
+the build uses relative URLs (`base_url` is empty in `jupyter_lite_config.json`).
 
 ## 1. Build
 
@@ -25,18 +25,17 @@ In the `jupyter-config-data` object of the served `dist/jupyter-lite.json`:
 
 | Rule                                                             | Reason                                                                      |
 | ---------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| Equals cs-plane's `--public-url` plus `/api/v1`                  | Session Jupyter URIs are accepted only as `sessions/<id>/jupyter/` under it |
+| The CyberShuttle API's `AIRAVATA_PUBLIC_URL` plus `/api/v1`      | App URIs are accepted only as `processes/<id>/proxy/<port>/` under this URL |
 | Absolute HTTPS or loopback HTTP; no credentials, query, fragment | Otherwise rejected at startup                                               |
 | Patched after every build                                        | Ships empty; `tests/distribution.mjs` fails if a value is baked in          |
 
-## 3. Allow this site's origin on cs-plane
+## 3. Configure the CyberShuttle API
 
-cs-plane must list the site's exact origin (scheme, host, port; no path) in `--allowed-origin`, which is
-repeatable, requires one entry and rejects `*`. Otherwise the browser blocks sign-in and every cs-plane request.
-
-```bash
-cs serve ... --allowed-origin https://jupyter.example.edu
-```
+| Setting                         | Value                                                                                       |
+| ------------------------------- | ------------------------------------------------------------------------------------------- |
+| `AIRAVATA_CORS_ALLOWED_ORIGINS` | This site's exact origin; the default `*` admits any                                        |
+| CILogon client redirect URIs    | This site's URL                                                                             |
+| A batch deployment per cluster  | Its run section asks Linkspan for Jupyter, per the CyberShuttle API's `docs/interactive.md` |
 
 ## 4. Verify
 

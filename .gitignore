@@ -22,3 +22,6 @@ dist/
 .pi/
 .pi-subagents/
 CLAUDE.md
+
+# Generated on install by `bun run types`
+src/api/
