@@ -1,7 +1,7 @@
 # Architecture
 
 A static JupyterLite site plus one federated extension (`src/index.ts`). It talks to one origin, the CyberShuttle
-API named by `cybershuttlePlaneApiUrl` ([DEPLOYING.md](DEPLOYING.md)), which also proxies each session's
+API named by `cybershuttlePlaneApiUrl` ([SETTING-UP.md](SETTING-UP.md)), which also proxies each session's
 Jupyter server. The CyberShuttle API does not serve this site, so every call is cross-origin. The routes are defined
 by the spec `bun run types` generates into `src/api/airavata.ts` ([CONTRIBUTING.md](../CONTRIBUTING.md)); every call
 goes through an openapi-fetch client typed by it, so a route or body the spec lacks does not compile.

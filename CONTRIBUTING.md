@@ -18,7 +18,7 @@ bun run dev
 ```
 
 `bun run dev` serves the site from the same `jupyter-lite.json` a deployment uses; set
-`cybershuttlePlaneApiUrl` there as in [docs/DEPLOYING.md](docs/DEPLOYING.md). Loopback HTTP is accepted.
+`cybershuttlePlaneApiUrl` there as in [docs/SETTING-UP.md](docs/SETTING-UP.md#deploying-for-real). Loopback HTTP is accepted.
 
 ## Scripts
 
