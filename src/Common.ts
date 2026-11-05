@@ -1,106 +1,114 @@
-// Types, identifier and URL validation, cs-plane's error envelope, and the
-// Validator vocabulary (vString, vNumber, vObject, ...) cs-plane response
-// shapes are built from.
-// The shapes are cs-plane's own, generated into src/api by `bun run types`;
-// each validator is typed against one, so a field cs-plane adds, drops or
-// makes optional fails the build. vObject ignores keys it does not list, so a
-// newer cs-plane still validates; strict refuses them, for grants and tokens.
-// Optional fields mean not observed or not yet, never a stand-in for false or
-// zero.
+// Types, URL validation and the CyberShuttle API's error envelope. Wire shapes
+// are the server's own, generated into src/api by `bun run types`, and the
+// typed `data` openapi-fetch returns is trusted as is; the view types here are
+// only those the UI derives (a session, a usage sample, a log line).
+import createClient from "openapi-fetch";
+import type { components, paths } from "./api/airavata";
 
-import type * as plane from "./api/session";
-import type * as ssh from "./api/ssh";
+export type Schemas = components["schemas"];
+export type PlaneApi = ReturnType<typeof createClient<paths>>;
 
-export const DEVTUNNELS_PROVIDERS = ["microsoft", "github"] as const;
-export type DevTunnelsProvider = (typeof DEVTUNNELS_PROVIDERS)[number];
+// The spec's paths carry `/api/v1`, so the client is rooted at the server, not the API URL.
+export const planeApi = (
+  base: string,
+  fetch: typeof globalThis.fetch,
+): PlaneApi =>
+  createClient<paths>({ baseUrl: base.replace(/\/api\/v1$/, ""), fetch });
 
-export interface OAuthCredentials {
-  idToken: string;
+export async function unwrap<T>(
+  call: Promise<{ data?: T; error?: unknown; response: Response }>,
+): Promise<T> {
+  const { data, error, response } = await call;
+  if (!response.ok) throw await planeError(response, error);
+  return data as T;
 }
 
-export const SESSION_ID = /^s-[a-f0-9]{12}$/;
+export const UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-export function validSessionId(value: string): string {
-  if (!SESSION_ID.test(value)) {
-    throw new Error("Invalid session id.");
-  }
-  return value;
+export interface IPlaneAuth {
+  acquireToken(): Promise<string>;
+  invalidateToken(): void;
+  signIn(): Promise<void>;
+  readonly identity?: string | undefined;
 }
 
-export interface ITokenProvider {
-  acquireToken(): Promise<OAuthCredentials>;
-  invalidateToken?(): void;
+export type SessionState = Schemas["ProcessStatusType"];
+
+export const isEnded = (state: SessionState): boolean =>
+  state === "COMPLETED" || state === "FAILED" || state === "CANCELLED";
+
+export const isTerminal = (state: SessionState): boolean =>
+  state === "CREATED" || isEnded(state);
+
+// The job has begun; RUNNING can follow READY, since Slurm reports the begin late.
+export const isRunning = (state: SessionState): boolean =>
+  state === "READY" || state === "RUNNING";
+
+export interface ISession {
+  id: string;
+  controlPort: number;
+  configId: string;
+  deploymentId?: string;
+  state: SessionState;
+  account: string;
+  partition?: string;
+  resources: {
+    cores?: number;
+    memoryMb?: number;
+    wallMinutes: number;
+    gpuCount?: number;
+  };
+  startedAt?: string;
+  updatedAt?: string;
+  error?: string;
+}
+export interface IUsageReport {
+  memBytes?: number;
+  cpuUsageUsec?: number;
+  gpus?: Array<{ utilPct?: number }>;
+}
+export type IUsageSample = IUsageReport & { at: number };
+export type ILogLine = { text: string; at: string };
+export interface IGres {
+  name: string;
+  count: number;
+}
+export interface IPartition {
+  name: string;
+  cpuCount?: number;
+  memoryMb?: number;
+  gres: IGres[];
+}
+export interface ISlurmInfo {
+  configId: string;
+  accounts: string[];
+  partitions: IPartition[];
 }
 
-export const TOKEN_43 = /^[A-Za-z0-9_-]{43}$/;
+export type IDeployment = Schemas["BatchDeploymentResponse"] & { name: string };
 
-export const SESSION_STATES = [
-  "SUBMITTING",
-  "QUEUED",
-  "STARTING",
-  "READY",
-  "STOPPING",
-  "STOPPED",
-  "FAILED",
-] as const;
-export type SessionState = (typeof SESSION_STATES)[number];
+export const configName = (
+  config: Schemas["SlurmClusterConfigResponse"],
+): string =>
+  config.name ||
+  config.slurmCluster?.clusterName ||
+  config.slurmClusterConfigId;
 
-export const PLATFORMS = ["jupyterlab", "vscode"] as const;
-type Platform = (typeof PLATFORMS)[number];
-export const PLATFORM_LABEL: Record<Platform, string> = {
-  jupyterlab: "JupyterLab",
-  vscode: "VS Code",
-};
+export const configLogin = (
+  config: Schemas["SlurmClusterConfigResponse"],
+): string =>
+  [config.loginUser, config.sshCredential?.sshCredentialName]
+    .filter(Boolean)
+    .join(" · ");
 
-export const TRANSPORTS = ["devtunnel", "link"] as const;
-export type Transport = (typeof TRANSPORTS)[number];
-export const TRANSPORT_LABEL: Record<Transport, string> = {
-  devtunnel: "Dev Tunnel",
-  link: "Link",
-};
-
-export const VALIDATION_STATUSES = ["PASSED", "FAILED"] as const;
-type SessionValidationStatus = (typeof VALIDATION_STATUSES)[number];
-
-export function isTerminal(state: SessionState): boolean {
-  return state === "STOPPED" || state === "FAILED";
+export function clusterLabel(
+  clusters: readonly Schemas["SlurmClusterConfigResponse"][],
+  id: string,
+): string {
+  const config = clusters.find((each) => each.slurmClusterConfigId === id);
+  return config ? configName(config) : id;
 }
-
-// The generated shapes carry Go's plain strings; Narrow pins the literals cs-plane sends.
-export type Narrow<T, N> = Omit<T, keyof N> & N;
-type LogStream = "status" | "stdout" | "stderr";
-type JobLiterals = { tunnelModes: Transport[] };
-
-export type ISessionCreateRequest = Narrow<
-  plane.CreateRequest,
-  JobLiterals & { idempotencyKey: string }
->;
-export type ISessionValidation = Narrow<
-  plane.ValidationResult,
-  { status: SessionValidationStatus }
->;
-export type ISession = Narrow<
-  plane.SessionResponse,
-  JobLiterals & { state: SessionState; platform: Platform }
->;
-export type IUsageSample = plane.UsageSample;
-export type ISessionSeries = plane.SessionSeries;
-export type IRunStats = plane.RunStats;
-export type ILogLine = Narrow<plane.SessionLogLine, { stream: LogStream }>;
-export type IRun = Narrow<
-  plane.Run,
-  JobLiterals & {
-    platform?: Platform;
-    finalState: SessionState;
-    logs?: ILogLine[];
-  }
->;
-export type ISshHost = ssh.HostEntry;
-export type ISshKey = ssh.SSHKey;
-export type ISshHostHealth = ssh.HostHealth;
-export type IGres = plane.Gres;
-export type IPartition = plane.Partition;
-export type ISlurmInfo = plane.Resource;
 
 export function isPlainObject(value: unknown): value is Record<string, any> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -127,7 +135,9 @@ export function assertSecureOrLoopback(
   insecure: string,
   message: string,
 ): void {
-  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  const loopback =
+    ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) ||
+    url.hostname.endsWith(".localhost");
   if (
     (url.protocol !== secure && !(url.protocol === insecure && loopback)) ||
     url.username ||
@@ -142,7 +152,7 @@ export function assertSecureOrLoopback(
 export function validPlaneApiUrl(configured: string): string {
   const url = parseUrl(
     configured,
-    "cybershuttlePlaneApiUrl must be an absolute cs-plane API URL.",
+    "cybershuttlePlaneApiUrl must be an absolute CyberShuttle API URL.",
   );
   assertSecureOrLoopback(
     url,
@@ -180,113 +190,23 @@ export function errorMessage(error: unknown): string {
 
 export class PlaneError extends Error {
   constructor(
-    readonly code: string,
     message: string,
-    readonly status?: number,
+    readonly status: number,
   ) {
     super(message);
   }
 }
 
-export const failsWith =
-  (code: string) =>
-  (error: unknown): boolean =>
-    error instanceof PlaneError && error.code === code;
-
-export async function parseJson(response: Response): Promise<unknown> {
-  try {
-    return await response.json();
-  } catch {
-    throw new Error("cs-plane returned invalid JSON.");
-  }
-}
-
-export async function planeError(response: Response): Promise<PlaneError> {
-  const value = await response.json().catch(() => undefined);
-  const error =
-    isPlainObject(value) && isPlainObject(value.error) ? value.error : {};
+export async function planeError(
+  response: Response,
+  body?: unknown,
+): Promise<PlaneError> {
+  const value: any = body ?? (await response.json().catch(() => undefined));
+  const message = [value?.message, value?.error].find(
+    (v) => typeof v === "string",
+  );
   return new PlaneError(
-    typeof error.code === "string" ? error.code : "request_failed",
-    typeof error.message === "string"
-      ? error.message
-      : `cs-plane returned ${response.status}`,
+    message ?? `The server returned ${response.status}`,
     response.status,
   );
-}
-
-export type Validator<T> = (value: unknown) => value is T;
-
-export function vString(pattern?: RegExp): Validator<string> {
-  return (v): v is string =>
-    typeof v === "string" && (!pattern || pattern.test(v));
-}
-
-export const vBoolean: Validator<boolean> = (v): v is boolean =>
-  typeof v === "boolean";
-
-export const vNumber: Validator<number> = (v): v is number =>
-  typeof v === "number";
-
-export function vBoundedInt(
-  minimum: number,
-  maximum: number,
-): Validator<number> {
-  return (v): v is number =>
-    typeof v === "number" &&
-    Number.isSafeInteger(v) &&
-    v >= minimum &&
-    v <= maximum;
-}
-
-export const vPositiveInt = vBoundedInt(1, Number.MAX_SAFE_INTEGER);
-
-export function vOptional<T>(field: Validator<T>): Validator<T | undefined> {
-  return (v): v is T | undefined => v === undefined || field(v);
-}
-
-export function vArray<T>(
-  of: Validator<T>,
-  maxLength?: number,
-): Validator<T[]> {
-  return (v): v is T[] =>
-    Array.isArray(v) &&
-    (maxLength === undefined || v.length <= maxLength) &&
-    v.every((item) => of(item));
-}
-
-export function vOneOf<T extends string | boolean>(
-  options: readonly T[],
-): Validator<T> {
-  return (v): v is T => (options as readonly unknown[]).includes(v);
-}
-
-export function vEither<T>(...shapes: Validator<T>[]): Validator<T> {
-  return (v): v is T => shapes.some((shape) => shape(v));
-}
-
-export function vObject<T>(
-  fields: { [K in keyof T]: Validator<T[K]> },
-  strict = false,
-): Validator<T> {
-  const keys = Object.keys(fields);
-  return (v): v is T =>
-    isPlainObject(v) &&
-    (!strict || Object.keys(v).every((key) => keys.includes(key))) &&
-    keys.every((key) =>
-      (fields as Record<string, Validator<unknown>>)[key](
-        (v as Record<string, unknown>)[key],
-      ),
-    );
-}
-
-export function expect<T>(
-  shape: Validator<T>,
-  what: string,
-): (value: unknown) => T {
-  return (value) => {
-    if (!shape(value)) {
-      throw new Error(`cs-plane returned an invalid ${what}.`);
-    }
-    return value;
-  };
 }

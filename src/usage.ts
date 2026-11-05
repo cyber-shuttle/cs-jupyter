@@ -1,9 +1,8 @@
-// Turns raw usage samples and Slurm accounting into series, summaries,
-// CPU/MEM/GPU usage plots (USAGE_SLOTS wide, mirroring cs-plane's window)
-// and the status-bar walltime countdown for the session this page is
-// attached to, drawn from the panel's state and hidden for a queued, stopping
-// or finished session.
-import type { IUsageSample, IRun, IRunStats, ISession } from "./Common";
+// Turns usage samples into series, summaries, CPU/MEM/GPU usage plots
+// (USAGE_SLOTS wide) and the status-bar walltime countdown for the session
+// this page is attached to, drawn from the panel's state and hidden for a
+// queued or finished session.
+import type { IUsageSample, ISession } from "./Common";
 import type { CyberShuttlePanel } from "./CyberShuttlePanel";
 import {
   CLOCK_GLYPH,
@@ -13,7 +12,7 @@ import {
   remainingBadge,
 } from "./dom";
 import { PanelBoundWidget } from "./RebuildingWidget";
-import { getActiveSessionId } from "./session";
+import { getActiveSessionId, sessionTitle } from "./session";
 
 export function cpuCoreSeries(samples: readonly IUsageSample[]): number[] {
   return samples.flatMap((sample, index) => {
@@ -25,8 +24,7 @@ export function cpuCoreSeries(samples: readonly IUsageSample[]): number[] {
     ) {
       return [];
     }
-    const elapsedUsec =
-      (Date.parse(sample.at) - Date.parse(previous.at)) * 1000;
+    const elapsedUsec = (sample.at - previous.at) * 1000;
     return elapsedUsec > 0
       ? [(sample.cpuUsageUsec - previous.cpuUsageUsec) / elapsedUsec]
       : [];
@@ -54,24 +52,25 @@ interface IResourceGraph {
 }
 
 export function resourceGraphs(
-  spec: Pick<ISession, "resources"> & { stats?: IRunStats },
+  spec: Pick<ISession, "resources">,
   samples: readonly IUsageSample[],
 ): IResourceGraph[] {
-  const { cores, memoryMb, gpuCount = 0 } = spec.resources;
-  const cpuCeiling = spec.stats?.cores ?? cores;
+  const { cores = 0, memoryMb = 0, gpuCount = 0 } = spec.resources;
   const memoryGb = memoryMb / 1024;
+  const of = (limit: number, figure: string) => (limit ? ` / ${figure}` : "");
   const graphs: IResourceGraph[] = [
     {
       label: "CPU",
       values: cpuCoreSeries(samples),
-      ceiling: cpuCeiling,
-      format: (value) => `${value.toFixed(1)} / ${cpuCeiling} cores`,
+      ceiling: cores,
+      format: (value) => `${value.toFixed(1)}${of(cores, String(cores))} cores`,
     },
     {
       label: "MEM",
       values: memoryGigabytes(samples),
       ceiling: memoryGb,
-      format: (value) => `${value.toFixed(1)} / ${memoryGb.toFixed(1)} GB`,
+      format: (value) =>
+        `${value.toFixed(1)}${of(memoryGb, memoryGb.toFixed(1))} GB`,
     },
   ];
   if (gpuCount > 0) {
@@ -105,65 +104,35 @@ export function sparklinePoints(
 }
 
 export function sessionSummary(session: ISession): Array<[string, string]> {
-  return [
+  const { cores, memoryMb } = session.resources;
+  const rows: Array<[string, string | undefined]> = [
     ["Partition", session.partition],
-    ["Cores", String(session.resources.cores)],
-    ["Memory", `${session.resources.memoryMb} MB`],
+    ["Cores", cores ? String(cores) : undefined],
+    ["Memory", memoryMb ? `${memoryMb} MB` : undefined],
   ];
+  return rows.filter((row): row is [string, string] => !!row[1]);
 }
 
-export function runSummary(run: IRun): Array<[string, string]> {
-  const rows: Array<[string, string]> = [
-    ["Ended", new Date(run.endedAt).toLocaleString()],
-    ["Outcome", run.finalState],
+export const when = (at: string | undefined): string =>
+  at ? new Date(at).toLocaleString() : "—";
+
+export function runSummary(run: ISession): Array<[string, string]> {
+  return [
+    ["Ended", when(run.updatedAt)],
+    ["Outcome", run.state],
     ["Ran for", elapsedLabel(run)],
   ];
-  const stats: IRunStats = run.stats ?? {};
-  if (stats.cores !== undefined)
-    rows.push(["Granted cores", String(stats.cores)]);
-  if (stats.maxRss) rows.push(["Peak memory", stats.maxRss]);
-  if (stats.requestedMemory) rows.push(["Requested", stats.requestedMemory]);
-  if (stats.cpuEfficiencyPct !== undefined) {
-    rows.push([
-      "CPU used",
-      `${Math.round(stats.cpuEfficiencyPct)}% of requested`,
-    ]);
-  }
-  if (stats.memoryEfficiencyPct !== undefined) {
-    rows.push([
-      "Memory used",
-      `${Math.round(stats.memoryEfficiencyPct)}% of requested`,
-    ]);
-  }
-  return rows;
 }
 
-function elapsedLabel(run: IRun): string {
-  const seconds =
-    run.stats?.elapsedSeconds ??
-    (run.startedAt
-      ? Math.max(
-          0,
-          (Date.parse(run.endedAt) - Date.parse(run.startedAt)) / 1000,
-        )
-      : undefined);
-  return seconds === undefined ? "—" : formatRemaining(seconds * 1000);
+function elapsedLabel(run: ISession): string {
+  return run.startedAt && run.updatedAt
+    ? formatRemaining(
+        Math.max(0, Date.parse(run.updatedAt) - Date.parse(run.startedAt)),
+      )
+    : "—";
 }
 
-const ACCOUNTING_WINDOW_MS = 10 * 60_000;
-
-export function accountingState(
-  run: IRun,
-  now: number,
-): "present" | "pending" | "never" {
-  if (run.stats) return "present";
-  const ended = Date.parse(run.endedAt);
-  return Number.isFinite(ended) && now - ended < ACCOUNTING_WINDOW_MS
-    ? "pending"
-    : "never";
-}
-
-const USAGE_SLOTS = 20;
+export const USAGE_SLOTS = 20;
 
 function plot(points: string, title: string): HTMLElement {
   const holder = element("div", "", "csPlot");
@@ -172,17 +141,13 @@ function plot(points: string, title: string): HTMLElement {
 }
 
 export function usagePlots(
-  spec: Pick<ISession, "resources"> & { stats?: IRunStats },
+  spec: Pick<ISession, "resources">,
   samples: readonly IUsageSample[],
-  mode: "latest" | "peak",
 ): HTMLElement {
-  const prefix = mode === "peak" ? "peak " : "";
-  const reading = mode === "peak" ? peak : latest;
   const row = element("div", "", "csUsageRow");
   for (const graph of resourceGraphs(spec, samples)) {
-    const value = reading(graph.values);
-    const caption =
-      value === undefined ? "—" : `${prefix}${graph.format(value)}`;
+    const value = graph.values.at(-1);
+    const caption = value === undefined ? "—" : graph.format(value);
     const cell = element(
       "figure",
       "",
@@ -204,12 +169,6 @@ export function usagePlots(
   }
   return row;
 }
-
-const latest = (values: number[]): number | undefined =>
-  values[values.length - 1];
-
-const peak = (values: number[]): number | undefined =>
-  values.length ? Math.max(...values) : undefined;
 
 export class WalltimeStatus extends PanelBoundWidget {
   constructor(panel: CyberShuttlePanel) {
@@ -238,7 +197,7 @@ export class WalltimeStatus extends PanelBoundWidget {
     }
     const { label, low } = remainingBadge(session, Date.now());
     this.toggleClass("csWalltimeStatusLow", low);
-    const caption = `${session.alias}: ${label} of the session's ${session.resources.wallMinutes} minutes left`;
+    const caption = `${sessionTitle(this._state, session)}: ${label} of the session's ${session.resources.wallMinutes} minutes left`;
     const item = element("span", "", "csWalltimeStatusItem");
     item.innerHTML = CLOCK_GLYPH;
     item.append(element("span", label));

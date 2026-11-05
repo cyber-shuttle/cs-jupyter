@@ -7,7 +7,7 @@
 // mark.
 import { MessageLoop } from "@lumino/messaging";
 import { Widget } from "@lumino/widgets";
-import type { ILogLine, ISession } from "./Common";
+import { isRunning, type ILogLine, type ISession } from "./Common";
 
 export const LOW_TIME_MS = 10 * 60_000;
 
@@ -25,7 +25,7 @@ export function formatRemaining(ms: number): string {
 }
 
 export const countsDown = (session: ISession): boolean =>
-  session.state === "STARTING" || session.state === "READY";
+  isRunning(session.state);
 
 export function remainingBadge(
   session: ISession,
@@ -33,15 +33,6 @@ export function remainingBadge(
 ): { label: string; low: boolean } {
   const left = remainingMs(session, now);
   return { label: formatRemaining(left), low: left <= LOW_TIME_MS };
-}
-
-export async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 export function element<K extends keyof HTMLElementTagNameMap>(
@@ -266,11 +257,7 @@ export function disclosure(
 }
 
 function logLine(line: ILogLine): HTMLElement {
-  const row = element(
-    "div",
-    "",
-    `csSessionLogLine csSessionLog-${line.stream}`,
-  );
+  const row = element("div", "", "csSessionLogLine");
   const at = new Date(line.at);
   const stamp = Number.isFinite(at.getTime())
     ? at.toLocaleTimeString([], {
@@ -281,7 +268,6 @@ function logLine(line: ILogLine): HTMLElement {
     : "";
   const time = element("time", stamp, "csSessionLogTime");
   if (stamp) time.dateTime = line.at;
-  time.title = line.stream;
   row.append(time, element("span", line.text, "csSessionLogText"));
   return row;
 }

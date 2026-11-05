@@ -21,7 +21,7 @@ assert.ok(
 assert.equal(
   config.cybershuttlePlaneApiUrl,
   "",
-  "cs-plane API URL must be deployment-configured",
+  "cybershuttlePlaneApiUrl must be deployment-configured",
 );
 for (const plugin of [
   "@jupyterlab/services-extension:server-settings",

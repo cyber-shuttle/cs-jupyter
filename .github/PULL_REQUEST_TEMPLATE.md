@@ -14,4 +14,4 @@ What you ran and what it reported.
 
 - [ ] `bun run lint` passes
 - [ ] New behaviour is covered by a test
-- [ ] Documentation updated, if this changes deployment, configuration or the cs-plane wire contract
+- [ ] Documentation updated, if this changes deployment, configuration or the CyberShuttle API wire contract

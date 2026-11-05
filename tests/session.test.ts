@@ -1,6 +1,5 @@
 // The shared PlaneClient used for session lifecycle calls and for building
-// Jupyter server connection settings. Validating a session id before an action
-// avoids reporting a spurious failure for an already-stopped session.
+// Jupyter server connection settings.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PlaneClient, createSessionServerSettings } from "../src/PlaneClient";
 import { jsonResponse, validPlaneApiUrl } from "../src/Common";
@@ -9,18 +8,32 @@ import {
   SessionController,
 } from "../src/SessionController";
 import { selectedSession, sessionLiteUrl } from "../src/session";
+import { SshHosts } from "../src/SshHosts";
+import { SshKeys } from "../src/SshKeys";
 import {
   accessFixture,
+  CLUSTER_ID,
+  clusterFixture,
+  credentialFixture,
+  CREDENTIAL_ID,
+  DEPLOYMENT_ID,
+  deploymentFixture,
   fakeAuth,
   fakeCommandApp,
+  planeFake,
+  PROCESS_ID,
+  processFixture,
+  processId,
   sessionFixture,
+  SLURM_CLUSTER_ID,
+  slurmClusterFixture,
 } from "./fakes";
 
 const auth = fakeAuth("test-delegated-token");
 
-const access = accessFixture("s-012345abcdef", 1, {
-  jupyter: {
-    uri: "http://localhost:3000/gateway/api/v1/sessions/s-012345abcdef/jupyter/",
+const access = accessFixture(PROCESS_ID, {
+  app: {
+    uri: `http://localhost:3000/gateway/api/v1/processes/${PROCESS_ID}/proxy/24001/`,
     token: "A".repeat(43),
   },
 });
@@ -36,7 +49,7 @@ beforeEach(() => {
   window.localStorage.clear();
 });
 
-describe("shared cs-plane client", () => {
+describe("shared CyberShuttle API client", () => {
   function makeClient(browserFetch: typeof globalThis.fetch) {
     return new PlaneClient(
       "http://localhost:3000/gateway/api/v1",
@@ -45,124 +58,151 @@ describe("shared cs-plane client", () => {
     );
   }
 
-  it("uses one exact API for SSH and session operations", async () => {
-    const fetch = vi.fn(
-      async (input: RequestInfo | URL, init?: RequestInit) => {
-        const request = new Request(input, init);
-        const path = new URL(request.url).pathname;
-        if (path === "/gateway/api/v1/hosts") {
-          return jsonResponse({ hosts: [] });
-        }
-        if (path === "/gateway/api/v1/sessions/validate") {
-          return jsonResponse({
-            sessionId: "s-012345abcdef",
-            status: "PASSED",
-            script: "#!/bin/bash\n#SBATCH --partition=debug\n",
-            message: "Validated.",
-            stderr: "",
-          });
-        }
-        if (path === "/gateway/api/v1/sessions" && request.method === "GET") {
-          return jsonResponse({ sessions: [session], logs: [] });
-        }
-        if (path.endsWith("/access")) return jsonResponse(access);
-        return jsonResponse(session);
-      },
-    );
+  it("uses one exact API for discovery, host and session operations", async () => {
+    const own = clusterFixture();
+    const shared = clusterFixture({
+      slurmClusterConfigId: processId(8),
+      name: null,
+      permission: "READ",
+    });
+    const { name: _name, ...deployment } = deploymentFixture();
+    const replies: Record<string, unknown> = {
+      "/slurm-cluster-configs/me": [own],
+      "/slurm-cluster-configs/shared-with-me": [shared],
+      "/slurm-deployments": [{ ...deployment, templateId: processId(9) }],
+      "/application-templates": [
+        { templateId: processId(9), templateName: "JupyterLab" },
+      ],
+      [`/slurm-cluster-configs/${CLUSTER_ID}/discover-allocations`]: {},
+      "/slurm-clusters": [slurmClusterFixture()],
+      "/ssh-credentials": [credentialFixture()],
+      "/processes/me": [processFixture(session)],
+      [`/processes/${PROCESS_ID}/access`]: access,
+      [`/processes/${PROCESS_ID}/proxy/24000/api/v1/usage`]: { memBytes: 1024 },
+    };
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const request = input as Request;
+      const path = new URL(request.url).pathname.slice(
+        "/gateway/api/v1".length,
+      );
+      return request.method === "DELETE"
+        ? new Response(null, { status: 204 })
+        : jsonResponse(replies[path] ?? processFixture(session));
+    });
     const client = makeClient(fetch as any);
-    await client.listSshHosts();
+    await client.resumeSignIn();
+    expect(await client.listConfigs()).toEqual([own, shared]);
+    expect(await client.listDeployments()).toEqual([
+      { ...deploymentFixture(), templateId: processId(9) },
+    ]);
+    await client.discoverSlurm(CLUSTER_ID);
+    expect(await client.listSlurmClusters()).toEqual([slurmClusterFixture()]);
+    expect(await client.listCredentials()).toEqual([credentialFixture()]);
+    const host = {
+      slurmClusterId: SLURM_CLUSTER_ID,
+      loginUser: "me",
+      workRoot: "/home/me",
+      sshCredentialId: CREDENTIAL_ID,
+    };
+    await client.addComputeHost(host);
+    await client.deleteComputeHost(CLUSTER_ID);
+    const credential = {
+      sshCredentialName: "laptop",
+      publicKey: "ssh-ed25519 AAAA me@laptop",
+      privateKey: "PRIVATE KEY TEXT",
+    };
+    await client.addCredential(credential);
+    await client.deleteCredential(CREDENTIAL_ID);
     await client.listSessions();
     const request = {
-      idempotencyKey: "idem",
-      alias: "delta",
-      partition: "debug",
-      rootFolder: "projects/demo",
-      resources: { cores: 1, memoryMb: 1024, wallMinutes: 30 },
-      tunnelModes: ["link" as const],
+      slurmClusterConfigId: CLUSTER_ID,
+      deploymentId: DEPLOYMENT_ID,
+      batchJobConfig: {
+        allocation: "project-a",
+        partition: "debug",
+        cpus: 2,
+        mem: "4096M",
+        wallTimeMinutes: 30,
+      },
     };
-    await client.validateCreateRequest(request);
     await client.createSession(request);
-    await client.getSession(session.id);
-    expect(await client.getSessionAccess(session.id)).toEqual(access);
-    await client.stopSession(session.id);
-    const requests = fetch.mock.calls.map(
-      ([input, init]) => new Request(input, init),
-    );
-    expect(
-      requests.map((item) => `${item.method} ${new URL(item.url).pathname}`),
-    ).toEqual([
-      "GET /gateway/api/v1/hosts",
-      "GET /gateway/api/v1/sessions",
-      "POST /gateway/api/v1/sessions/validate",
-      "POST /gateway/api/v1/sessions",
-      "GET /gateway/api/v1/sessions/s-012345abcdef",
-      "GET /gateway/api/v1/sessions/s-012345abcdef/access",
-      "POST /gateway/api/v1/sessions/s-012345abcdef/stop",
+    await client.startSession(PROCESS_ID);
+    expect((await client.getSession(session.id)).id).toBe(PROCESS_ID);
+    expect(await client.getSessionAccess(PROCESS_ID)).toEqual(access);
+    expect(await client.getSessionUsage(session)).toEqual({ memBytes: 1024 });
+    await client.stopSession(PROCESS_ID);
+    const requests = fetch.mock.calls.map(([input]) => input as Request);
+    const api = "http://localhost:3000/gateway/api/v1";
+    expect(requests.map((item) => `${item.method} ${item.url}`)).toEqual([
+      `GET ${api}/slurm-cluster-configs/me`,
+      `GET ${api}/slurm-cluster-configs/shared-with-me`,
+      `GET ${api}/slurm-deployments`,
+      `GET ${api}/application-templates`,
+      `POST ${api}/slurm-cluster-configs/${CLUSTER_ID}/discover-allocations`,
+      `GET ${api}/slurm-clusters`,
+      `GET ${api}/ssh-credentials`,
+      `POST ${api}/slurm-cluster-configs`,
+      `DELETE ${api}/slurm-cluster-configs/${CLUSTER_ID}`,
+      `POST ${api}/ssh-credentials`,
+      `DELETE ${api}/ssh-credentials/${CREDENTIAL_ID}`,
+      `GET ${api}/processes/me`,
+      `POST ${api}/processes`,
+      `POST ${api}/processes/${PROCESS_ID}/launch`,
+      `GET ${api}/processes/${PROCESS_ID}`,
+      `GET ${api}/processes/${PROCESS_ID}/access`,
+      `GET ${api}/processes/${PROCESS_ID}/proxy/24000/api/v1/usage`,
+      `POST ${api}/processes/${PROCESS_ID}/stop`,
     ]);
+    expect(await requests[7].clone().json()).toEqual(host);
+    expect(await requests[9].clone().json()).toEqual(credential);
+    expect(requests[16].headers.get("Authorization")).toBe(
+      `token ${access.app.token}`,
+    );
+    expect(await requests[12].clone().json()).toEqual({
+      processType: "BATCH_JOB",
+      batchProcess: request,
+    });
   });
 
-  it("rejects a getSession answer for another session", async () => {
+  it("surfaces the server's message on a failed call", async () => {
     const client = makeClient(
       vi.fn(async () =>
-        jsonResponse({ ...session, id: "s-999999999999" }),
+        jsonResponse(
+          { message: "Partition discovery failed" },
+          { status: 502 },
+        ),
       ) as any,
     );
-    await expect(client.getSession(session.id)).rejects.toThrow(
-      "cs-plane returned a session for s-999999999999, not s-012345abcdef.",
-    );
+    await expect(client.discoverSlurm(CLUSTER_ID)).rejects.toMatchObject({
+      message: "Partition discovery failed",
+      status: 502,
+    });
   });
 
-  it("accepts an empty 204 response when deleting a session", async () => {
-    const fetch = vi.fn(
-      async () => new Response(null, { status: 204 }),
-    ) as unknown as typeof globalThis.fetch;
-    const client = makeClient(fetch);
-
-    await expect(client.deleteSession(session.id)).resolves.toBeUndefined();
-
-    const [input, init] = vi.mocked(fetch).mock.calls[0];
-    expect(`${init?.method} ${new URL(String(input)).pathname}`).toBe(
-      `DELETE /gateway/api/v1/sessions/${session.id}`,
+  it("refuses access before the job's link is up, or under a foreign proxy", async () => {
+    const client = makeClient(
+      vi.fn(async () =>
+        jsonResponse({ message: "The job has no link" }, { status: 409 }),
+      ) as any,
     );
-  });
-
-  it("rejects a malformed id before any session request is sent", async () => {
-    const fetch = vi.fn(async () => jsonResponse(access));
-    const client = makeClient(fetch as any);
-    await expect(client.stopSession("s-invalid!")).rejects.toThrow(
-      "Invalid session id.",
-    );
-    await expect(client.getSessionAccess("s-invalid!")).rejects.toThrow(
-      "Invalid session id.",
-    );
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it("rejects an unknown session validation status", async () => {
-    for (const value of [
-      {
-        sessionId: "s-012345abcdef",
-        status: "UNKNOWN",
-        script: "x",
-        message: "x",
-      },
-    ]) {
-      const client = makeClient(vi.fn(async () => jsonResponse(value)) as any);
-      await expect(
-        client.validateCreateRequest({
-          idempotencyKey: "idem",
-          alias: "delta",
-          partition: "debug",
-          rootFolder: ".",
-          resources: { cores: 1, memoryMb: 1024, wallMinutes: 30 },
-          tunnelModes: ["link"],
+    await expect(client.getSessionAccess(PROCESS_ID)).rejects.toMatchObject({
+      status: 409,
+    });
+    const foreign = makeClient(
+      vi.fn(async () =>
+        jsonResponse({
+          ...access,
+          app: { ...access.app, uri: "https://other.example/proxy/" },
         }),
-      ).rejects.toThrow("invalid session validation");
-    }
+      ) as any,
+    );
+    await expect(foreign.getSessionAccess(PROCESS_ID)).rejects.toThrow(
+      "outside its own API",
+    );
   });
 
   it("accepts plain http on every loopback hostname a URL reports, and nowhere else", () => {
-    for (const hostname of ["localhost", "127.0.0.1", "[::1]"]) {
+    for (const hostname of ["localhost", "127.0.0.1", "[::1]", "a.localhost"]) {
       const url = `http://${hostname}:8045/api/v1`;
       expect(validPlaneApiUrl(url)).toBe(url);
     }
@@ -170,15 +210,15 @@ describe("shared cs-plane client", () => {
       "HTTPS or loopback HTTP",
     );
     expect(() => validPlaneApiUrl("/gateway/api/v1")).toThrow(
-      "absolute cs-plane API URL",
+      "absolute CyberShuttle API URL",
     );
   });
 
   it("constructs token-authorized Jupyter HTTP and WebSocket settings", async () => {
     const settings = createSessionServerSettings(access);
-    expect(settings.baseUrl).toBe(access.jupyter.uri);
-    expect(settings.wsUrl).toBe(access.jupyter.uri.replace(/^http/, "ws"));
-    expect(settings.token).toBe(access.jupyter.token);
+    expect(settings.baseUrl).toBe(access.app.uri);
+    expect(settings.wsUrl).toBe(access.app.uri.replace(/^http/, "ws"));
+    expect(settings.token).toBe(access.app.token);
     expect(settings.appendToken).toBe(true);
   });
 
@@ -238,9 +278,7 @@ describe("kernel spec logos", () => {
     const settings = createSessionServerSettings(access, {
       fetch: (async () => jsonResponse(body)) as unknown as typeof fetch,
     });
-    const response = await settings.fetch(
-      `${access.jupyter.uri}api/kernelspecs`,
-    );
+    const response = await settings.fetch(`${access.app.uri}api/kernelspecs`);
     const parsed = await response.json();
     expect(parsed.kernelspecs.python3.resources).toEqual({});
     expect(parsed.kernelspecs.python3.name).toBe("python3");
@@ -248,15 +286,16 @@ describe("kernel spec logos", () => {
 });
 
 describe("native Lite session routing", () => {
-  const id = "s-012345abcdef";
+  const id = sessionFixture().id;
 
   it("selects only a matching session and workspace", () => {
     expect(selectedSession(`?session=${id}&workspace=${id}`)).toEqual({
       sessionId: id,
     });
     expect(
-      selectedSession(`?session=${id}&workspace=s-111111111111`),
+      selectedSession(`?session=${id}&workspace=${CLUSTER_ID}`),
     ).toBeUndefined();
+    expect(selectedSession(`?session=s-abc&workspace=s-abc`)).toBeUndefined();
   });
 
   it("keeps session selection within the current Lite application URL", () => {
@@ -265,7 +304,110 @@ describe("native Lite session routing", () => {
         href: "http://localhost/lite/lab/index.html?old=value",
       }),
     ).toBe(
-      "http://localhost/lite/lab/index.html?session=s-012345abcdef&workspace=s-012345abcdef&path=folder%2Fexample.ipynb",
+      `http://localhost/lite/lab/index.html?session=${id}&workspace=${id}&path=folder%2Fexample.ipynb`,
     );
+  });
+});
+
+describe("compute host and credential dialogs", () => {
+  const toggle = (widget: { node: HTMLElement }, action: string) =>
+    widget.node
+      .querySelector<HTMLButtonElement>(`[data-session-action="${action}"]`)!
+      .click();
+  const control = (widget: { node: HTMLElement }, name: string) =>
+    widget.node.querySelector<HTMLInputElement>(`[name="${name}"]`)!;
+  function fill(
+    widget: { node: HTMLElement },
+    values: Record<string, string>,
+    event = "input",
+  ): void {
+    for (const [name, value] of Object.entries(values)) {
+      control(widget, name).value = value;
+      control(widget, name).dispatchEvent(new Event(event));
+    }
+  }
+
+  it("lists owned and shared compute hosts and adds one", async () => {
+    const api = planeFake({
+      listConfigs: vi.fn(async () => [
+        clusterFixture(),
+        clusterFixture({
+          slurmClusterConfigId: processId(8),
+          permission: "READ",
+        }),
+      ]),
+    });
+    const widget = new SshHosts(api as any);
+    await widget.refresh();
+    const deletes = [
+      ...widget.node.querySelectorAll<HTMLButtonElement>(".csDangerButton"),
+    ];
+    expect(widget.node.textContent).toContain("me · laptop · Owned");
+    expect(widget.node.textContent).toContain("me · laptop · Shared");
+    expect(deletes.map((each) => each.disabled)).toEqual([false, true]);
+    toggle(widget, "add-compute-host-toggle");
+    fill(widget, {
+      computeHostLoginUser: " me ",
+      computeHostWorkRoot: "/home/me",
+    });
+    widget.node.querySelector("form")!.requestSubmit();
+    await vi.waitFor(() =>
+      expect(api.addComputeHost).toHaveBeenCalledWith({
+        slurmClusterId: SLURM_CLUSTER_ID,
+        loginUser: "me",
+        workRoot: "/home/me",
+        sshCredentialId: CREDENTIAL_ID,
+      }),
+    );
+  });
+
+  it("uploads a keypair's private key file into the create request", async () => {
+    const api = planeFake();
+    const widget = new SshKeys(api as any);
+    await widget.refresh();
+    expect(widget.node.textContent).toContain("laptop");
+    toggle(widget, "add-credential-toggle");
+    fill(widget, {
+      credentialName: "laptop",
+      credentialPublicKey: "ssh-ed25519 AAAA me@laptop",
+    });
+    const file = control(widget, "credentialPrivateKey");
+    Object.defineProperty(file, "files", {
+      value: [new File(["PRIVATE KEY TEXT"], "id_ed25519")],
+    });
+    file.dispatchEvent(new Event("change"));
+    widget.node.querySelector("form")!.requestSubmit();
+    await vi.waitFor(() =>
+      expect(api.addCredential).toHaveBeenCalledWith({
+        sshCredentialName: "laptop",
+        publicKey: "ssh-ed25519 AAAA me@laptop",
+        privateKey: "PRIVATE KEY TEXT",
+      }),
+    );
+    expect(widget.node.innerHTML).not.toContain("PRIVATE KEY TEXT");
+  });
+
+  it("saves a password or a prompt-only credential without a keypair", async () => {
+    const api = planeFake();
+    const widget = new SshKeys(api as any);
+    for (const [kind, fields, request] of [
+      ["password", { credentialPassword: "pw" }, { password: "pw" }],
+      ["prompt", {}, { fullInteractive: true }],
+    ] as const) {
+      toggle(widget, "add-credential-toggle");
+      fill(widget, { credentialKind: kind }, "change");
+      expect(control(widget, "credentialPublicKey")).toBeNull();
+      fill(widget, { credentialName: "campus", ...fields });
+      widget.node.querySelector("form")!.requestSubmit();
+      await vi.waitFor(() =>
+        expect(api.addCredential).toHaveBeenLastCalledWith({
+          sshCredentialName: "campus",
+          ...request,
+        }),
+      );
+      await vi.waitFor(() =>
+        expect(widget.node.querySelector("form")).toBeNull(),
+      );
+    }
   });
 });

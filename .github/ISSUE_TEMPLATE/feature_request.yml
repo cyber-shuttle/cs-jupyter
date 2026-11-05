@@ -19,6 +19,6 @@ body:
     id: alternatives
     attributes:
       label: Alternatives considered
-      description: Including anything that would have to change in cs-plane instead.
+      description: Including anything that would have to change in the CyberShuttle API instead.
     validations:
       required: false

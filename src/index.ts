@@ -1,7 +1,7 @@
 // The extension's entry point: JupyterLab service-manager plugins that point
 // every service at the active session's Jupyter server. It fails closed rather than
-// falling back to an unauthenticated default server. cs-plane issues access
-// only once a session is up, so a response from it is the readiness signal.
+// falling back to an unauthenticated default server. The CyberShuttle API issues
+// access only once a session is up, so a response from it is the readiness signal.
 import type { JupyterFrontEndPlugin } from "@jupyterlab/application";
 import { PageConfig } from "@jupyterlab/coreutils";
 import type {
@@ -59,7 +59,7 @@ const IRemoteServerSettings = new Token<ServerConnection.ISettings>(
 
 const planeClientPlugin: JupyterFrontEndPlugin<PlaneClient> = {
   id: "@cybershuttle/jupyter:plane-client",
-  description: "Provide the shared cs-plane API client.",
+  description: "Provide the shared CyberShuttle API client.",
   autoStart: true,
   provides: IPlaneClient,
   activate: () => new PlaneClient(),
@@ -115,7 +115,7 @@ const remoteServerSettingsPlugin: ServiceManagerPlugin<
 > = {
   id: "@cybershuttle/jupyter:remote-server-settings",
   description:
-    "Provide a READY cs-plane session or the fail-closed bootstrap to compute managers.",
+    "Provide a READY session or the fail-closed bootstrap to compute managers.",
   autoStart: true,
   provides: IRemoteServerSettings,
   requires: [IPlaneClient],
@@ -127,7 +127,7 @@ const remoteServerSettingsPlugin: ServiceManagerPlugin<
       }
       const access = await api.getSessionAccess(selected.sessionId);
       PageConfig.setOption("terminalsAvailable", "true");
-      setActiveSession({ id: access.sessionId, seq: access.seq });
+      setActiveSession(access.processId);
       return createSessionServerSettings(access);
     } catch {
       PageConfig.setOption("terminalsAvailable", "false");

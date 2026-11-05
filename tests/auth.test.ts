@@ -14,8 +14,8 @@ const planeApiUrl = "https://plane.example.edu/api/v1";
 
 const config = {
   issuer: "https://cilogon.org",
-  authorizationEndpoint: "https://cilogon.org/authorize",
-  clientId: "cilogon:/client_id/abc",
+  authorization_endpoint: "https://cilogon.org/authorize",
+  client_id: "cilogon:/client_id/abc",
   scope: "openid email profile offline_access",
 };
 
@@ -53,7 +53,7 @@ beforeEach(() => {
 });
 
 describe("AuthClient interactive sign-in", () => {
-  it("builds the authorize URL from cs-plane's config and stores state and verifier", async () => {
+  it("builds the authorize URL from the CyberShuttle API's config and stores state and verifier", async () => {
     const navigate = vi.fn();
     const auth = new AuthClient(planeApiUrl, {
       fetch: fetchSequence([{ body: config }]),
@@ -64,9 +64,9 @@ describe("AuthClient interactive sign-in", () => {
 
     expect(navigate).toHaveBeenCalledTimes(1);
     const url = new URL(navigate.mock.calls[0][0]);
-    expect(url.origin + url.pathname).toBe(config.authorizationEndpoint);
+    expect(url.origin + url.pathname).toBe(config.authorization_endpoint);
     expect(url.searchParams.get("response_type")).toBe("code");
-    expect(url.searchParams.get("client_id")).toBe(config.clientId);
+    expect(url.searchParams.get("client_id")).toBe(config.client_id);
     expect(url.searchParams.get("scope")).toBe(config.scope);
     expect(url.searchParams.get("redirect_uri")).toBe(
       "http://localhost:3000/lite/lab/",
@@ -120,7 +120,7 @@ describe("AuthClient callback exchange", () => {
     setUrl("/lite/lab/?code=auth-code&state=s");
     const auth = new AuthClient(planeApiUrl, {
       fetch: fetchSequence([
-        { body: { idToken: jwt({ sub: "x" }), expiresInSeconds: 900 } },
+        { body: { id_token: jwt({ sub: "x" }), expires_in: 900 } },
       ]),
     });
     await auth.acquireToken();
@@ -133,12 +133,18 @@ describe("AuthClient callback exchange", () => {
     const idToken = jwt({ email: "user@example.edu" });
     const dependencies: IAuthClientDependencies = {
       fetch: fetchSequence([
-        { body: { idToken, refreshToken: "refresh-1", expiresInSeconds: 900 } },
+        {
+          body: {
+            id_token: idToken,
+            refresh_token: "refresh-1",
+            expires_in: 900,
+          },
+        },
       ]),
     };
     const auth = new AuthClient(planeApiUrl, dependencies);
 
-    await expect(auth.acquireToken()).resolves.toEqual({ idToken });
+    await expect(auth.acquireToken()).resolves.toBe(idToken);
     expect(auth.identity).toBe("user@example.edu");
     expect(window.location.search).toBe("");
     expect(sessionStorage.getItem("cybershuttle.oauth.pkce.v1")).toBeNull();
@@ -146,12 +152,12 @@ describe("AuthClient callback exchange", () => {
       JSON.parse(sessionStorage.getItem("cybershuttle.oauth.v1")!),
     ).toMatchObject({ idToken, refreshToken: "refresh-1" });
 
-    const [url, init] = vi.mocked(dependencies.fetch!).mock.calls[0];
-    expect(String(url)).toBe(`${planeApiUrl}/oauth/exchange`);
-    expect(JSON.parse(String(init?.body))).toEqual({
+    const request = vi.mocked(dependencies.fetch!).mock.calls[0][0] as Request;
+    expect(request.url).toBe(`${planeApiUrl}/auth/token`);
+    expect(await request.json()).toEqual({
       code: "auth-code",
-      codeVerifier: "verifier-value",
-      redirectUri: "http://localhost:3000/lite/lab/",
+      code_verifier: "verifier-value",
+      redirect_uri: "http://localhost:3000/lite/lab/",
     });
   });
 
@@ -193,17 +199,19 @@ describe("AuthClient token refresh", () => {
     const second = auth.acquireToken();
     await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
     reply.resolve(
-      new Response(
-        JSON.stringify({ idToken: refreshed, expiresInSeconds: 900 }),
-        { headers: { "content-type": "application/json" } },
-      ),
+      new Response(JSON.stringify({ id_token: refreshed, expires_in: 900 }), {
+        headers: { "content-type": "application/json" },
+      }),
     );
 
     await expect(Promise.all([first, second])).resolves.toEqual([
-      { idToken: refreshed },
-      { idToken: refreshed },
+      refreshed,
+      refreshed,
     ]);
     expect(fetch).toHaveBeenCalledOnce();
+    expect(
+      JSON.parse(sessionStorage.getItem("cybershuttle.oauth.v1")!).refreshToken,
+    ).toBe("refresh-old");
   });
 
   it("does not restore credentials invalidated during refresh", async () => {
@@ -227,8 +235,8 @@ describe("AuthClient token refresh", () => {
     reply.resolve(
       new Response(
         JSON.stringify({
-          idToken: jwt({ sub: "stale" }),
-          expiresInSeconds: 900,
+          id_token: jwt({ sub: "stale" }),
+          expires_in: 900,
         }),
         { headers: { "content-type": "application/json" } },
       ),
@@ -256,9 +264,9 @@ describe("AuthClient token refresh", () => {
       fetch: fetchSequence([
         {
           body: {
-            idToken: refreshed,
-            refreshToken: "refresh-new",
-            expiresInSeconds: 900,
+            id_token: refreshed,
+            refresh_token: "refresh-new",
+            expires_in: 900,
           },
         },
       ]),
@@ -266,11 +274,11 @@ describe("AuthClient token refresh", () => {
     };
     const auth = new AuthClient(planeApiUrl, dependencies);
 
-    await expect(auth.acquireToken()).resolves.toEqual({ idToken: refreshed });
-    const [url, init] = vi.mocked(dependencies.fetch!).mock.calls[0];
-    expect(String(url)).toBe(`${planeApiUrl}/oauth/refresh`);
-    expect(JSON.parse(String(init?.body))).toEqual({
-      refreshToken: "refresh-old",
+    await expect(auth.acquireToken()).resolves.toBe(refreshed);
+    const request = vi.mocked(dependencies.fetch!).mock.calls[0][0] as Request;
+    expect(request.url).toBe(`${planeApiUrl}/auth/token`);
+    expect(await request.json()).toEqual({
+      refresh_token: "refresh-old",
     });
     expect(
       JSON.parse(sessionStorage.getItem("cybershuttle.oauth.v1")!),
@@ -292,7 +300,7 @@ describe("AuthClient token refresh", () => {
       now: () => 0,
     });
 
-    await expect(auth.acquireToken()).resolves.toEqual({ idToken });
+    await expect(auth.acquireToken()).resolves.toBe(idToken);
   });
 
   it("requires interaction once an unrefreshable credential fully expires", async () => {
@@ -336,15 +344,11 @@ describe("AuthClient account claim", () => {
 });
 
 describe("AuthClient credential persistence", () => {
-  it.each([
-    { name: "no id token", record: { expiresAt: 3_600_000 } },
-    {
-      name: "a non-string id token",
-      record: { idToken: 12345, expiresAt: 3_600_000 },
-    },
-    { name: "an expired record", record: { idToken: "x", expiresAt: 0 } },
-  ])("refuses a stored record with $name", async ({ record }) => {
-    sessionStorage.setItem("cybershuttle.oauth.v1", JSON.stringify(record));
+  it("refuses an expired stored record", async () => {
+    sessionStorage.setItem(
+      "cybershuttle.oauth.v1",
+      JSON.stringify({ idToken: "x", expiresAt: 0 }),
+    );
     const auth = new AuthClient(planeApiUrl, {
       fetch: fetchSequence([]),
       now: () => 1_000,
@@ -365,30 +369,7 @@ describe("AuthClient credential persistence", () => {
       fetch: fetchSequence([]),
       now: () => 1_000,
     });
-    await expect(auth.acquireToken()).resolves.toEqual({ idToken });
+    await expect(auth.acquireToken()).resolves.toBe(idToken);
     expect(auth.identity).toBe("person@example.edu");
-  });
-});
-
-describe("AuthClient response validation", () => {
-  it("rejects a malformed exchange response", async () => {
-    for (const reply of [
-      { body: { expiresInSeconds: 900 } },
-      { body: { idToken: "x", expiresInSeconds: 0 } },
-    ]) {
-      sessionStorage.setItem(
-        "cybershuttle.oauth.pkce.v1",
-        JSON.stringify({
-          state: "s",
-          verifier: "v",
-          redirectUri: "http://localhost:3000/lite/lab/",
-        }),
-      );
-      setUrl("/lite/lab/?code=c&state=s");
-      const auth = new AuthClient(planeApiUrl, {
-        fetch: fetchSequence([reply]),
-      });
-      await expect(auth.acquireToken()).rejects.toThrow(/invalid/i);
-    }
   });
 });

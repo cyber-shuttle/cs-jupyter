@@ -43,14 +43,17 @@ export abstract class RebuildingWidget extends Widget {
 
 export abstract class PanelBoundWidget extends RebuildingWidget {
   protected _state: ISessionUiState;
+  protected _logIds = new Set<string>();
 
   constructor(protected _panel: CyberShuttlePanel) {
     super();
     this._state = _panel.state;
     this._panel.stateChanged.connect(this._onStateChanged, this);
+    this._panel.logWatchers.add(this._logIds);
   }
 
   dispose(): void {
+    this._panel.logWatchers.delete(this._logIds);
     this._panel.stateChanged.disconnect(this._onStateChanged, this);
     super.dispose();
   }

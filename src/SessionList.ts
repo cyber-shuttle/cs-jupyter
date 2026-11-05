@@ -1,4 +1,4 @@
-// Renders the Launcher's sessions and header actions. A session's SSH host and
+// Renders the Launcher's sessions and header actions. A session's compute host and
 // job spec sit together as one identity, apart from the rest of the layout. The
 // countdown is the one figure that changes on its own, driven by a shared clock.
 import { caretLeftIcon } from "@jupyterlab/ui-components";
@@ -6,7 +6,12 @@ import { Signal } from "@lumino/signaling";
 import { PanelBoundWidget } from "./RebuildingWidget";
 import type { SessionState, ISession } from "./Common";
 import type { CyberShuttlePanel } from "./CyberShuttlePanel";
-import { displayState, getActiveSessionId, sessionHomeUrl } from "./session";
+import {
+  displayState,
+  getActiveSessionId,
+  sessionHomeUrl,
+  sessionTitle,
+} from "./session";
 import {
   button,
   CLOCK_GLYPH,
@@ -48,7 +53,7 @@ export class SessionList extends PanelBoundWidget {
     const sectionHeader = element("header", "", "jp-Launcher-sectionHeader");
     const sectionTitle = element("h2", "Sessions", "jp-Launcher-sectionTitle");
     const sshHosts = button(
-      "SSH Hosts",
+      "Compute Hosts",
       "csTextButton csSectionHeaderButton",
       () => this.sshHostsRequested.emit(undefined),
     );
@@ -92,7 +97,7 @@ export class SessionList extends PanelBoundWidget {
       section.appendChild(
         element(
           "div",
-          "Sign in to see your sessions and SSH hosts.",
+          "Sign in to see your sessions and compute hosts.",
           "csSignedOutNotice",
         ),
       );
@@ -127,7 +132,8 @@ export class SessionList extends PanelBoundWidget {
       `jp-LauncherCard csSessionCard${current ? " csSessionCardCurrent" : ""}`,
       () => this.sessionRequested.emit(session.id),
     );
-    const caption = `${session.alias}, ${state}${current ? ", current session" : ""}`;
+    const title = sessionTitle(this._state, session);
+    const caption = `${title}, ${state}${current ? ", current session" : ""}`;
     card.setAttribute("aria-label", caption);
     card.title = caption;
     card.dataset.category = "CyberShuttle Sessions";
@@ -138,7 +144,7 @@ export class SessionList extends PanelBoundWidget {
       "jp-LauncherCard-label csSessionCardLabel",
     );
     const identity = element("span", "", "csSessionCardIdentity");
-    identity.append(element("p", session.alias, "csSessionCardTitle"));
+    identity.append(element("p", title, "csSessionCardTitle"));
     if (session.account) {
       identity.append(element("span", session.account, "csSessionCardAccount"));
     }
@@ -188,16 +194,16 @@ function gigabytes(memoryMb: number): string {
 function sessionResourceRow(session: ISession): HTMLElement {
   const { cores, gpuCount = 0, memoryMb } = session.resources;
   const row = element("span", "", "csSessionCardMeta");
-  const measures: Array<[string, string, string]> = [
-    [RESOURCE_GLYPHS.cpu, String(cores), `${cores} CPU`],
-    [RESOURCE_GLYPHS.mem, gigabytes(memoryMb), `${gigabytes(memoryMb)} memory`],
-  ];
+  const measures: Array<[string, string, string]> = [];
+  if (cores) {
+    measures.push([RESOURCE_GLYPHS.cpu, String(cores), `${cores} CPU`]);
+  }
   if (gpuCount) {
-    measures.splice(1, 0, [
-      RESOURCE_GLYPHS.gpu,
-      String(gpuCount),
-      `${gpuCount} GPU`,
-    ]);
+    measures.push([RESOURCE_GLYPHS.gpu, String(gpuCount), `${gpuCount} GPU`]);
+  }
+  if (memoryMb) {
+    const memory = gigabytes(memoryMb);
+    measures.push([RESOURCE_GLYPHS.mem, memory, `${memory} memory`]);
   }
   measures.forEach(([glyph, value, title], index) => {
     if (index > 0) {

@@ -19,87 +19,6 @@
 .csSessionPanel {
   width: 100%;
 }
-.csDeviceCodeOverlay {
-  position: fixed;
-  z-index: 10000;
-  inset: 0;
-  box-sizing: border-box;
-  width: auto;
-  height: auto;
-  max-width: none;
-  max-height: none;
-  margin: 0;
-  border: 0;
-  display: grid;
-  place-items: center;
-  padding: 16px;
-  background: rgb(0 0 0 / 45%);
-}
-.csDeviceCodeDialog {
-  position: relative;
-  box-sizing: border-box;
-  width: min(100%, 480px);
-  padding: 24px;
-  border: 1px solid var(--jp-border-color2);
-  border-radius: 4px;
-  background: var(--jp-layout-color1);
-  color: var(--jp-ui-font-color1);
-  box-shadow: var(--jp-elevation-z6);
-  font-family: var(--jp-ui-font-family);
-}
-.csDeviceCodeDialog h2 {
-  margin: 0 0 12px;
-  font-size: var(--jp-ui-font-size3);
-}
-.csDeviceCode {
-  margin-right: -0.12em;
-  font-size: 1.5rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-}
-
-.csDeviceCodeRow {
-  display: flex;
-  gap: 2px;
-  align-items: center;
-  justify-content: center;
-  margin: 20px 0;
-}
-.csDeviceCodeCopy,
-.csDialogClose {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 4px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--jp-ui-font-color2);
-  cursor: pointer;
-}
-.csDeviceCodeCopy svg,
-.csDialogClose svg {
-  width: 18px;
-  height: 18px;
-}
-.csDeviceCodeCopy:hover,
-.csDeviceCodeCopy:focus-visible,
-.csDialogClose:hover,
-.csDialogClose:focus-visible {
-  background: var(--jp-layout-color2);
-  color: var(--jp-ui-font-color1);
-}
-.csDeviceCodeCopied,
-.csDeviceCodeCopied:hover {
-  color: var(--jp-success-color1);
-}
-.csDialogClose {
-  position: absolute;
-  z-index: 1;
-  top: 12px;
-  right: 12px;
-}
-
 .csDialogSubtitle {
   padding-right: 32px;
   color: var(--jp-ui-font-color2);
@@ -125,23 +44,6 @@
   border: 0;
   border-top: 1px solid var(--jp-border-color2);
   margin: 12px 0;
-}
-.csDeviceCodeOpen {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  text-decoration: none;
-}
-.csDeviceCodeWaiting {
-  pointer-events: none;
-  opacity: 0.75;
-}
-.csDeviceCodeActions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 16px;
 }
 
 .jp-Launcher-content > .csShell,
@@ -189,12 +91,6 @@
 .csStatus,
 .csMeta {
   color: var(--jp-ui-font-color2);
-}
-.csStopping,
-.csValidationStatusBusy {
-  display: flex;
-  align-items: center;
-  gap: 8px;
 }
 .csError {
   color: var(--jp-error-color1);
@@ -463,16 +359,14 @@
   font-size: var(--jp-ui-font-size0);
   font-weight: 700;
 }
-.csSessionState-ready {
+.csSessionState-ready,
+.csSessionState-running {
   background: var(--jp-success-color3);
 }
 .csSessionState-failed {
   background: var(--jp-error-color3);
 }
-.csSessionState-submitting,
-.csSessionState-queued,
-.csSessionState-starting,
-.csSessionState-stopping {
+.csSessionState-submitted {
   background: var(--jp-warn-color3);
 }
 
@@ -503,21 +397,17 @@
   color: var(--jp-ui-font-color3);
 }
 .csSessionState-ready,
-.csSessionCardIcon-ready {
+.csSessionState-running,
+.csSessionCardIcon-ready,
+.csSessionCardIcon-running {
   color: var(--jp-success-color1);
 }
 .csSessionState-failed,
 .csSessionCardIcon-failed {
   color: var(--jp-error-color1);
 }
-.csSessionState-submitting,
-.csSessionState-queued,
-.csSessionState-starting,
-.csSessionState-stopping,
-.csSessionCardIcon-submitting,
-.csSessionCardIcon-queued,
-.csSessionCardIcon-starting,
-.csSessionCardIcon-stopping {
+.csSessionState-submitted,
+.csSessionCardIcon-submitted {
   color: var(--jp-warn-color1);
 }
 .csSessionCardIcon svg {
@@ -609,13 +499,6 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.csSessionLog-status .csSessionLogTime {
-  color: var(--jp-brand-color1);
-}
-.csSessionLog-stderr .csSessionLogTime,
-.csSessionLog-stderr .csSessionLogText {
-  color: var(--jp-error-color1);
-}
 .csCardTitle {
   min-width: 0;
   margin: 0;
@@ -694,83 +577,19 @@
   display: inline-flex;
   padding: 4px 8px;
 }
-.csForm,
-.csSessionReview {
+.csForm {
   display: flex;
   flex-direction: column;
   min-height: 0;
   padding: 14px;
   gap: 12px;
 }
-.csScriptHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-.csSlurmScript,
-.csValidationError {
-  box-sizing: border-box;
-  width: 100%;
-  margin: 0;
-  padding: 12px;
-  overflow: auto;
-  border: 1px solid var(--jp-border-color2);
-  border-radius: 4px;
-  background: var(--jp-layout-color0);
-  color: var(--jp-content-font-color1);
-  font-family: var(--jp-code-font-family);
-  font-size: var(--jp-code-font-size);
-  white-space: pre;
-}
-.csSlurmScript {
-  flex: 1 1 320px;
-  min-height: 240px;
-  max-height: 55vh;
-}
-.csValidationStatus {
-  padding: 10px 12px;
-  border-left: 4px solid var(--jp-border-color1);
-  background: var(--jp-layout-color2);
-  font-weight: 700;
-}
-.csValidationPassed {
-  border-color: var(--jp-success-color1);
-  color: var(--jp-success-color1);
-}
-.csValidationFailed {
-  border-color: var(--jp-error-color1);
-  color: var(--jp-error-color1);
-}
-.csValidationError {
-  max-height: 180px;
-  color: var(--jp-error-color1);
-  white-space: pre-wrap;
-}
-
-.csValidationError.csValidationDetail {
-  color: var(--jp-ui-font-color2);
-}
-
-@media (width <= 640px) {
-  .csSessionReview {
-    padding: 10px;
-  }
-  .csSlurmScript {
-    min-height: 180px;
-  }
-}
-.csStepHeading {
-  margin: 0 0 8px;
-  font-size: var(--jp-ui-font-size3);
-}
 .csResourceType {
   padding: 0;
   margin: 0 0 14px;
   border: 0;
 }
-.csResourceTypeChoices,
-.csPlatformFilter {
+.csResourceTypeChoices {
   display: flex;
   gap: 8px;
 }
@@ -794,10 +613,6 @@
   border-color: var(--jp-brand-color1);
   background: var(--jp-brand-color1);
   color: var(--cs-on-brand);
-}
-.csResourceTypeOption input:disabled + span {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 .csResourceTypeOption input:focus-visible + span {
   outline: 2px solid var(--jp-brand-color1);
@@ -829,31 +644,6 @@
   border: 1px solid var(--jp-border-color2);
   border-radius: 8px;
   background: var(--jp-layout-color1);
-}
-.csDevTunnelsProviders {
-  flex-direction: row;
-  flex-wrap: wrap;
-}
-.csDevTunnelsCard {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 11px;
-  border: 1px solid var(--jp-brand-color1);
-  border-radius: 4px;
-}
-.csDevTunnelsCard svg {
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-}
-.csDevTunnelsAccountName {
-  display: flex;
-  flex-direction: column;
-}
-.csDevTunnelsAccountName .csMeta {
-  margin-top: 0;
 }
 .csSshKeyRow {
   display: flex;
@@ -914,10 +704,6 @@
 .csSshArgValue {
   overflow-wrap: anywhere;
 }
-.csSshHostStatus {
-  margin-top: 8px;
-  font-size: var(--jp-ui-font-size0);
-}
 .csSshHostActions {
   display: flex;
   justify-content: flex-end;
@@ -959,23 +745,6 @@
   overflow: hidden;
   background: var(--jp-layout-color1);
 }
-.csSshAuthDock {
-  margin-bottom: 12px;
-  border: 1px solid var(--jp-border-color2);
-  border-radius: 6px;
-  overflow: hidden;
-  background: var(--jp-layout-color1);
-  box-shadow: var(--jp-elevation-z4);
-}
-body > .csSshAuthDock {
-  position: fixed;
-  z-index: 10001;
-  top: 16px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(100%, 480px);
-  margin: 0;
-}
 .csSshAuthHeader {
   display: flex;
   align-items: center;
@@ -985,10 +754,6 @@ body > .csSshAuthDock {
   background: var(--jp-layout-color2);
 }
 
-.csSshAuthTranscript {
-  padding: 8px;
-  background: #111827;
-}
 .csSshAuth > .csSecondaryButton {
   margin: 0 8px 8px;
 }
@@ -999,11 +764,6 @@ body > .csSshAuthDock {
 }
 .csSshAuthStatus:empty {
   display: none;
-}
-.csSshOperationTerminal {
-  box-sizing: border-box;
-  min-height: 280px;
-  height: min(42vh, 390px);
 }
 .csFormFooter {
   display: flex;
@@ -1024,4 +784,22 @@ body > .csSshAuthDock {
   to {
     transform: rotate(360deg);
   }
+}
+
+.csLoginBanner {
+  margin: 0;
+  max-height: 12em;
+  overflow: auto;
+  font-size: var(--jp-ui-font-size0);
+  white-space: pre-wrap;
+}
+
+.csLoginOverlay {
+  position: fixed;
+  z-index: 10001;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--jp-dialog-background);
 }

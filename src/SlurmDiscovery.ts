@@ -1,15 +1,20 @@
-// Picks an SSH host and discovers its Slurm accounts and partitions. The
-// shared SSH authentication dock owns every interactive SSH exchange; discovery
-// awaits that operation and retries once. SSH host switches and cancellation
-// invalidate the in-flight discovery without taking ownership of the dock.
-import { errorMessage, ISlurmInfo, ISshHost } from "./Common";
+// Picks a compute host and an application on its cluster, and discovers its
+// Slurm accounts and partitions. Host switches and cancellation invalidate the
+// in-flight discovery.
+import {
+  clusterLabel,
+  configLogin,
+  configName,
+  errorMessage,
+  IDeployment,
+  ISlurmInfo,
+  type Schemas,
+} from "./Common";
 import { PlaneClient } from "./PlaneClient";
-import { withSshAuthentication, type SshAuthDock } from "./ssh";
 import { button, element, field, fillOptions, select } from "./dom";
 
 interface ISlurmDiscoveryHooks {
-  onManageHosts: () => void;
-  onHostChange: (alias: string) => void;
+  onClusterChange: (clusterId: string) => void;
   onDiscovered: () => void;
   onCleared: () => void;
   onError: (message: string) => void;
@@ -17,26 +22,43 @@ interface ISlurmDiscoveryHooks {
 }
 
 export class SlurmDiscovery {
-  private _hosts: ISshHost[] = [];
+  private _clusters: Schemas["SlurmClusterConfigResponse"][] = [];
+  private _deployments: IDeployment[] = [];
   slurm: ISlurmInfo | undefined;
-  alias = "";
+  clusterId = "";
+  deploymentId = "";
   preferredAccount: string | undefined;
   private _discoveryAbort: AbortController | undefined;
   account!: HTMLSelectElement;
   accountField!: HTMLElement;
 
-  constructor(
-    private _api: PlaneClient,
-    private _sshAuthDock: () => SshAuthDock,
-  ) {}
+  constructor(private _api: PlaneClient) {}
 
-  setHosts(hosts: ISshHost[]): void {
-    this._hosts = hosts;
+  setClusters(
+    clusters: Schemas["SlurmClusterConfigResponse"][],
+    deployments: IDeployment[],
+  ): void {
+    this._clusters = clusters;
+    this._deployments = deployments;
   }
 
-  selectHost(alias: string): void {
+  get deployments(): IDeployment[] {
+    const cluster = this._clusters.find(
+      (each) => each.slurmClusterConfigId === this.clusterId,
+    );
+    return this._deployments.filter(
+      (each) => cluster && each.slurmClusterId === cluster.slurmClusterId,
+    );
+  }
+
+  get label(): string {
+    return clusterLabel(this._clusters, this.clusterId);
+  }
+
+  selectCluster(clusterId: string): void {
     this.stop();
-    this.alias = alias;
+    this.clusterId = clusterId;
+    this.deploymentId = this.deployments[0]?.deploymentId ?? "";
     this.slurm = undefined;
   }
 
@@ -48,32 +70,38 @@ export class SlurmDiscovery {
   build(hooks: ISlurmDiscoveryHooks): HTMLElement {
     const container = element("div");
 
-    const host = select("alias", [
-      [
-        "",
-        this._hosts.length
-          ? "Select an SSH host…"
-          : "No SSH hosts are configured.",
-      ],
-      ...this._hosts.map(
-        (item) => [item.alias, item.alias] as [string, string],
-      ),
+    const cluster = select("clusterId", [
+      ["", "Select a compute host…"],
+      ...this._clusters.map((each): [string, string] => [
+        each.slurmClusterConfigId,
+        `${configName(each)} (${configLogin(each)})`,
+      ]),
     ]);
-    host.value = this.alias;
-    host.disabled = !this._hosts.length;
-    host.onchange = () => hooks.onHostChange(host.value);
-    container.appendChild(field("SSH host", host));
-    if (!this._hosts.length) {
-      container.appendChild(
-        button("Manage SSH hosts", "csTextButton", hooks.onManageHosts),
+    cluster.value = this.clusterId;
+    cluster.onchange = () => hooks.onClusterChange(cluster.value);
+    container.appendChild(field("Compute host", cluster));
+
+    if (this.clusterId) {
+      const deployments = this.deployments.map((each): [string, string] => [
+        each.deploymentId,
+        each.name,
+      ]);
+      const application = select(
+        "deploymentId",
+        deployments.length
+          ? deployments
+          : [["", "None deployed here; an administrator must add one."]],
       );
+      application.value = this.deploymentId;
+      application.onchange = () => (this.deploymentId = application.value);
+      container.appendChild(field("Application", application));
     }
 
-    this.account = select("account", [], false);
+    this.account = select("account", []);
     this.accountField = field("Slurm account", this.account);
 
     const operationArea = element("section", "", "csSshAuth");
-    operationArea.hidden = !this.alias;
+    operationArea.hidden = !this.clusterId;
     const operationHeader = element("div", "", "csSshAuthHeader");
     const spinner = element("span", "", "csSpinner");
     const operationTitle = element("strong", "Slurm discovery");
@@ -105,47 +133,34 @@ export class SlurmDiscovery {
       clearDependentState();
     };
     const showFailure = (message: string): void => {
-      endOperation(message, `Slurm discovery failed — ${this.alias}`);
+      endOperation(message, `Slurm discovery failed — ${this.label}`);
       hooks.onError(message);
     };
     const applyDiscovery = (value: ISlurmInfo): void => {
       this.slurm = value;
       const preferred = this.preferredAccount;
-      const chosen =
-        preferred === "" || (preferred && value.accounts.includes(preferred))
-          ? preferred
-          : (value.accounts[0] ?? "");
       fillOptions(
         this.account,
-        [
-          ["", "(no Slurm account)"],
-          ...value.accounts.map((item): [string, string] => [item, item]),
-        ],
-        chosen,
+        value.accounts.map((item): [string, string] => [item, item]),
+        preferred && value.accounts.includes(preferred) ? preferred : undefined,
       );
       hooks.onDiscovered();
       this.stop();
       operationArea.hidden = true;
     };
     const startDiscovery = async (): Promise<void> => {
-      const alias = this.alias;
+      const clusterId = this.clusterId;
       clearDependentState();
-      renderPhase("Querying Slurm…", `Connecting to ${alias}.`, true);
+      renderPhase("Querying Slurm…", `Connecting to ${this.label}.`, true);
       this._discoveryAbort?.abort();
       const abort = new AbortController();
       this._discoveryAbort = abort;
       const current = (): boolean =>
-        !abort.signal.aborted && this.alias === alias && !hooks.isDisposed();
+        !abort.signal.aborted &&
+        this.clusterId === clusterId &&
+        !hooks.isDisposed();
       try {
-        const value = await withSshAuthentication(
-          this._sshAuthDock,
-          this._api,
-          alias,
-          () => {
-            abort.signal.throwIfAborted();
-            return this._api.discoverSlurm(alias, abort.signal);
-          },
-        );
+        const value = await this._api.discoverSlurm(clusterId, abort.signal);
         if (current()) {
           applyDiscovery(value);
         }
@@ -162,9 +177,9 @@ export class SlurmDiscovery {
       endOperation("Operation cancelled. Select Retry to continue.");
     };
 
-    if (this.slurm?.alias === this.alias) {
+    if (this.slurm?.configId === this.clusterId) {
       applyDiscovery(this.slurm);
-    } else if (this.alias) {
+    } else if (this.clusterId) {
       startDiscovery();
     }
 

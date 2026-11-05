@@ -1,14 +1,12 @@
 // Every run of this account's sessions, running ones first, then finished ones.
-// The history outlives the sessions in it, so a deleted session's run stays,
-// and a session's current run is itself an entry with no outcome yet.
-// RunReport renders one finished entry's accounting, usage and frozen log.
+// A live session is itself an entry with no outcome yet. RunReport renders one
+// finished entry's summary and frozen log.
 import { PanelBoundWidget } from "./RebuildingWidget";
-import type { IRun, ISession, SessionState } from "./Common";
-import { isTerminal, PLATFORM_LABEL, PLATFORMS } from "./Common";
-import { displayState } from "./session";
+import type { ILogLine, ISession, SessionState } from "./Common";
+import { isTerminal } from "./Common";
 import type { CyberShuttlePanel } from "./CyberShuttlePanel";
+import { sessionTitle } from "./session";
 import {
-  button,
   countsDown,
   detailColumns,
   detailGrid,
@@ -19,29 +17,18 @@ import {
   dialogBody,
   statePill,
 } from "./dom";
-import {
-  accountingState,
-  runSummary,
-  sessionSummary,
-  usagePlots,
-} from "./usage";
-
-const PLATFORM_OPTIONS: Array<[string, string]> = [
-  ["", "All"],
-  ...PLATFORMS.map((p): [string, string] => [p, PLATFORM_LABEL[p]]),
-];
+import { runSummary, sessionSummary, usagePlots, when } from "./usage";
 
 interface IHistoryEntry {
   key: string;
-  alias: string;
+  title: string;
   state: SessionState;
-  run?: IRun;
+  run?: ISession;
   session?: ISession;
 }
 
 export class RunHistory extends PanelBoundWidget {
   private _open = new Set<string>();
-  private _platform = "";
 
   constructor(panel: CyberShuttlePanel, open?: string) {
     super(panel);
@@ -52,71 +39,36 @@ export class RunHistory extends PanelBoundWidget {
   }
 
   private _entries(): IHistoryEntry[] {
-    const shown = (p?: string) => !this._platform || p === this._platform;
+    const title = (run: ISession) => sessionTitle(this._state, run);
     const running = this._state.sessions
-      .filter(
-        (session) => !isTerminal(session.state) && shown(session.platform),
-      )
+      .filter((session) => !isTerminal(session.state))
       .map((session) => ({
-        key: `${session.id}/${session.seq}`,
-        alias: session.alias,
+        key: session.id,
+        title: title(session),
         state: session.state,
         session,
       }));
-    const finished = this._state.runs
-      .filter((run) => shown(run.platform))
-      .map((run) => {
-        const starting = this._state.sessions.find(
-          (session) => session.id === run.sessionId && session.seq === run.seq,
-        );
-        return {
-          key: `${run.sessionId}/${run.seq}`,
-          alias: run.alias,
-          state: starting
-            ? displayState(starting, this._state.busySessionIds)
-            : run.finalState,
-          run,
-        };
-      });
+    const finished = this._state.runs.map((run) => ({
+      key: run.id,
+      title: title(run),
+      state: run.state,
+      run,
+    }));
     return [...running, ...finished];
   }
 
   protected _rebuild(): void {
     this.node.textContent = "";
     const { root, scroll, card } = dialogBody(
-      "Every run of your sessions, running ones first. A run is kept even after its session is deleted.",
+      "Every run of your sessions, running ones first.",
       this._state.error,
     );
-    // Buttons, not a select: the countdown rebuilds this every second, which
-    // would close an open dropdown.
-    const platforms = element("div", "", "csPlatformFilter");
-    for (const [value, label] of PLATFORM_OPTIONS) {
-      const chosen = value === this._platform;
-      const choice = button(
-        label,
-        chosen ? "csPrimaryButton" : "csSecondaryButton",
-        () => {
-          this._platform = value;
-          this._render();
-        },
-      );
-      choice.setAttribute("aria-pressed", String(chosen));
-      choice.dataset.sessionAction = `platform-${value || "all"}`;
-      platforms.appendChild(choice);
-    }
-    scroll.appendChild(platforms);
     const entries = this._entries();
     for (const entry of entries) {
       card.appendChild(this._entry(entry));
     }
     if (entries.length === 0) {
-      card.appendChild(
-        element(
-          "div",
-          this._platform ? "No runs on this platform." : "No runs yet.",
-          "csStatus",
-        ),
-      );
+      card.appendChild(element("div", "No runs yet.", "csStatus"));
     }
     scroll.appendChild(card);
     this.node.appendChild(root);
@@ -130,20 +82,28 @@ export class RunHistory extends PanelBoundWidget {
 
   private _entry(entry: IHistoryEntry): HTMLElement {
     const { entry: element_, body } = disclosure(entry.key, this._open, [
-      element("span", entry.alias, "csCardTitle"),
+      element("span", entry.title, "csCardTitle"),
       element("span", this._when(entry), "csMeta csSshHostTarget"),
       statePill(entry.state),
     ]);
     element_.querySelector("summary")!.dataset.sessionAction = entry.key;
+    const run = entry.run;
+    const load = (): void => {
+      if (run && element_.open) this._logIds.add(run.id);
+    };
+    element_.addEventListener("toggle", load);
+    load();
     body.appendChild(
-      entry.run ? RunReport(entry.run) : this._inFlight(entry.session!),
+      run
+        ? RunReport(run, this._state.logs.get(run.id)?.lines)
+        : this._inFlight(entry.session!),
     );
     return element_;
   }
 
   private _when(entry: IHistoryEntry): string {
     if (entry.run) {
-      return new Date(entry.run.endedAt).toLocaleString();
+      return when(entry.run.updatedAt);
     }
     const started = entry.session?.startedAt;
     return started
@@ -161,39 +121,20 @@ export class RunHistory extends PanelBoundWidget {
     section.appendChild(
       detailColumns(
         detailGridWithRemaining(rows, session),
-        samples.length ? usagePlots(session, samples, "latest") : undefined,
+        samples.length ? usagePlots(session, samples) : undefined,
       ),
     );
     return section;
   }
 }
 
-export function RunReport(run: IRun): HTMLElement {
+export function RunReport(run: ISession, logs: ILogLine[] = []): HTMLElement {
   const section = element("section", "", "csRunReport");
   section.appendChild(element("h4", "Run report", "csSessionLogTitle"));
-  const samples = run.samples ?? [];
-  section.appendChild(
-    detailColumns(
-      detailGrid(runSummary(run)),
-      samples.length ? usagePlots(run, samples, "peak") : undefined,
-    ),
-  );
-  const accounting = accountingState(run, Date.now());
-  if (accounting !== "present") {
-    section.appendChild(
-      element(
-        "div",
-        accounting === "pending"
-          ? "Slurm's accounting for this run has not flushed yet; peak memory and efficiency will appear here."
-          : "Slurm recorded no accounting for this run, so peak memory and efficiency are unknown.",
-        "csStatus",
-      ),
-    );
-  }
+  section.appendChild(detailGrid(runSummary(run)));
   if (run.error) {
     section.appendChild(element("div", run.error, "csError"));
   }
-  const logs = run.logs ?? [];
   if (logs.length) {
     section.appendChild(logSection(logs).section);
   }

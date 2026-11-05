@@ -1,22 +1,16 @@
-// Runs CILogon's authorization-code flow with PKCE, finished by cs-plane
-// because only it holds the client secret. Sign-in navigates the top window
+// Runs CILogon's authorization-code flow with PKCE, finished by the CyberShuttle
+// API because only it holds the client secret. Sign-in navigates the top window
 // away; the callback exchange happens on the next load, from the `code` and
 // `state` the redirect carries. The credential is held in per-tab
-// sessionStorage so it survives that navigation. Every cs-plane response is
-// validated strictly against its expected shape.
-import type { OAuthConfigResponse, TokenResponse } from "./api/oauth";
+// sessionStorage so it survives that navigation.
 import {
   isPlainObject,
-  parseJson,
-  planeError,
-  vBoundedInt,
-  vNumber,
-  vObject,
-  vOptional,
-  vString,
-  type Validator,
+  planeApi,
+  unwrap,
+  type IPlaneAuth,
+  type PlaneApi,
+  type Schemas,
   validPlaneApiUrl,
-  type OAuthCredentials,
   base64UrlEncode,
 } from "./Common";
 
@@ -51,46 +45,9 @@ interface IPendingSignIn {
   returnTo?: string;
 }
 
-const oauthConfigShape = vObject<OAuthConfigResponse>({
-  issuer: vString(),
-  authorizationEndpoint: vString(),
-  clientId: vString(),
-  scope: vString(),
-});
-
-const oauthTokensShape = vObject<TokenResponse>(
-  {
-    idToken: vString(),
-    refreshToken: vOptional(vString()),
-    expiresInSeconds: vBoundedInt(1, 86400),
-  },
-  true,
-);
-
-const storedCredentialsShape = vObject<IStoredCredentials>(
-  {
-    idToken: vString(),
-    refreshToken: vOptional(vString()),
-    expiresAt: vNumber,
-  },
-  true,
-);
-
-const pendingSignInShape = vObject<IPendingSignIn>(
-  {
-    state: vString(),
-    verifier: vString(),
-    redirectUri: vString(),
-    returnTo: vOptional(vString()),
-  },
-  true,
-);
-
-function readStored<T>(key: string, shape: Validator<T>): T | undefined {
-  const raw = sessionStorage.getItem(key);
+function readStored<T>(key: string): T | undefined {
   try {
-    const value: unknown = raw ? JSON.parse(raw) : undefined;
-    return shape(value) ? value : undefined;
+    return JSON.parse(sessionStorage.getItem(key) ?? "") as T;
   } catch {
     return undefined;
   }
@@ -122,9 +79,9 @@ async function pkcePair(): Promise<{ verifier: string; challenge: string }> {
   return { verifier, challenge: base64UrlEncode(new Uint8Array(digest)) };
 }
 
-export class AuthClient {
+export class AuthClient implements IPlaneAuth {
   private readonly _base: string;
-  private readonly _fetch: typeof globalThis.fetch;
+  private readonly _api: PlaneApi;
   private readonly _now: () => number;
   private readonly _navigate: (url: string) => void;
   private _credentials: IStoredCredentials | undefined;
@@ -134,11 +91,14 @@ export class AuthClient {
 
   constructor(planeApiUrl: string, dependencies: IAuthClientDependencies = {}) {
     this._base = validPlaneApiUrl(planeApiUrl);
-    this._fetch = dependencies.fetch ?? globalThis.fetch.bind(globalThis);
+    this._api = planeApi(
+      this._base,
+      dependencies.fetch ?? globalThis.fetch.bind(globalThis),
+    );
     this._now = dependencies.now ?? Date.now;
     this._navigate =
       dependencies.navigate ?? ((url) => window.location.assign(url));
-    const stored = readStored(SIGN_IN_KEY, storedCredentialsShape);
+    const stored = readStored<IStoredCredentials>(SIGN_IN_KEY);
     if (stored && stored.expiresAt > this._now()) {
       this._credentials = stored;
     } else {
@@ -156,7 +116,7 @@ export class AuthClient {
     return this._credentials && identityFromIdToken(this._credentials.idToken);
   }
 
-  async acquireToken(): Promise<OAuthCredentials> {
+  async acquireToken(): Promise<string> {
     if (this._callback) {
       const callback = this._callback;
       this._callback = undefined;
@@ -189,7 +149,7 @@ export class AuthClient {
       this.invalidateToken();
       throw new AuthInteractionRequiredError();
     }
-    return { idToken: credentials.idToken };
+    return credentials.idToken;
   }
 
   invalidateToken(): void {
@@ -199,9 +159,8 @@ export class AuthClient {
   }
 
   async signIn(): Promise<void> {
-    const config = await this._call(
-      `${this._base}/oauth/config`,
-      oauthConfigShape,
+    const config = await this._call((init) =>
+      this._api.GET("/api/v1/auth/config", init),
     );
     const { verifier, challenge } = await pkcePair();
     const state = base64UrlEncode(crypto.getRandomValues(new Uint8Array(16)));
@@ -215,10 +174,10 @@ export class AuthClient {
       returnTo: window.location.href,
     };
     sessionStorage.setItem(PKCE_KEY, JSON.stringify(pending));
-    const authorize = new URL(config.authorizationEndpoint);
+    const authorize = new URL(config.authorization_endpoint);
     authorize.search = new URLSearchParams({
       response_type: "code",
-      client_id: config.clientId,
+      client_id: config.client_id,
       scope: config.scope,
       redirect_uri: pending.redirectUri,
       state,
@@ -229,7 +188,7 @@ export class AuthClient {
   }
 
   private async _completeCallback(code: string, state: string): Promise<void> {
-    const pending = readStored(PKCE_KEY, pendingSignInShape);
+    const pending = readStored<IPendingSignIn>(PKCE_KEY);
     sessionStorage.removeItem(PKCE_KEY);
     if (!pending) {
       throw new Error("No sign-in was in progress for this callback.");
@@ -237,16 +196,13 @@ export class AuthClient {
     if (pending.state !== state) {
       throw new Error("Sign-in state did not match; try signing in again.");
     }
-    const tokens = await this._call(
-      `${this._base}/oauth/exchange`,
-      oauthTokensShape,
-      {
+    this._store(
+      await this._redeem({
         code,
-        codeVerifier: pending.verifier,
-        redirectUri: pending.redirectUri,
-      },
+        code_verifier: pending.verifier,
+        redirect_uri: pending.redirectUri,
+      }),
     );
-    this._store(tokens);
     window.history.replaceState(
       window.history.state,
       "",
@@ -259,54 +215,47 @@ export class AuthClient {
     generation: number,
   ): Promise<void> {
     const refreshToken = credentials.refreshToken!;
-    const tokens = await this._call(
-      `${this._base}/oauth/refresh`,
-      oauthTokensShape,
-      { refreshToken },
-    );
+    const tokens = await this._redeem({ refresh_token: refreshToken });
     if (this._generation === generation && this._credentials === credentials) {
       this._store({
         ...tokens,
-        refreshToken: tokens.refreshToken ?? refreshToken,
+        refresh_token: tokens.refresh_token ?? refreshToken,
       });
     }
   }
 
-  private _store(tokens: TokenResponse): void {
+  private _redeem(grant: Record<string, string>): Promise<Schemas["Tokens"]> {
+    return this._call((init) =>
+      this._api.POST("/api/v1/auth/token", { ...init, body: grant }),
+    );
+  }
+
+  private _store(tokens: Schemas["Tokens"]): void {
     this._generation++;
     this._credentials = {
-      idToken: tokens.idToken,
-      expiresAt: this._now() + tokens.expiresInSeconds * 1000,
-      ...(tokens.refreshToken ? { refreshToken: tokens.refreshToken } : {}),
+      idToken: tokens.id_token,
+      expiresAt: this._now() + tokens.expires_in * 1000,
+      ...(tokens.refresh_token ? { refreshToken: tokens.refresh_token } : {}),
     };
     sessionStorage.setItem(SIGN_IN_KEY, JSON.stringify(this._credentials));
   }
 
   private async _call<T>(
-    url: string,
-    shape: Validator<T>,
-    body?: Record<string, string>,
+    send: (
+      init: Omit<RequestInit, "body">,
+    ) => Promise<{ data?: T; error?: unknown; response: Response }>,
   ): Promise<T> {
     const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
-    const response = await this._fetch(url, {
-      method: body ? "POST" : "GET",
-      headers: body ? { "Content-Type": "application/json" } : {},
-      body: body && JSON.stringify(body),
-      cache: "no-store",
-      credentials: "omit",
-      redirect: "error",
-      referrerPolicy: "no-referrer",
-      signal,
-    }).catch((error: unknown) => {
-      throw signal.aborted
-        ? new Error("cs-plane sign-in request timed out.")
-        : error;
+    return unwrap(
+      send({
+        cache: "no-store",
+        credentials: "omit",
+        redirect: "error",
+        referrerPolicy: "no-referrer",
+        signal,
+      }),
+    ).catch((error: unknown) => {
+      throw signal.aborted ? new Error("Sign-in request timed out.") : error;
     });
-    if (!response.ok) throw await planeError(response);
-    const value = await parseJson(response);
-    if (!shape(value)) {
-      throw new Error("cs-plane returned an invalid sign-in response.");
-    }
-    return value;
   }
 }

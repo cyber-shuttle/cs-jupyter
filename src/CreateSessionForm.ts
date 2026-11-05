@@ -1,24 +1,12 @@
-// The Add Session wizard shell: step navigation, shared error and busy state,
-// and the partition/GPU model that turns discovered Slurm partitions into
-// configuration-step choices, with MIN_CORES, MIN_MEMORY_MB and
-// MAX_WALL_MINUTES mirroring the bounds cs-plane enforces in
-// validateCreate. SSH host discovery and the final submit step live in their own
-// modules. A document-level keydown listener retakes Enter so the dialog
-// chrome cannot swallow it before submit.
+// The Add Session form: shared error and busy state, and the partition/GPU
+// model that turns discovered Slurm partitions into choices, capped where Slurm
+// reported a partition's CPU and memory. A document-level keydown listener
+// retakes Enter so the dialog chrome cannot swallow it before submit.
 import { Signal } from "@lumino/signaling";
 import { Widget } from "@lumino/widgets";
-import {
-  IPartition,
-  ISessionCreateRequest,
-  ISshHost,
-  TRANSPORT_LABEL,
-  TRANSPORTS,
-  type Transport,
-} from "./Common";
+import { IDeployment, IPartition, type Schemas } from "./Common";
 import { PlaneClient } from "./PlaneClient";
-import type { SshAuthDock } from "./ssh";
 import { button, element, field, fillOptions, select } from "./dom";
-import { ReviewStep, type IReviewStepHooks } from "./ReviewStep";
 import { SlurmDiscovery } from "./SlurmDiscovery";
 
 type ResourceType = "cpu" | "gpu";
@@ -30,7 +18,6 @@ interface IPartitionChoice {
 
 const MIN_CORES = 2;
 const MIN_MEMORY_MB = 4096;
-const MAX_WALL_MINUTES = 525600;
 
 function isGpuGres(item: { name: string }): boolean {
   return item.name === "gpu" || item.name.startsWith("gpu:");
@@ -52,9 +39,14 @@ function partitionLabel(partition: IPartition): string {
     .filter(isGpuGres)
     .map((item) => `${item.count}× ${gpuType(item.name).label}`)
     .join(", ");
-  return `${partition.name} — ${partition.cpuCount} CPU · ${partition.memoryMb} MB${
-    hardware ? ` · ${hardware}` : ""
-  }`;
+  return [
+    partition.name,
+    partition.cpuCount && `${partition.cpuCount} CPU`,
+    partition.memoryMb && `${partition.memoryMb} MB`,
+    hardware,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 function partitionChoices(
@@ -93,7 +85,6 @@ function gpuMax(
 
 interface ISessionDraft {
   resourceType: ResourceType | "";
-  rootFolder: string;
   wallMinutes: number;
   partitionKey: string;
   cores: number;
@@ -101,13 +92,11 @@ interface ISessionDraft {
   gpuType: string;
   gpuCount: number;
   account: string | undefined;
-  transports: Transport[];
 }
 
 function freshDraft(): ISessionDraft {
   return {
     resourceType: "",
-    rootFolder: "$HOME",
     wallMinutes: 60,
     partitionKey: "",
     cores: MIN_CORES,
@@ -115,45 +104,36 @@ function freshDraft(): ISessionDraft {
     gpuType: "",
     gpuCount: 1,
     account: undefined,
-    transports: ["link"],
   };
 }
 
 export class CreateSessionForm extends Widget {
-  readonly sshHostsRequested = new Signal<this, void>(this);
-  readonly createRequested = new Signal<this, ISessionCreateRequest>(this);
+  readonly createRequested = new Signal<this, Schemas["BatchProcessRequest"]>(
+    this,
+  );
   private _busy = false;
   private _error = "";
-  private _key = crypto.randomUUID();
-  private _payload = "";
   private _create: HTMLButtonElement | undefined;
   private _errorNode: HTMLElement | undefined;
   private _partition: HTMLSelectElement | undefined;
   private _partitionChoices: IPartitionChoice[] = [];
   private _draft = freshDraft();
   private _discovery: SlurmDiscovery;
-  private _review: ReviewStep;
-  private _devTunnelsConnected: Promise<boolean>;
 
-  constructor(
-    private _api: PlaneClient,
-    sshAuthDock: () => SshAuthDock,
-  ) {
+  constructor(private _api: PlaneClient) {
     super();
     this.id = "cybershuttle-create-session";
     this.addClass("csSessionPanel");
     this.hide();
-    this._discovery = new SlurmDiscovery(this._api, sshAuthDock);
-    this._review = new ReviewStep(this._api, sshAuthDock);
-    this._devTunnelsConnected = this._api.getDevTunnelsAccount().then(
-      ({ connected }) => connected,
-      () => false,
-    );
+    this._discovery = new SlurmDiscovery(this._api);
     this._render();
   }
 
-  setHosts(hosts: ISshHost[]): void {
-    this._discovery.setHosts(hosts);
+  setClusters(
+    clusters: Schemas["SlurmClusterConfigResponse"][],
+    deployments: IDeployment[],
+  ): void {
+    this._discovery.setClusters(clusters, deployments);
     this._render();
   }
 
@@ -172,7 +152,6 @@ export class CreateSessionForm extends Widget {
       return;
     }
     this._discovery.stop();
-    this._review.cancel();
     super.dispose();
   }
 
@@ -196,9 +175,8 @@ export class CreateSessionForm extends Widget {
     }
   };
 
-  private _selectHost(alias: string): void {
-    this._discovery.selectHost(alias);
-    this._review.leave();
+  private _selectCluster(clusterId: string): void {
+    this._discovery.selectCluster(clusterId);
     this._partitionChoices = [];
     this._draft = freshDraft();
     this._error = "";
@@ -209,13 +187,16 @@ export class CreateSessionForm extends Widget {
       const selected = this._partitionChoices.find(
         (item) => item.key === this._partition?.value,
       );
-      this._create.disabled = !selected;
+      this._create.disabled = this._busy || !selected;
+      this._create.replaceChildren(
+        ...(this._busy ? [element("span", "", "csSpinner")] : []),
+        document.createTextNode(this._busy ? "Creating…" : "Create"),
+      );
     }
     if (this._errorNode) {
       this._errorNode.textContent = this._error;
       this._errorNode.hidden = !this._error;
     }
-    this._review.sync(this._busy, this._error);
   }
 
   private _render(): void {
@@ -227,24 +208,10 @@ export class CreateSessionForm extends Widget {
     const root = element("div", "", "csRoot");
     root.append(
       element("hr", "", "csDialogRule"),
-      this._review.isActive
-        ? this._review.build(this._reviewHooks())
-        : this._buildConfigurationStep(),
+      this._buildConfigurationStep(),
     );
     this.node.appendChild(root);
     this._syncStatus();
-  }
-
-  private _reviewHooks(): IReviewStepHooks {
-    return {
-      onBack: () => {
-        this._review.leave();
-        this._render();
-      },
-      onSubmit: (request) => this.createRequested.emit(request),
-      isDisposed: () => this.isDisposed,
-      onChange: () => this._syncStatus(),
-    };
   }
 
   private _buildConfigurationStep(): HTMLElement {
@@ -258,21 +225,9 @@ export class CreateSessionForm extends Widget {
     resourceType.append(resourceLegend, resourceChoices);
     const partition = select("partition", []);
     this._partition = partition;
-    const rootFolder = input("rootFolder", "text");
-    rootFolder.value = this._draft.rootFolder;
-    const rootFolderHelp = element(
-      "div",
-      rootFolderHelpText(this._discovery.slurm?.homeDir),
-      "csFieldHelp",
-      { id: "cybershuttle-root-folder-help" },
-    );
-    rootFolder.setAttribute("aria-describedby", rootFolderHelp.id);
-    const rootFolderField = field("Root folder", rootFolder);
-    rootFolderField.appendChild(rootFolderHelp);
     const cores = number("cores", MIN_CORES, MIN_CORES);
     const memory = number("memoryMb", MIN_MEMORY_MB, MIN_MEMORY_MB);
     const wall = number("wallMinutes", this._draft.wallMinutes);
-    wall.max = String(MAX_WALL_MINUTES);
     const gpuType = select("gpuType", []);
     const gpuCount = number("gpuCount", 1);
     const gpuTypeField = field("GPU type", gpuType);
@@ -281,7 +236,7 @@ export class CreateSessionForm extends Widget {
     error.hidden = !this._error;
     this._errorNode = error;
     const footer = element("div", "", "csFormFooter");
-    const create = button("Review", "csPrimaryButton");
+    const create = button("Create", "csPrimaryButton");
     create.type = "submit";
     this._create = create;
     footer.appendChild(create);
@@ -305,13 +260,13 @@ export class CreateSessionForm extends Widget {
       cores.value = String(
         Math.min(
           restoring ? this._draft.cores : MIN_CORES,
-          selected?.cpuCount ?? MIN_CORES,
+          selected?.cpuCount ?? Infinity,
         ),
       );
       memory.value = String(
         Math.min(
           restoring ? this._draft.memoryMb : MIN_MEMORY_MB,
-          selected?.memoryMb ?? MIN_MEMORY_MB,
+          selected?.memoryMb ?? Infinity,
         ),
       );
       gpuCount.value = restoring ? String(this._draft.gpuCount) : "1";
@@ -323,10 +278,8 @@ export class CreateSessionForm extends Widget {
     const updatePartition = (): void => {
       const selected = selectedChoice()?.partition;
       resetPartitionResources(selected);
-      if (selected) {
-        cores.max = String(selected.cpuCount);
-        memory.max = String(selected.memoryMb);
-      }
+      cores.max = String(selected?.cpuCount ?? "");
+      memory.max = String(selected?.memoryMb ?? "");
       const gpus =
         this._draft.resourceType === "gpu" ? gpuOptions(selected) : [];
       const rememberedGpuType = gpus.some(
@@ -373,7 +326,7 @@ export class CreateSessionForm extends Widget {
           ? "cpu"
           : types[0];
       if (!remembered) {
-        this._error = `No CPU or GPU Slurm partitions were discovered for ${this._discovery.alias}.`;
+        this._error = `No CPU or GPU Slurm partitions were discovered for ${this._discovery.label}.`;
         this._syncStatus();
         return false;
       }
@@ -395,13 +348,6 @@ export class CreateSessionForm extends Widget {
 
     partition.onchange = () => updatePartition();
     gpuType.onchange = updateGpuCount;
-    rootFolder.oninput = () => {
-      this._draft.rootFolder = rootFolder.value;
-      if (this._error) {
-        this._error = "";
-        this._syncStatus();
-      }
-    };
     wall.oninput = () => (this._draft.wallMinutes = Number(wall.value));
     cores.oninput = () => (this._draft.cores = Number(cores.value));
     memory.oninput = () => (this._draft.memoryMb = Number(memory.value));
@@ -409,21 +355,16 @@ export class CreateSessionForm extends Widget {
 
     this._discovery.preferredAccount = this._draft.account;
     const discoveryNode = this._discovery.build({
-      onManageHosts: () => this.sshHostsRequested.emit(undefined),
-      onHostChange: (alias) => {
-        this._selectHost(alias);
+      onClusterChange: (clusterId) => {
+        this._selectCluster(clusterId);
         this._render();
       },
       onDiscovered: () => {
-        rootFolderHelp.textContent = rootFolderHelpText(
-          this._discovery.slurm?.homeDir,
-        );
         options.hidden = !buildResourceTypes();
       },
       onCleared: () => {
         this._partitionChoices = [];
         options.hidden = true;
-        rootFolderHelp.textContent = rootFolderHelpText(undefined);
         this._syncStatus();
       },
       onError: (message) => {
@@ -439,13 +380,11 @@ export class CreateSessionForm extends Widget {
       resourceType,
       this._discovery.accountField,
       field("Partition", partition),
-      rootFolderField,
       field("Cores", cores),
       field("Memory (MB)", memory),
       field("Walltime (minutes)", wall),
       gpuTypeField,
       gpuCountField,
-      this._buildTransports(),
       error,
       footer,
     );
@@ -461,80 +400,28 @@ export class CreateSessionForm extends Widget {
         return;
       }
       this._error = "";
+      const gpus = Number(gpuCount.value);
       const gpu =
-        this._draft.resourceType === "gpu"
-          ? { gpuType: gpuType.value, gpuCount: Number(gpuCount.value) }
-          : {};
-      const payload = {
-        alias: this._discovery.alias,
-        ...(this._discovery.account.value
-          ? { account: this._discovery.account.value }
-          : {}),
-        partition: choice.partition.name,
-        rootFolder: rootFolder.value.trim(),
-        tunnelModes: this._draft.transports,
-        resources: {
-          cores: Number(cores.value),
-          memoryMb: Number(memory.value),
-          wallMinutes: Number(wall.value),
+        this._draft.resourceType !== "gpu"
+          ? {}
+          : gpuType.value === "gpu"
+            ? { gpus }
+            : { gres: `gpu:${gpuType.value}:${gpus}` };
+      this.createRequested.emit({
+        slurmClusterConfigId: this._discovery.clusterId,
+        deploymentId: this._discovery.deploymentId,
+        batchJobConfig: {
+          allocation: this._discovery.account.value,
+          partition: choice.partition.name,
+          cpus: Number(cores.value),
+          mem: `${memory.value}M`,
+          wallTimeMinutes: Number(wall.value),
           ...gpu,
         },
-      };
-      const serialized = JSON.stringify(payload);
-      if (this._payload && serialized !== this._payload) {
-        this._key = crypto.randomUUID();
-      }
-      this._payload = serialized;
-      this._review.start({ idempotencyKey: this._key, ...payload });
-      this._render();
-      void this._review.validate(this._reviewHooks());
+      });
     };
     return form;
   }
-
-  private _buildTransports(): HTMLElement {
-    const fieldset = element("fieldset", "", "csResourceType");
-    const choices = element("div", "", "csResourceTypeChoices");
-    const hint = element(
-      "div",
-      "Connect a Dev Tunnels account in the account menu to use Dev Tunnel.",
-      "csFieldHelp",
-    );
-    fieldset.append(element("legend", "Transport", "csLabel"), choices, hint);
-    for (const transport of ["link", "devtunnel"] as const) {
-      const label = element("label", "", "csResourceTypeOption");
-      const checkbox = element("input");
-      checkbox.type = "checkbox";
-      checkbox.name = "transport";
-      checkbox.value = transport;
-      checkbox.checked = this._draft.transports.includes(transport);
-      checkbox.onchange = () => {
-        const chosen = TRANSPORTS.filter((item) =>
-          item === transport
-            ? checkbox.checked
-            : this._draft.transports.includes(item),
-        );
-        if (chosen.length) this._draft.transports = chosen;
-        else checkbox.checked = true;
-      };
-      label.append(checkbox, element("span", TRANSPORT_LABEL[transport]));
-      choices.appendChild(label);
-      if (transport === "devtunnel") {
-        checkbox.disabled = true;
-        void this._devTunnelsConnected.then((connected) => {
-          checkbox.disabled = !connected;
-          hint.hidden = connected;
-        });
-      }
-    }
-    return fieldset;
-  }
-}
-
-function rootFolderHelpText(homeDir: string | undefined): string {
-  return homeDir
-    ? `Relative to ${homeDir} unless it starts with /, ~ or $.`
-    : "Examples: . · ~/cybershuttle · $HOME/work · /scratch/user/work";
 }
 
 function input(name: string, type: string): HTMLInputElement {

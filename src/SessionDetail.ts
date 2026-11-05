@@ -1,9 +1,8 @@
 // Renders the full detail view for one session: identity, lifecycle actions,
-// usage figures and status log. A finished session's Slurm job cannot resume,
-// so Start submits a fresh one. The status log stays visible, not behind a
+// usage figures and status log. The status log stays visible, not behind a
 // disclosure, since it shows when a session last said anything.
 import { PanelBoundWidget } from "./RebuildingWidget";
-import { isTerminal, TRANSPORT_LABEL, type ISession } from "./Common";
+import { isRunning, isTerminal, type ISession } from "./Common";
 import type { CyberShuttlePanel } from "./CyberShuttlePanel";
 import type { ISessionLogTail } from "./PlaneClient";
 import {
@@ -21,6 +20,7 @@ import {
   displayState,
   getActiveSessionId,
   type ISessionUiState,
+  sessionTitle,
 } from "./session";
 
 interface ISessionLogView {
@@ -37,6 +37,7 @@ export class SessionDetail extends PanelBoundWidget {
     private _sessionId: string,
   ) {
     super(panel);
+    this._logIds.add(_sessionId);
     this.addClass("csSessionDetail");
     this._render();
   }
@@ -86,11 +87,12 @@ export class SessionDetail extends PanelBoundWidget {
   private _buildSession(session: ISession): HTMLElement {
     const root = element("div", "", "csRoot");
     const state = displayState(session, this._state.busySessionIds);
+    const title = sessionTitle(this._state, session);
 
     const header = element("div", "", "csSessionDetailHeader");
     const identity = element("div");
     identity.append(
-      element("h3", session.alias, "csSessionDetailTitle"),
+      element("h3", title, "csSessionDetailTitle"),
       element(
         "span",
         session.account || "(no Slurm account)",
@@ -100,7 +102,7 @@ export class SessionDetail extends PanelBoundWidget {
     );
     const actions = element("div", "", "csSessionDetailActions");
     const busy = this._state.busySessionIds.has(session.id);
-    if (isTerminal(state)) {
+    if (state === "CREATED") {
       actions.appendChild(
         this._button(
           "Start",
@@ -110,7 +112,7 @@ export class SessionDetail extends PanelBoundWidget {
         ),
       );
     }
-    if (!isTerminal(state) && state !== "STOPPING") {
+    if (!isTerminal(state)) {
       actions.appendChild(
         this._button(
           "Stop",
@@ -120,7 +122,7 @@ export class SessionDetail extends PanelBoundWidget {
         ),
       );
     }
-    if (session.state === "READY" && this._state.jupyterReady.has(session.id)) {
+    if (isRunning(session.state) && this._state.jupyterReady.has(session.id)) {
       if (session.id === getActiveSessionId()) {
         actions.appendChild(element("span", "Connected", "csPill"));
       } else {
@@ -134,14 +136,6 @@ export class SessionDetail extends PanelBoundWidget {
         );
       }
     }
-    actions.appendChild(
-      this._button(
-        "Delete",
-        "csDangerButton",
-        busy,
-        () => void this._panel.actions.delete(session.id),
-      ),
-    );
     if (busy || this._state.connectingSessionId === session.id) {
       actions.appendChild(element("span", "", "csSpinner"));
     }
@@ -153,42 +147,21 @@ export class SessionDetail extends PanelBoundWidget {
         "Jupyter",
         this._state.jupyterReady.has(session.id) ? "ready" : "pending",
       ],
-      ["Run", String(session.seq)],
-      ["Root folder", session.rootFolder],
       ...sessionSummary(session),
       ["Walltime", `${session.resources.wallMinutes} min`],
-      [
-        "Transport",
-        session.tunnelModes
-          .map((transport) => TRANSPORT_LABEL[transport])
-          .join(" + "),
-      ],
     ];
     if (session.resources.gpuCount) {
-      rows.push([
-        "GPU",
-        `${session.resources.gpuCount} ${session.resources.gpuType || ""}`.trim(),
-      ]);
+      rows.push(["GPU", String(session.resources.gpuCount)]);
     }
     const samples = this._state.samples.get(session.id);
     const live = !isTerminal(state);
     root.appendChild(
       detailColumns(
         detailGridWithRemaining(rows, session),
-        live && samples?.length
-          ? usagePlots(session, samples, "latest")
-          : undefined,
+        live && samples?.length ? usagePlots(session, samples) : undefined,
       ),
     );
 
-    if (state === "STOPPING") {
-      const stopping = element("div", "", "csStatus csStopping");
-      stopping.append(
-        element("span", "", "csSpinner"),
-        element("span", `Session ${session.alias} is stopping...`),
-      );
-      root.appendChild(stopping);
-    }
     root.append(
       ...notes([
         [this._state.error || session.error || "", "csError"],
@@ -206,7 +179,10 @@ export class SessionDetail extends PanelBoundWidget {
     this._logView ??= { scrollTop: 0, atBottom: true };
     const { section, scroller } = logSection(tail.lines);
     scroller.dataset.sessionId = session.id;
-    scroller.setAttribute("aria-label", `Status for ${session.alias}`);
+    scroller.setAttribute(
+      "aria-label",
+      `Status for ${sessionTitle(this._state, session)}`,
+    );
     scroller.setAttribute("aria-live", "polite");
     return section;
   }

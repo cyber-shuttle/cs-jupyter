@@ -31,9 +31,9 @@ import plugins, { remoteServicePlugins } from "../src/index";
 import { PlaneClient, IPlaneClient } from "../src/PlaneClient";
 import { jsonResponse } from "../src/Common";
 import { getActiveSessionId } from "../src/session";
-import { accessFixture } from "./fakes";
+import { accessFixture, PROCESS_ID, sessionFixture } from "./fakes";
 
-const id = "s-012345abcdef";
+const id = sessionFixture().id;
 
 const supportManagers = {
   events: { dispose: vi.fn() },
@@ -87,8 +87,8 @@ function registryFor(path: string): PluginRegistry<null> {
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe("shared cs-plane service", () => {
-  it("provides one client to every plugin that reaches cs-plane", () => {
+describe("shared CyberShuttle API service", () => {
+  it("provides one client to every plugin that reaches the CyberShuttle API", () => {
     const providers = plugins.filter(
       (plugin) => plugin.provides === IPlaneClient,
     );
@@ -142,7 +142,7 @@ describe("remote service manager registry", () => {
     manager.dispose();
   });
 
-  it("fails closed when cs-plane refuses session access", async () => {
+  it("fails closed when the CyberShuttle API refuses session access", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(null, { status: 401 })),
@@ -167,8 +167,8 @@ describe("remote service manager registry", () => {
         typeof input === "string" || input instanceof URL ? input : input.url,
       );
       let body: unknown = [];
-      if (url.pathname.endsWith(`/sessions/${id}/access`)) {
-        body = accessFixture(id, 1);
+      if (url.pathname.endsWith(`/processes/${PROCESS_ID}/access`)) {
+        body = accessFixture(PROCESS_ID);
       } else if (url.pathname.endsWith("/api/kernelspecs")) {
         body = {
           default: "python",
@@ -215,7 +215,7 @@ describe("remote service manager registry", () => {
     expect(kernels).toBeInstanceOf(KernelManager);
     expect(kernelspecs).toBeInstanceOf(KernelSpecManager);
     expect(sessions).toBeInstanceOf(SessionManager);
-    const remoteBase = `http://localhost:3000/api/v1/sessions/${id}/jupyter/`;
+    const remoteBase = `http://localhost:3000/api/v1/processes/${PROCESS_ID}/proxy/24001/`;
     expect(shellServerSettings.baseUrl).toBe(PageConfig.getBaseUrl());
     expect(manager.serverSettings).toBe(shellServerSettings);
     expect(contents.serverSettings.baseUrl).toBe(remoteBase);
@@ -243,12 +243,12 @@ describe("remote service manager registry", () => {
     );
     expect(paths).toEqual(
       expect.arrayContaining([
-        `/api/v1/sessions/${id}/access`,
+        `/api/v1/processes/${PROCESS_ID}/access`,
         "/lab/api/settings",
-        `/api/v1/sessions/${id}/jupyter/api/kernels`,
-        `/api/v1/sessions/${id}/jupyter/api/kernelspecs`,
-        `/api/v1/sessions/${id}/jupyter/api/sessions`,
-        `/api/v1/sessions/${id}/jupyter/api/terminals`,
+        `/api/v1/processes/${PROCESS_ID}/proxy/24001/api/kernels`,
+        `/api/v1/processes/${PROCESS_ID}/proxy/24001/api/kernelspecs`,
+        `/api/v1/processes/${PROCESS_ID}/proxy/24001/api/sessions`,
+        `/api/v1/processes/${PROCESS_ID}/proxy/24001/api/terminals`,
       ]),
     );
 
