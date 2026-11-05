@@ -158,8 +158,10 @@ export class PlaneClient {
     );
   }
 
-  async addCredential(request: Schemas["SSHCredentialRequest"]): Promise<void> {
-    await unwrap(this._api.POST("/api/v1/ssh-credentials", { body: request }));
+  addCredential(
+    request: Schemas["SSHCredentialRequest"],
+  ): Promise<Schemas["SSHCredentialResponse"]> {
+    return unwrap(this._api.POST("/api/v1/ssh-credentials", { body: request }));
   }
 
   async deleteCredential(id: string): Promise<void> {

@@ -22,7 +22,7 @@ Pre-release 0.1.1.
 
 1. **Sign in** on the CyberShuttle title row of the Launcher.
 2. **Add Session** in the Launcher's **Sessions** section submits a Slurm job on a compute host, added under
-   **Compute Hosts** with a key, password or ask-each-login entry from **Credentials**; the session shows its
+   **Compute Hosts** with a key or password from **Credentials**, or none to answer each login; the session shows its
    compute host, application, Slurm account, state, resources and remaining walltime.
 3. Open the session and choose **Connect** once it reads `READY`. The detail dialog shows usage and the status log.
 4. **Run History** keeps every ended session.

@@ -1,6 +1,6 @@
-// Credential dialog: list, add and delete the caller's SSH keypairs, passwords
-// and prompt-only logins. The private key goes from its file straight into
-// the create request, never into state. Deletion confirms inline.
+// Credential dialog: list, add and delete the caller's SSH keypairs and
+// passwords. The private key goes from its file straight into the create
+// request, never into state. Deletion confirms inline.
 import { RemoteListWidget } from "./RebuildingWidget";
 import type { Schemas } from "./Common";
 import { PlaneClient } from "./PlaneClient";
@@ -17,8 +17,6 @@ import {
 
 type ICredentialDraft = Schemas["SSHCredentialRequest"] & { file?: File };
 
-const PROMPT_KIND = "Ask at each login";
-
 export class SshKeys extends RemoteListWidget {
   private _keys: Schemas["SSHCredentialResponse"][] = [];
   private _form: ICredentialDraft | undefined;
@@ -32,7 +30,9 @@ export class SshKeys extends RemoteListWidget {
 
   async refresh(): Promise<void> {
     await this._refreshing(async () => {
-      this._keys = await this._api.listCredentials();
+      this._keys = (await this._api.listCredentials()).filter(
+        (each) => !each.fullInteractive,
+      );
     });
   }
 
@@ -84,19 +84,13 @@ export class SshKeys extends RemoteListWidget {
     const kind = select("credentialKind", [
       ["keypair", "Keypair"],
       ["password", "Password"],
-      ["prompt", PROMPT_KIND],
     ]);
     kind.dataset.sessionAction = "credential-kind";
-    kind.value = draft.fullInteractive
-      ? "prompt"
-      : draft.password != null
-        ? "password"
-        : "keypair";
+    kind.value = draft.password != null ? "password" : "keypair";
     kind.onchange = () => {
       this._form = {
         sshCredentialName: draft.sshCredentialName,
         ...(kind.value === "password" && { password: "" }),
-        ...(kind.value === "prompt" && { fullInteractive: true }),
       };
       this._sync();
     };
@@ -108,15 +102,7 @@ export class SshKeys extends RemoteListWidget {
     name.value = draft.sshCredentialName;
     name.oninput = () => (draft.sshCredentialName = name.value);
     form.append(field("Kind", kind), field("Name", name));
-    if (kind.value === "prompt") {
-      form.append(
-        element(
-          "div",
-          "Nothing is stored. You answer each login yourself, with a password or one-time code.",
-          "csFieldHelp",
-        ),
-      );
-    } else if (kind.value === "password") {
+    if (kind.value === "password") {
       const password = element("input", "", "csInput");
       password.type = "password";
       password.name = "credentialPassword";
@@ -190,8 +176,7 @@ export class SshKeys extends RemoteListWidget {
       element("span", credential.sshCredentialName, "csCardTitle"),
       element(
         "span",
-        credential.publicKey ||
-          (credential.fullInteractive ? PROMPT_KIND : "Password"),
+        credential.publicKey || "Password",
         "csMeta csSshKeyPrint",
       ),
     );
