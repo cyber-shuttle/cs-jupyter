@@ -16,6 +16,8 @@ import {
   select,
 } from "./dom";
 
+const ASK_AT_LOGIN = "Ask at each login";
+
 export class SshHosts extends RemoteListWidget {
   private _hosts: Schemas["SlurmClusterConfigResponse"][] = [];
   private _clusters: Schemas["SlurmClusterResponse"][] = [];
@@ -48,9 +50,23 @@ export class SshHosts extends RemoteListWidget {
         ...form,
         loginUser: form.loginUser.trim(),
         workRoot: form.workRoot.trim(),
+        sshCredentialId: form.sshCredentialId || (await this._askAtLogin()),
       });
       this._form = undefined;
     });
+  }
+
+  // The API wants a credential on every host; a prompt-only one stands for none.
+  private async _askAtLogin(): Promise<string> {
+    let held = this._credentials.find((each) => each.fullInteractive);
+    if (!held) {
+      held = await this._api.addCredential({
+        sshCredentialName: ASK_AT_LOGIN,
+        fullInteractive: true,
+      });
+      this._credentials.push(held);
+    }
+    return held.sshCredentialId;
   }
 
   protected _rebuild(): void {
@@ -84,7 +100,9 @@ export class SshHosts extends RemoteListWidget {
               slurmClusterId: this._clusters[0]?.slurmClusterId ?? "",
               loginUser: "",
               workRoot: "",
-              sshCredentialId: this._credentials[0]?.sshCredentialId ?? "",
+              sshCredentialId:
+                this._credentials.find((each) => !each.fullInteractive)
+                  ?.sshCredentialId ?? "",
             };
         this._formError = "";
         this._sync();
@@ -120,17 +138,23 @@ export class SshHosts extends RemoteListWidget {
     workRoot.oninput = () => (draft.workRoot = workRoot.value);
     const credential = select(
       "computeHostCredential",
-      this._credentials.map((each) => [
-        each.sshCredentialId,
-        each.sshCredentialName,
-      ]),
+      [
+        ["", `None, ${ASK_AT_LOGIN.toLowerCase()}`],
+        ...this._credentials
+          .filter((each) => !each.fullInteractive)
+          .map((each): [string, string] => [
+            each.sshCredentialId,
+            each.sshCredentialName,
+          ]),
+      ],
+      false,
     );
     credential.dataset.sessionAction = "compute-host-credential";
     credential.value = draft.sshCredentialId;
     credential.onchange = () => (draft.sshCredentialId = credential.value);
     const help = element(
       "div",
-      "Logins to this compute host use the credential; add one under Credentials.",
+      "Logins use the credential, added under Credentials. With none, you answer each login yourself.",
       "csFieldHelp",
     );
     const [error, footer] = formFooter(

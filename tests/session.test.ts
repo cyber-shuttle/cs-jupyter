@@ -387,27 +387,55 @@ describe("compute host and credential dialogs", () => {
     expect(widget.node.innerHTML).not.toContain("PRIVATE KEY TEXT");
   });
 
-  it("saves a password or a prompt-only credential without a keypair", async () => {
+  it("saves a password credential without a keypair", async () => {
     const api = planeFake();
     const widget = new SshKeys(api as any);
-    for (const [kind, fields, request] of [
-      ["password", { credentialPassword: "pw" }, { password: "pw" }],
-      ["prompt", {}, { fullInteractive: true }],
-    ] as const) {
-      toggle(widget, "add-credential-toggle");
-      fill(widget, { credentialKind: kind }, "change");
-      expect(control(widget, "credentialPublicKey")).toBeNull();
-      fill(widget, { credentialName: "campus", ...fields });
+    toggle(widget, "add-credential-toggle");
+    fill(widget, { credentialKind: "password" }, "change");
+    expect(control(widget, "credentialPublicKey")).toBeNull();
+    fill(widget, { credentialName: "campus", credentialPassword: "pw" });
+    widget.node.querySelector("form")!.requestSubmit();
+    await vi.waitFor(() =>
+      expect(api.addCredential).toHaveBeenLastCalledWith({
+        sshCredentialName: "campus",
+        password: "pw",
+      }),
+    );
+  });
+
+  it("saves a compute host with no credential as ask-at-login", async () => {
+    const prompt = {
+      ...credentialFixture(),
+      sshCredentialId: processId(9),
+      fullInteractive: true,
+    };
+    const api = planeFake({
+      listCredentials: vi.fn(async () => [] as (typeof prompt)[]),
+      addCredential: vi.fn(async () => prompt),
+    });
+    const widget = new SshHosts(api as any);
+    await widget.refresh();
+    for (const calls of [1, 1]) {
+      toggle(widget, "add-compute-host-toggle");
+      expect(control(widget, "computeHostCredential")!.value).toBe("");
+      fill(widget, {
+        computeHostLoginUser: "me",
+        computeHostWorkRoot: "/home/me",
+      });
       widget.node.querySelector("form")!.requestSubmit();
-      await vi.waitFor(() =>
-        expect(api.addCredential).toHaveBeenLastCalledWith({
-          sshCredentialName: "campus",
-          ...request,
-        }),
-      );
       await vi.waitFor(() =>
         expect(widget.node.querySelector("form")).toBeNull(),
       );
+      expect(api.addComputeHost).toHaveBeenLastCalledWith(
+        expect.objectContaining({ sshCredentialId: prompt.sshCredentialId }),
+      );
+      expect(api.addCredential).toHaveBeenCalledTimes(calls);
+      api.listCredentials.mockResolvedValue([prompt]);
+      await widget.refresh();
     }
+    expect(api.addCredential).toHaveBeenCalledWith({
+      sshCredentialName: "Ask at each login",
+      fullInteractive: true,
+    });
   });
 });
