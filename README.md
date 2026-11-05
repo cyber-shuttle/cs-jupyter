@@ -27,21 +27,21 @@ A compute host is your login on a cluster. You name the cluster, your user name 
 can store a keypair or a password for it. You can also store nothing and answer each login yourself. When the cluster
 asks for more, such as a one-time code, a dialog asks you.
 
-<img src="docs/media/04-compute-host-add.png" alt="Adding a compute host" width="720">
+<img src="docs/media/compute-host.png" alt="Adding a compute host" width="720">
 
 ### Request a compute node from a form
 
 **Add Session** logs in to the cluster and reads your Slurm accounts and partitions. You choose from them, then set
 cores, memory, GPUs and walltime. **Create** submits the job. There is no batch script to write.
 
-<img src="docs/media/07-add-session.png" alt="The Add Session form" width="720">
+<img src="docs/media/add-session.png" alt="The Add Session form" width="720">
 
 ### Work in JupyterLab on the node
 
 **Connect** opens JupyterLab on the compute node. The file browser shows the session's folder on the cluster.
 Notebooks, consoles and terminals run inside the job. The status bar counts down the walltime.
 
-<img src="docs/media/10-connected.png" alt="JupyterLab connected to a session" width="800">
+<img src="docs/media/connected.png" alt="JupyterLab connected to a session" width="800">
 
 ### Watch the job
 
@@ -49,14 +49,14 @@ Each session shows its state, its resources and its remaining walltime. Opening 
 memory and GPU use. It also adds a log of each state the session has passed through. You can see a queued job start,
 and you can spot an idle one.
 
-<img src="docs/media/09-ready.png" alt="A ready session with its usage and status log" width="720">
+<img src="docs/media/session.png" alt="A ready session with its usage and status log" width="720">
 
 ### Stop a session and review it later
 
 **Stop** cancels the Slurm job and releases the allocation. The session then moves to **Run History**. Run History
 lists every run with its outcome, how long it ran and its status log.
 
-<img src="docs/media/12-run-history.png" alt="Run History with one finished run opened" width="720">
+<img src="docs/media/run-history.png" alt="Run History with one finished run opened" width="720">
 
 ## Getting started
 
@@ -76,7 +76,7 @@ The ARTISAN group runs a deployment at <https://jupyter.cybershuttle.org>. To ru
 4. Wait for the session to read `READY`, then choose **Connect**.
 5. Choose **Stop** when you are done.
 
-The [user guide](docs/USING.md) walks through each step with screenshots.
+The [user guide](docs/USING.md) shows a short recording of each step.
 
 ## FAQ
 
@@ -111,14 +111,14 @@ The [user guide](docs/USING.md) walks through each step with screenshots.
 
 ## Learn more
 
-| Document                                     | Covers                                                                |
-| -------------------------------------------- | --------------------------------------------------------------------- |
-| [docs/USING.md](docs/USING.md)               | Compute hosts, sessions, connecting and Run History, with screenshots |
-| [docs/SETTING-UP.md](docs/SETTING-UP.md)     | The commands that bring up the CyberShuttle API and this site         |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | API routes, sign-in, the session lifecycle and fail-closed compute    |
-| [CONTRIBUTING.md](CONTRIBUTING.md)           | Development setup, scripts and CI                                     |
-| [SECURITY.md](SECURITY.md)                   | Reporting a vulnerability and the client's security properties        |
-| [CHANGELOG.md](CHANGELOG.md)                 | What changed in each release                                          |
+| Document                                     | Covers                                                               |
+| -------------------------------------------- | -------------------------------------------------------------------- |
+| [docs/USING.md](docs/USING.md)               | Compute hosts, sessions, connecting and Run History, with recordings |
+| [docs/SETTING-UP.md](docs/SETTING-UP.md)     | The commands that bring up the CyberShuttle API and this site        |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | API routes, sign-in, the session lifecycle and fail-closed compute   |
+| [CONTRIBUTING.md](CONTRIBUTING.md)           | Development setup, scripts and CI                                    |
+| [SECURITY.md](SECURITY.md)                   | Reporting a vulnerability and the client's security properties       |
+| [CHANGELOG.md](CHANGELOG.md)                 | What changed in each release                                         |
 
 ## Getting help
 
