@@ -99,7 +99,7 @@ A form describes the job.
 
 | Field              | Value                                                      |
 | ------------------ | ---------------------------------------------------------- |
-| Application        | The application to run. Preselected when there is only one |
+| Application        | The application to run. **Base** is preselected if present |
 | Resource type      | **CPU** or **GPU**. Shown when the cluster offers both     |
 | Slurm account      | The account the job is charged to                          |
 | Partition          | The partition the job runs in                              |
