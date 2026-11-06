@@ -58,7 +58,11 @@ export class SlurmDiscovery {
   selectCluster(clusterId: string): void {
     this.stop();
     this.clusterId = clusterId;
-    this.deploymentId = this.deployments[0]?.deploymentId ?? "";
+    this.deploymentId =
+      (
+        this.deployments.find((each) => each.name === "Base") ??
+        this.deployments[0]
+      )?.deploymentId ?? "";
     this.slurm = undefined;
   }
 

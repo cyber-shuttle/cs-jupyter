@@ -72,4 +72,26 @@ describe("Add Session form", () => {
     });
     widget.dispose();
   });
+
+  it("preselects the Base application", () => {
+    const widget = new CreateSessionForm(planeFake() as unknown as PlaneClient);
+    widget.setClusters(
+      [clusterFixture()],
+      [
+        deploymentFixture(),
+        { ...deploymentFixture(), deploymentId: PROCESS_ID, name: "Base" },
+      ],
+    );
+    const cluster = widget.node.querySelector<HTMLSelectElement>(
+      'select[name="clusterId"]',
+    )!;
+    cluster.value = CLUSTER_ID;
+    cluster.dispatchEvent(new Event("change"));
+    expect(
+      widget.node.querySelector<HTMLSelectElement>(
+        'select[name="deploymentId"]',
+      )!.value,
+    ).toBe(PROCESS_ID);
+    widget.dispose();
+  });
 });
