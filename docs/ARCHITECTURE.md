@@ -20,11 +20,12 @@ Paths are relative to `cybershuttlePlaneApiUrl` (`…/api/v1`).
 | `GET ssh-interactive-auths`; `POST ssh-interactive-auths/{id}/response` | Logins waiting on the user, and answers  | Bearer                                            |
 | `POST slurm-cluster-configs/{id}/discover-allocations`                  | Slurm accounts and partitions            | Bearer                                            |
 | `GET slurm-deployments`, `GET application-templates`                    | Applications                             | Bearer                                            |
-| `GET processes/me`, `GET processes/{id}`; `POST processes`              | Sessions and runs; create                | Bearer                                            |
-| `POST processes/{id}/launch`, `/stop`                                   | Launch, stop                             | Bearer                                            |
-| `GET processes/{id}/statuses`                                           | Status log                               | Bearer                                            |
-| `GET processes/{id}/access`                                             | App URI and token once the link is up    | Bearer                                            |
-| `processes/{id}/proxy/{port}/`                                          | Jupyter, and Linkspan's `api/v1/usage`   | Run token (`Authorization: token`, `?token=`)     |
+| `GET sessions/me`, `GET sessions/{id}`; `POST sessions`                 | Sessions and their runs; create          | Bearer                                            |
+| `POST sessions/{id}/start`; `POST processes/{run}/stop`                 | Start, stop                              | Bearer                                            |
+| `DELETE sessions/{id}`                                                  | Delete an ended session                  | Bearer                                            |
+| `GET processes/{run}/statuses`                                          | Status log                               | Bearer                                            |
+| `GET processes/{run}/access`                                            | App URI and token once the link is up    | Bearer                                            |
+| `processes/{run}/proxy/{port}/`                                         | Jupyter, and Linkspan's `api/v1/usage`   | Run token (`Authorization: token`, `?token=`)     |
 
 - Requests go through `safePlaneFetch`: same origin as the configured URL, `credentials: "omit"`,
   `redirect: "error"`, `cache: "no-store"`; no cookies or XSRF header. A `401` drops the ID token, and the next
@@ -48,33 +49,34 @@ shared ones carry a `permission`. An application is a `slurm-deployments` entry 
 
 ## Session lifecycle
 
-A session is one `BATCH_JOB` process; its id is the process id.
+A session owns runs; each run is a `BATCH_JOB` process; `runs[0]` is current.
 
-| State                              | Client behaviour                                  |
-| ---------------------------------- | ------------------------------------------------- |
-| `CREATED`                          | Never launched. **Start** launches it             |
-| `SUBMITTED`                        | Polled; status log shown                          |
-| `READY`, `RUNNING`                 | Access fetched; **Connect** enabled once it is up |
-| `COMPLETED`, `FAILED`, `CANCELLED` | A run in **Run History**                          |
+| State                              | Client behaviour                                |
+| ---------------------------------- | ----------------------------------------------- |
+| `CREATED`, `SUBMITTED`             | Live. Polled; status log shown; **Stop**        |
+| `READY`, `RUNNING`                 | Live. Access fetched; **Connect** once it is up |
+| `COMPLETED`, `FAILED`, `CANCELLED` | Ended. **Start** launches a new run             |
 
-Every second the Launcher reads `processes/me`, `statuses` for each session whose detail is open, and usage
-for each linked one.
+Every second the Launcher reads `sessions/me`, `statuses` for each run whose detail is open, and usage
+for each linked session.
 
 **Connect** reloads with `?session=<id>&workspace=<id>`; only the session ID enters the URL. On load
-`src/index.ts` requests fresh access and points JupyterLab's contents, kernels, kernelspecs, sessions and terminals managers at it.
+`src/index.ts` reads `sessions/{id}`, then fresh access on `runs[0].processId`, and points JupyterLab's contents, kernels, kernelspecs, sessions and terminals managers at it.
 A Jupyter `401` or `403` reloads the page for fresh access; another before Jupyter next succeeds is reported. The
-session page returns to the Launcher on sign-out, and with the run's report once the session ends or its walltime
-runs out.
+session page returns to the Launcher on sign-out, with the run's report once the session is no longer `live`, and
+without one once the session is gone.
 
-The JupyterLab layout is stored in the session's Jupyter root at `.cybershuttle/workspaces/<id>.json`, replacing
-JupyterLite's browser-local workspace. Nothing from this repository runs on the compute node.
+The JupyterLab layout is stored in the run's Jupyter root at `.cybershuttle/workspaces/<id>.json`, replacing
+JupyterLite's browser-local workspace. Each run works in `<work root>/<processId>`, so **Start** opens a fresh folder
+and layout; the last run's files stay in that run's folder on the cluster. Nothing from this repository runs on
+the compute node.
 
 ## Countdown and usage
 
-- Deadline = the job's `BEGIN` status + `wallTimeMinutes`, ticked locally each second.
+- Deadline = `runs[0].deadline`, ticked locally each second.
 - The status-bar countdown reads the Launcher panel, which lives as long as the page.
 - Every surface warns below ten minutes.
-- Usage is Linkspan's current report, read through the proxy on the process's `controlPort` with the run token
+- Usage is Linkspan's current report, read through the proxy on `runs[0].controlPort` with the run token
   `access` gave; the Launcher keeps the last 20 per session.
 
 ## Fail-closed compute

@@ -6,12 +6,8 @@ import { Signal } from "@lumino/signaling";
 import { PanelBoundWidget } from "./RebuildingWidget";
 import type { SessionState, ISession } from "./Common";
 import type { CyberShuttlePanel } from "./CyberShuttlePanel";
-import {
-  displayState,
-  getActiveSessionId,
-  sessionHomeUrl,
-  sessionTitle,
-} from "./session";
+import { getActiveSessionId, sessionHomeUrl, sessionTitle } from "./session";
+import { lifecycleButtons } from "./SessionDetail";
 import {
   button,
   CLOCK_GLYPH,
@@ -124,20 +120,24 @@ export class SessionList extends PanelBoundWidget {
     return section;
   }
 
-  private _sessionCard(session: ISession): HTMLButtonElement {
-    const current = session.id === getActiveSessionId();
-    const state = displayState(session, this._state.busySessionIds);
-    const card = button(
-      "",
-      `jp-LauncherCard csSessionCard${current ? " csSessionCardCurrent" : ""}`,
-      () => this.sessionRequested.emit(session.id),
-    );
+  private _sessionCard(session: ISession): HTMLElement {
+    const current = session.sessionId === getActiveSessionId();
+    const { state } = session;
     const title = sessionTitle(this._state, session);
     const caption = `${title}, ${state}${current ? ", current session" : ""}`;
-    card.setAttribute("aria-label", caption);
-    card.title = caption;
+    const card = element(
+      "div",
+      "",
+      `jp-LauncherCard csSessionCard${current ? " csSessionCardCurrent" : ""}`,
+      { role: "group", "aria-label": caption },
+    );
     card.dataset.category = "CyberShuttle Sessions";
-    card.dataset.sessionAction = session.id;
+    const open = button("", "csSessionCardOpen", () =>
+      this.sessionRequested.emit(session.sessionId),
+    );
+    open.setAttribute("aria-label", caption);
+    open.title = caption;
+    open.dataset.sessionAction = session.sessionId;
     const label = element(
       "div",
       "",
@@ -155,7 +155,23 @@ export class SessionList extends PanelBoundWidget {
       sessionResourceRow(session),
       ...(countsDown(session) ? [countdown(session)] : []),
     );
-    card.append(sessionIcon(session, state), label);
+    open.append(sessionIcon(session, state), label);
+    const actions = element("div", "", "csSessionCardActions");
+    actions.append(
+      ...lifecycleButtons(session, this._state, this._panel.actions),
+    );
+    if (!session.live) {
+      const remove = button(
+        "✕",
+        "csTextButton",
+        () => void this._panel.actions.remove(session.sessionId),
+      );
+      remove.setAttribute("aria-label", "Delete session");
+      remove.dataset.sessionAction = `delete:${session.sessionId}`;
+      remove.disabled = this._state.busySessionIds.has(session.sessionId);
+      actions.appendChild(remove);
+    }
+    card.append(open, actions);
     return card;
   }
 }

@@ -25,7 +25,7 @@ const GPU_SLURM: ISlurmInfo = {
 };
 
 describe("Add Session form", () => {
-  it("emits the chosen resources as the run's batch job config", async () => {
+  it("emits the chosen resources as the session request", async () => {
     const widget = new CreateSessionForm(
       planeFake({
         discoverSlurm: vi.fn(async () => GPU_SLURM),
@@ -61,13 +61,14 @@ describe("Add Session form", () => {
     expect(requested).toHaveBeenCalledWith({
       slurmClusterConfigId: CLUSTER_ID,
       deploymentId: DEPLOYMENT_ID,
-      batchJobConfig: {
-        allocation: "project-a",
-        partition: "gpu",
-        cpus: 2,
-        mem: "4096M",
-        wallTimeMinutes: 60,
-        gres: "gpu:a100:1",
+      account: "project-a",
+      partition: "gpu",
+      resources: {
+        cores: 2,
+        memoryMb: 4096,
+        wallMinutes: 60,
+        gpuCount: 1,
+        gpuType: "a100",
       },
     });
     widget.dispose();

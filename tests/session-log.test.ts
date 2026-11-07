@@ -16,11 +16,8 @@ import {
   uiState,
 } from "./fakes";
 
-const session = sessionFixture({ state: "SUBMITTED" });
-
-function sessionInState(state: ISession["state"]): ISession {
-  return { ...session, state };
-}
+const sessionInState = (state: ISession["state"], live = true): ISession =>
+  sessionFixture({ state, live });
 
 const LOG_AT = "2026-01-01T00:00:00.000Z";
 
@@ -53,8 +50,8 @@ function detailState(
   const lines = texts.map((text) => ({ text, at: LOG_AT }));
   return uiState({
     sessions: [value],
-    logs: new Map([[value.id, logTail(value.id, lines)]]),
-    jupyterReady: new Set(value.state === "READY" ? [value.id] : []),
+    logs: new Map([[PROCESS_ID, logTail(PROCESS_ID, lines)]]),
+    jupyterReady: new Set(value.state === "READY" ? [value.sessionId] : []),
   });
 }
 
@@ -65,22 +62,18 @@ function sessionDetail(value: ISession): {
   const fake = new PanelStateFake(detailState(value));
   return {
     fake,
-    detail: new SessionDetail(fake as never, value.id),
+    detail: new SessionDetail(fake as never, value.sessionId),
   };
 }
 
 describe("session detail modal body", () => {
   it("shows complete metadata, literal accessible logs, and state actions", () => {
-    const value: ISession = {
-      ...sessionInState("READY"),
-      error: "bounded warning",
-      resources: {
-        cores: 4,
-        memoryMb: 4096,
-        wallMinutes: 60,
-        gpuCount: 2,
+    const value = sessionFixture(
+      {
+        resources: { cores: 4, memoryMb: 4096, wallMinutes: 60, gpuCount: 2 },
       },
-    };
+      { error: "bounded warning" },
+    );
     const { detail } = sessionDetail(value);
     for (const text of [
       "hpc-a",
@@ -109,14 +102,15 @@ describe("session detail modal body", () => {
   });
 
   it.each([
-    ["CREATED", ["Start"]],
-    ["SUBMITTED", ["Stop"]],
-    ["RUNNING", ["Stop"]],
-    ["READY", ["Stop", "Connect"]],
-    ["CANCELLED", []],
-    ["FAILED", []],
-  ] as const)("gates %s actions", (state, expected) => {
-    const { detail } = sessionDetail(sessionInState(state));
+    ["CREATED", true, ["Stop"]],
+    ["SUBMITTED", true, ["Stop"]],
+    ["RUNNING", true, ["Stop"]],
+    ["READY", true, ["Stop", "Connect"]],
+    ["CANCELLED", false, ["Start"]],
+    ["FAILED", false, ["Start"]],
+    ["COMPLETED", false, ["Start"]],
+  ] as const)("gates %s (live %s) actions", (state, live, expected) => {
+    const { detail } = sessionDetail(sessionFixture({ state, live }));
     expect(
       [...detail.node.querySelectorAll("button")].map(
         (button) => button.textContent,
@@ -134,7 +128,7 @@ describe("session detail modal body", () => {
         jupyterReady: new Set<string>(),
       }),
     );
-    const detail = new SessionDetail(fake as never, ready.id);
+    const detail = new SessionDetail(fake as never, ready.sessionId);
     expect(detail.node.textContent).not.toContain("Connect");
     detail.dispose();
   });
@@ -142,20 +136,17 @@ describe("session detail modal body", () => {
   it("rerenders live, preserves status scroll, and disconnects on dispose", () => {
     vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(200);
     vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(50);
-    const { fake, detail } = sessionDetail({
-      ...session,
-      state: "RUNNING",
-    });
+    const { fake, detail } = sessionDetail(sessionInState("RUNNING"));
     const logScroll = () =>
       detail.node.querySelector<HTMLElement>(".csSessionLogScroll")!;
     let scroller = logScroll();
     scroller.scrollTop = 40;
-    fake.setState(detailState({ ...session, state: "RUNNING" }, ["next"]));
+    fake.setState(detailState(sessionInState("RUNNING"), ["next"]));
     scroller = logScroll();
     expect(scroller.scrollTop).toBe(40);
 
     scroller.scrollTop = 150;
-    fake.setState(detailState({ ...session, state: "READY" }, ["ready"]));
+    fake.setState(detailState(sessionInState("READY"), ["ready"]));
     expect(detail.node.textContent).toContain("READY");
     expect(detail.node.querySelector(".csSessionLogTitle")?.textContent).toBe(
       "Status",
@@ -164,17 +155,17 @@ describe("session detail modal body", () => {
 
     logScroll().scrollTop = 40;
     fake.setState({
-      ...detailState({ ...session, state: "RUNNING" }),
+      ...detailState(sessionInState("RUNNING")),
       logs: new Map(),
     });
-    fake.setState(detailState({ ...session, state: "RUNNING" }, ["new epoch"]));
+    fake.setState(detailState(sessionInState("RUNNING"), ["new epoch"]));
     const status = detail.node.querySelector<HTMLElement>(".csSessionLog")!;
     expect(status.textContent).toContain("new epoch");
     expect(status.textContent).not.toContain("ready");
     expect(logScroll().scrollTop).toBe(200);
 
     detail.dispose();
-    fake.setState(detailState({ ...session, state: "FAILED" }));
+    fake.setState(detailState(sessionInState("FAILED")));
     expect(detail.node.textContent).not.toContain("FAILED");
   });
 });
@@ -188,7 +179,7 @@ describe("what belongs to a session and what belongs to its run", () => {
     running.detail.dispose();
 
     for (const state of ["CANCELLED", "FAILED"] as const) {
-      const { detail } = sessionDetail(sessionInState(state));
+      const { detail } = sessionDetail(sessionInState(state, false));
       expect(detail.node.querySelector(".csSessionLogScroll")).toBeNull();
       detail.dispose();
     }

@@ -22,14 +22,15 @@ The same dialog asks for a one-time code when the cluster requires one.
 
 ### Sessions from a form
 
-A session is a Slurm job that runs a Jupyter server. The **Add Session** form lists the Slurm accounts and partitions
-available to your login. You set cores, memory, GPUs and walltime. **Create** submits the job.
+A session is a saved job request that runs a Jupyter server, and you can start it again. Each start is a new Slurm
+job in its own folder. The **Add Session** form lists the Slurm accounts and partitions available to your login. You
+set cores, memory, GPUs and walltime. **Create** submits the job.
 
 <img src="docs/media/add-session.png" alt="The Add Session form" width="720">
 
 ### JupyterLab on the compute node
 
-**Connect** attaches JupyterLab to the session. The file browser shows the session's folder on the cluster.
+**Connect** attaches JupyterLab to the session. The file browser shows the run's folder on the cluster.
 Notebooks, consoles and terminals run inside the job. The status bar shows the walltime left.
 
 <img src="docs/media/connected.png" alt="JupyterLab connected to a session" width="800">

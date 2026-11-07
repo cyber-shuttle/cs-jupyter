@@ -10,7 +10,6 @@ import {
   IUsageSample,
   ISession,
   isRunning,
-  isTerminal,
   type Schemas,
 } from "./Common";
 import { AuthInteractionRequiredError } from "./AuthClient";
@@ -26,7 +25,7 @@ import {
 import { SessionActions } from "./session-actions";
 import { SessionList } from "./SessionList";
 import { SessionModals } from "./modals";
-import { button, element, remainingMs } from "./dom";
+import { button, element } from "./dom";
 import { LoginPrompts } from "./LoginPrompts";
 import { USAGE_SLOTS } from "./usage";
 
@@ -141,7 +140,6 @@ export class CyberShuttlePanel extends StackedPanel {
   private _logs = new Map<string, ISessionLogTail>();
   readonly logWatchers = new Set<ReadonlySet<string>>();
   private _samples = new Map<string, IUsageSample[]>();
-  private _runs: ISession[] = [];
   private _loading = false;
   private _updatesStatus = "";
   private _error = "";
@@ -168,7 +166,7 @@ export class CyberShuttlePanel extends StackedPanel {
       onError: (message) => (this._error = message),
       sessions: () => this._sessions,
       clusters: () => this._hosts ?? [],
-      replaceSessions: (sessions) => (this._sessions = sessions),
+      replaceSessions: (sessions) => this._setSessions(sessions),
       rejectDetail: () => this._modals.rejectDetail(),
     });
     this._modals = new SessionModals(this, _api);
@@ -194,7 +192,6 @@ export class CyberShuttlePanel extends StackedPanel {
       sessions: this._sessions,
       logs: this._logs,
       samples: this._samples,
-      runs: this._runs,
       clusters: this._hosts ?? [],
       deployments: this._deployments,
       loading: this._loading,
@@ -222,36 +219,30 @@ export class CyberShuttlePanel extends StackedPanel {
     if (unchanged(sessions, this._sessions)) {
       return;
     }
-    const next = new Map(sessions.map((session) => [session.id, session]));
-    for (const previous of this._sessions) {
-      const session = next.get(previous.id);
-      if (!session || isTerminal(session.state)) {
-        this._actions.releaseSession(previous.id);
-        this._logs = new Map(
-          [...this._logs].filter(([id]) => id !== previous.id),
-        );
+    const next = new Map(sessions.map((each) => [each.sessionId, each]));
+    for (const previous of this._sessions.filter((each) => each.live)) {
+      const run = previous.runs[0].processId;
+      const session = next.get(previous.sessionId);
+      if (!session?.live || session.runs[0].processId !== run) {
+        this._actions.releaseSession(previous.sessionId);
+        this._logs = new Map([...this._logs].filter(([id]) => id !== run));
       } else if (!isRunning(session.state)) {
-        this._actions.releaseJupyter(previous.id);
+        this._actions.releaseJupyter(previous.sessionId);
       }
     }
     this._sessions = sessions;
     this._emitState();
   }
 
-  // Every tick, since walltime runs out without the list changing.
   private _leaveIfEnded(): boolean {
     const id = getActiveSessionId();
-    const live = this._sessions.find((session) => session.id === id);
-    if (
-      !id ||
-      !(
-        this._runs.some((run) => run.id === id) ||
-        (live && remainingMs(live, Date.now()) === 0)
-      )
-    ) {
+    const session = this._sessions.find((each) => each.sessionId === id);
+    if (!id || session?.live) {
       return false;
     }
-    sessionStorage.setItem(RUN_REPORT_KEY, id);
+    if (session) {
+      sessionStorage.setItem(RUN_REPORT_KEY, session.runs[0].processId);
+    }
     window.location.replace(sessionHomeUrl());
     return true;
   }
@@ -281,15 +272,11 @@ export class CyberShuttlePanel extends StackedPanel {
     void this._logins.check();
     const epoch = this._signedInEpoch;
     try {
-      const list = await this._api.listSessions();
+      const sessions = await this._api.listSessions();
       if (this._stale(epoch)) {
         return;
       }
-      this._setSessions(list.sessions);
-      if (!unchanged(list.runs, this._runs)) {
-        this._runs = list.runs;
-        this._emitState();
-      }
+      this._setSessions(sessions);
       if (this._leaveIfEnded()) return;
       await Promise.all([this._pollSamples(epoch), this._pollLogs(epoch)]);
       if (this._stale(epoch)) {
@@ -298,10 +285,10 @@ export class CyberShuttlePanel extends StackedPanel {
       for (const session of this._sessions) {
         if (
           isRunning(session.state) &&
-          !this._actions.jupyterReady.has(session.id) &&
-          !this._actions.hasJupyterOperation(session.id)
+          !this._actions.jupyterReady.has(session.sessionId) &&
+          !this._actions.hasJupyterOperation(session.sessionId)
         ) {
-          void this._actions.refreshJupyter(session.id);
+          void this._actions.refreshJupyter(session.sessionId);
         }
       }
       this._setUpdatesStatus("");
@@ -325,7 +312,9 @@ export class CyberShuttlePanel extends StackedPanel {
       .filter(
         (id) =>
           !this._logs.has(id) ||
-          this._sessions.some((session) => session.id === id),
+          this._sessions.some(
+            (session) => session.live && session.runs[0].processId === id,
+          ),
       );
     const tails = await Promise.all(
       ids.map((id) => this._api.getSessionLogs(id).catch(() => undefined)),
@@ -334,13 +323,13 @@ export class CyberShuttlePanel extends StackedPanel {
       return;
     }
     const fresh = tails.flatMap((tail) =>
-      tail && !unchanged(tail, this._logs.get(tail.sessionId)) ? [tail] : [],
+      tail && !unchanged(tail, this._logs.get(tail.processId)) ? [tail] : [],
     );
     if (fresh.length) {
       this._logs = new Map([
         ...this._logs,
         ...fresh.map((tail): [string, ISessionLogTail] => [
-          tail.sessionId,
+          tail.processId,
           tail,
         ]),
       ]);
@@ -350,7 +339,7 @@ export class CyberShuttlePanel extends StackedPanel {
 
   private async _pollSamples(epoch: number): Promise<void> {
     const live = this._sessions.filter((session) =>
-      this._actions.jupyterReady.has(session.id),
+      this._actions.jupyterReady.has(session.sessionId),
     );
     await Promise.all(live.map((session) => this._pollSample(session, epoch)));
     if (this._stale(epoch)) {
@@ -358,7 +347,7 @@ export class CyberShuttlePanel extends StackedPanel {
     }
     let changed = false;
     for (const id of [...this._samples.keys()]) {
-      if (!live.some((session) => session.id === id)) {
+      if (!live.some((session) => session.sessionId === id)) {
         this._samples.delete(id);
         changed = true;
       }
@@ -374,8 +363,8 @@ export class CyberShuttlePanel extends StackedPanel {
       if (this._stale(epoch)) {
         return;
       }
-      this._samples.set(session.id, [
-        ...(this._samples.get(session.id) ?? []).slice(1 - USAGE_SLOTS),
+      this._samples.set(session.sessionId, [
+        ...(this._samples.get(session.sessionId) ?? []).slice(1 - USAGE_SLOTS),
         { ...report, at: Date.now() },
       ]);
       this._emitState();
@@ -416,7 +405,6 @@ export class CyberShuttlePanel extends StackedPanel {
     this._deployments = [];
     this._logs = new Map();
     this._samples = new Map();
-    this._runs = [];
     this._updatesStatus = "";
     this._error = "";
     this._emitState();

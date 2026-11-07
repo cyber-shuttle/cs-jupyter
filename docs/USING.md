@@ -15,13 +15,13 @@ The recordings use a cluster named `hpc-a` and a user named `researcher`. Your d
 
 ## Terms
 
-| Term         | Meaning                                                             |
-| ------------ | ------------------------------------------------------------------- |
-| Compute host | Your login on one cluster                                           |
-| Credential   | A keypair or a password that logs in to a compute host              |
-| Work root    | A folder on the cluster. Each session gets its own folder inside it |
-| Session      | One Slurm job that runs a Jupyter server                            |
-| Run          | An entry in Run History: a running or ended session                 |
+| Term         | Meaning                                                         |
+| ------------ | --------------------------------------------------------------- |
+| Compute host | Your login on one cluster                                       |
+| Credential   | A keypair or a password that logs in to a compute host          |
+| Work root    | A folder on the cluster. Each run gets its own folder inside it |
+| Session      | A saved job request you can start again                         |
+| Run          | One Slurm job of a session                                      |
 
 ## 1. Sign in
 
@@ -112,12 +112,13 @@ A form describes the job.
 
 You can close the dialog. The session stays on the Launcher as a card. Choose the card to open it again.
 
-| State                              | Meaning                         | Actions                 |
-| ---------------------------------- | ------------------------------- | ----------------------- |
-| `CREATED`                          | Saved, not submitted            | **Start** submits it    |
-| `SUBMITTED`                        | Waiting in the Slurm queue      | **Stop** cancels it     |
-| `READY`, `RUNNING`                 | Running on a compute node       | **Connect** or **Stop** |
-| `COMPLETED`, `FAILED`, `CANCELLED` | Ended. The session is now a run | Open it in Run History  |
+The card shows **Start**, **Stop**, **Connect** and **✕**.
+
+| State                              | Meaning                 | Actions                 |
+| ---------------------------------- | ----------------------- | ----------------------- |
+| `CREATED`, `SUBMITTED`             | Live, waiting to start  | **Stop** cancels it     |
+| `READY`, `RUNNING`                 | Live, on a compute node | **Connect** or **Stop** |
+| `COMPLETED`, `FAILED`, `CANCELLED` | Ended                   | **Start** runs it again |
 
 ## 5. Connect
 
@@ -133,7 +134,7 @@ The dialog also shows the time remaining and plots of CPU and memory use. A GPU 
 
 | Part of the page | Shows                                                              |
 | ---------------- | ------------------------------------------------------------------ |
-| File browser     | The session's folder inside the work root                          |
+| File browser     | The run's folder inside the work root                              |
 | Notebook         | The kernels that the job offers                                    |
 | Terminal         | A shell on the compute node. It is under **Other** on the Launcher |
 | Session card     | **Current** marks the connected session                            |
@@ -158,10 +159,11 @@ the Launcher and shows the run's report.
 **Stop** cancels the Slurm job and releases its allocation. Unsaved work in kernels and terminals is lost. Saved
 files stay on the cluster.
 
-Run History lists running sessions first, then ended runs, newest first. A report shows the end time, the outcome,
+Run History lists every run of your sessions: running sessions first, then ended runs, newest first. A report shows the end time, the outcome,
 the duration and the status log. A failed run also shows the error.
 
-An ended session cannot be started again. Add a new session.
+**Start** runs an ended session again in a fresh folder. The last run's files stay in that run's folder on the
+cluster. **✕** deletes the session with its runs.
 
 ## Signing out
 

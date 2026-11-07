@@ -21,14 +21,11 @@ describe("OAuth cross-origin CyberShuttle API client", () => {
       auth,
       browserFetch,
     );
-    await expect(client.listSessions()).resolves.toEqual({
-      sessions: [],
-      runs: [],
-    });
+    await expect(client.listSessions()).resolves.toEqual([]);
     const [input, init] = browserFetch.mock.calls[0];
     assert.isDefined(init);
     expect((input as Request).url).toBe(
-      "https://plane.example.edu/api/v1/processes/me",
+      "https://plane.example.edu/api/v1/sessions/me",
     );
     const headers = new Headers(init.headers);
     expect([...headers]).toEqual([

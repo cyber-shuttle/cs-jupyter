@@ -31,7 +31,7 @@ export class SessionController {
 
   async select(session: ISession, isCurrent: () => boolean): Promise<void> {
     const previous = getActiveSessionId();
-    if (session.id === previous) return;
+    if (session.sessionId === previous) return;
     if (previous) {
       if (!this._app.commands.hasCommand("docmanager:save-all")) {
         throw new Error(
@@ -40,7 +40,7 @@ export class SessionController {
       }
       await this._app.commands.execute("docmanager:save-all");
       if (!isCurrent()) return;
-      const live = await this._api.getSession(session.id);
+      const live = await this._api.getSession(session.sessionId);
       if (!isCurrent()) return;
       if (!isRunning(live.state)) {
         throw new Error("Session changed before selection completed.");
@@ -49,7 +49,7 @@ export class SessionController {
     const documentPath =
       this._requestedDocumentPath ?? this._activeDocumentContext()?.path;
     this._requestedDocumentPath = undefined;
-    this._navigate(this._destination(session.id, documentPath));
+    this._navigate(this._destination(session.sessionId, documentPath));
   }
 
   private _activeDocumentContext(): IDocumentContextLike | undefined {

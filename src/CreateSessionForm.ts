@@ -108,9 +108,7 @@ function freshDraft(): ISessionDraft {
 }
 
 export class CreateSessionForm extends Widget {
-  readonly createRequested = new Signal<this, Schemas["BatchProcessRequest"]>(
-    this,
-  );
+  readonly createRequested = new Signal<this, Schemas["SessionRequest"]>(this);
   private _busy = false;
   private _error = "";
   private _create: HTMLButtonElement | undefined;
@@ -400,22 +398,22 @@ export class CreateSessionForm extends Widget {
         return;
       }
       this._error = "";
-      const gpus = Number(gpuCount.value);
+      const count = Number(gpuCount.value);
       const gpu =
         this._draft.resourceType !== "gpu"
           ? {}
           : gpuType.value === "gpu"
-            ? { gpus }
-            : { gres: `gpu:${gpuType.value}:${gpus}` };
+            ? { gpuCount: count }
+            : { gpuCount: count, gpuType: gpuType.value };
       this.createRequested.emit({
         slurmClusterConfigId: this._discovery.clusterId,
         deploymentId: this._discovery.deploymentId,
-        batchJobConfig: {
-          allocation: this._discovery.account.value,
-          partition: choice.partition.name,
-          cpus: Number(cores.value),
-          mem: `${memory.value}M`,
-          wallTimeMinutes: Number(wall.value),
+        account: this._discovery.account.value,
+        partition: choice.partition.name,
+        resources: {
+          cores: Number(cores.value),
+          memoryMb: Number(memory.value),
+          wallMinutes: Number(wall.value),
           ...gpu,
         },
       });
