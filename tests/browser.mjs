@@ -366,9 +366,9 @@ try {
     "the PKCE code verifier must not enter the URL, localStorage, or logs",
   );
   assert.deepEqual(
-    Object.keys(browserState.sessionStorage),
-    ["cybershuttle.oauth.v1"],
-    "session storage holds only the credentials",
+    Object.keys(browserState.sessionStorage).sort(),
+    ["cybershuttle.connection.v1", "cybershuttle.oauth.v1"],
+    "session storage holds only the credentials and this tab's connection id",
   );
   assert.ok(planeRequests.includes("GET /api/v1/processes/me"));
 

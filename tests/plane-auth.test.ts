@@ -12,7 +12,7 @@ afterEach(() => {
 });
 
 describe("OAuth cross-origin CyberShuttle API client", () => {
-  it("sends only a bearer ID token to the configured CyberShuttle API origin", async () => {
+  it("sends only a bearer ID token and this tab's connection to the configured CyberShuttle API origin", async () => {
     const browserFetch = vi.fn<typeof globalThis.fetch>(async () =>
       jsonResponse([]),
     );
@@ -31,7 +31,10 @@ describe("OAuth cross-origin CyberShuttle API client", () => {
       "https://plane.example.edu/api/v1/processes/me",
     );
     const headers = new Headers(init.headers);
-    expect([...headers]).toEqual([["authorization", "Bearer delegated-token"]]);
+    expect([...headers]).toEqual([
+      ["authorization", "Bearer delegated-token"],
+      ["x-connection-id", sessionStorage.getItem("cybershuttle.connection.v1")],
+    ]);
     expect(init.cache).toBe("no-store");
     expect(init.credentials).toBe("omit");
     expect(init.redirect).toBe("error");
