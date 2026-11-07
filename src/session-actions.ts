@@ -1,7 +1,7 @@
-// The panel's session-lifecycle verbs: create, connect, start, stop, and
+// The panel's session-lifecycle verbs: create, connect, start, stop, delete, and
 // Jupyter readiness once a session's job runs. Readiness means the CyberShuttle
 // API granted access; this page's own session starts ready, and the page a
-// connect opens fetches access again. Stop confirms first.
+// connect opens fetches access again. Stop and delete confirm first.
 import { Dialog, showDialog } from "@jupyterlab/apputils";
 import {
   clusterLabel,
@@ -34,8 +34,6 @@ interface IAccessBackoff {
   retryAt: number;
 }
 
-type BusyKind = "start" | "action";
-
 async function confirm(
   title: string,
   body: string,
@@ -54,7 +52,7 @@ async function confirm(
 
 export class SessionActions {
   private _selection = 0;
-  private _busySessionIds = new Map<string, BusyKind>();
+  private _busySessionIds = new Set<string>();
   private _busyTokens = new Map<string, number>();
   private _connectingSessionId: string | undefined;
   private _jupyterReady = new Set<string>();
@@ -71,7 +69,7 @@ export class SessionActions {
     if (active) this._jupyterReady.add(active);
   }
 
-  get busySessionIds(): ReadonlyMap<string, BusyKind> {
+  get busySessionIds(): ReadonlySet<string> {
     return this._busySessionIds;
   }
 
@@ -88,7 +86,7 @@ export class SessionActions {
   }
 
   private _session(id: string): ISession | undefined {
-    return this._hooks.sessions().find((session) => session.id === id);
+    return this._hooks.sessions().find((session) => session.sessionId === id);
   }
 
   private _selectedSession(id: string): ISession | undefined {
@@ -101,7 +99,7 @@ export class SessionActions {
   }
 
   private _label(session: ISession): string {
-    return clusterLabel(this._hooks.clusters(), session.configId);
+    return clusterLabel(this._hooks.clusters(), session.slurmClusterConfigId);
   }
 
   releaseJupyter(id: string): void {
@@ -118,9 +116,12 @@ export class SessionActions {
   }
 
   private _beginJupyter(session: ISession): IJupyterOperation {
-    this._abortJupyter(session.id);
-    const operation = { sessionId: session.id, selection: this._selection };
-    this._jupyterOperations.set(session.id, operation);
+    this._abortJupyter(session.sessionId);
+    const operation = {
+      sessionId: session.sessionId,
+      selection: this._selection,
+    };
+    this._jupyterOperations.set(session.sessionId, operation);
     return operation;
   }
 
@@ -153,10 +154,10 @@ export class SessionActions {
     }
   }
 
-  private _busy(sessionId: string, kind: BusyKind): () => void {
+  private _busy(sessionId: string): () => void {
     const token = (this._busyTokens.get(sessionId) ?? 0) + 1;
     this._busyTokens.set(sessionId, token);
-    this._busySessionIds.set(sessionId, kind);
+    this._busySessionIds.add(sessionId);
     this._hooks.emitState();
     return () => {
       if (this._busyTokens.get(sessionId) !== token) return;
@@ -205,11 +206,11 @@ export class SessionActions {
     session: ISession,
     operation: IJupyterOperation,
   ): Promise<void> {
-    if (!this._jupyterReady.has(session.id)) {
-      await this._api.getSessionAccess(session.id);
+    if (!this._jupyterReady.has(session.sessionId)) {
+      await this._api.getSessionAccess(session.runs[0].processId);
     }
     if (!this._jupyterOperationCurrent(operation)) return;
-    this._jupyterReady.add(session.id);
+    this._jupyterReady.add(session.sessionId);
     this._hooks.emitState();
   }
 
@@ -223,10 +224,10 @@ export class SessionActions {
     const current = (): boolean =>
       selection === this._selection && !this._hooks.isDisposed();
     this._hooks.onError("");
-    this._connectingSessionId = session.id;
+    this._connectingSessionId = session.sessionId;
     this._hooks.emitState();
     const operation = this._beginJupyter(session);
-    const release = this._busy(session.id, "action");
+    const release = this._busy(session.sessionId);
     try {
       try {
         await this._ensureAccess(session, operation);
@@ -235,7 +236,7 @@ export class SessionActions {
         release();
       }
       if (current()) {
-        if (!this._jupyterReady.has(session.id)) {
+        if (!this._jupyterReady.has(session.sessionId)) {
           throw new Error("Session must be READY.");
         }
         await this._controller.select(session, current);
@@ -261,27 +262,22 @@ export class SessionActions {
     }
     const session = this._selectedSession(sessionId);
     if (session) {
-      await this._act(session, (id) => this._api.startSession(id), {
-        kind: "start",
-      });
+      await this._act(session, (each) =>
+        this._api.startSession(each.sessionId),
+      );
     }
   }
 
-  async create(request: Schemas["BatchProcessRequest"]): Promise<ISession> {
+  async create(request: Schemas["SessionRequest"]): Promise<ISession> {
+    this._hooks.onError("");
     const session = await this._api.createSession(request);
-    const { ok, error } = await this._act(
+    this._hooks.replaceSessions([
       session,
-      (id) => this._api.startSession(id),
-      {
-        kind: "start",
-        report: () => false,
-        apply: (acted) => [
-          ...this._hooks.sessions().filter((each) => each.id !== acted.id),
-          acted,
-        ],
-      },
-    );
-    if (!ok) throw error;
+      ...this._hooks
+        .sessions()
+        .filter((each) => each.sessionId !== session.sessionId),
+    ]);
+    this._hooks.emitState();
     return session;
   }
 
@@ -299,46 +295,56 @@ export class SessionActions {
     if (!confirmed || this._hooks.isDisposed()) {
       return;
     }
-    await this._act(session, (id) => this._api.stopSession(id));
+    await this._act(session, (each) => this._api.stopSession(each));
   }
 
-  private async _act(
+  async remove(sessionId: string): Promise<void> {
+    const session = this._selectedSession(sessionId);
+    if (!session) {
+      return;
+    }
+    const confirmed = await confirm(
+      "Delete session",
+      "Removes this session and its runs from Run History.",
+      "Delete",
+    );
+    if (!confirmed || this._hooks.isDisposed()) {
+      return;
+    }
+    await this._act(
+      session,
+      (each) => this._api.deleteSession(each.sessionId),
+      () =>
+        this._hooks.sessions().filter((each) => each.sessionId !== sessionId),
+    );
+  }
+
+  private async _act<T>(
     session: ISession,
-    act: (id: string) => Promise<ISession>,
-    options: {
-      apply?: (acted: ISession) => ISession[];
-      report?: (error: unknown) => boolean;
-      kind?: BusyKind;
-    } = {},
-  ): Promise<{ ok: boolean; error?: unknown }> {
-    const {
-      apply = (acted: ISession) =>
-        this._hooks
-          .sessions()
-          .map((each) => (each.id === acted.id ? acted : each)),
-      report = () => true,
-      kind = "action",
-    } = options;
+    act: (session: ISession) => Promise<T>,
+    apply = (acted: T): ISession[] =>
+      this._hooks
+        .sessions()
+        .map((each) =>
+          each.sessionId === session.sessionId ? (acted as ISession) : each,
+        ),
+  ): Promise<void> {
     this._hooks.onError("");
-    this.releaseSession(session.id);
+    this.releaseSession(session.sessionId);
     const selection = this._selection;
     const current = (): boolean =>
       selection === this._selection && !this._hooks.isDisposed();
-    const release = this._busy(session.id, kind);
+    const release = this._busy(session.sessionId);
     try {
-      const acted = await act(session.id);
+      const acted = await act(session);
       if (current()) {
         this._hooks.replaceSessions(apply(acted));
       }
-      return { ok: true };
     } catch (error) {
       if (current()) {
-        if (report(error)) {
-          this._hooks.onError(errorMessage(error));
-        }
+        this._hooks.onError(errorMessage(error));
         this._hooks.emitState();
       }
-      return { ok: false, error };
     } finally {
       release();
     }
@@ -348,7 +354,7 @@ export class SessionActions {
     this._selection++;
     this._abortAllJupyter();
     this._connectingSessionId = undefined;
-    this._busySessionIds = new Map();
+    this._busySessionIds = new Set();
     this._busyTokens = new Map();
     this._jupyterReady = new Set();
     this._lastAccessError = undefined;

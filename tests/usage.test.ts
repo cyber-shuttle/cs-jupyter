@@ -9,6 +9,7 @@ import {
   processId,
   runFixture,
   sessionFixture,
+  sessionId,
   uiState,
 } from "./fakes";
 import {
@@ -21,6 +22,8 @@ import {
   usagePlots,
 } from "../src/usage";
 import { RunHistory } from "../src/RunHistory";
+
+const T = Date.UTC(2030, 0, 1);
 
 const sample = (
   seconds: number,
@@ -106,9 +109,19 @@ describe("sparkline", () => {
 
 describe("run report", () => {
   it("reports the outcome and the wall-clock span", () => {
-    const rows = new Map(runSummary(runFixture()));
-    expect(rows.get("Ran for")).toBe("1h 0m");
-    expect(rows.get("Outcome")).toBe("CANCELLED");
+    expect(
+      runSummary(
+        runFixture({
+          state: "CANCELLED",
+          startedAt: T,
+          endedAt: T + 3_600_000,
+        }),
+      ),
+    ).toEqual([
+      ["Ended", new Date(T + 3_600_000).toLocaleString()],
+      ["Outcome", "CANCELLED"],
+      ["Ran for", "1h 0m"],
+    ]);
   });
 });
 
@@ -136,21 +149,27 @@ describe("usage plots", () => {
 });
 
 describe("run history view", () => {
-  const finished = runFixture();
+  const finished = sessionFixture(
+    { state: "CANCELLED", live: false },
+    { state: "CANCELLED", startedAt: T, endedAt: T + 3_600_000 },
+  );
 
-  const live = sessionFixture({
-    id: processId(2),
-    resources: { cores: 4, memoryMb: 8192, wallMinutes: 120 },
-    startedAt: "2030-01-01T00:00:00Z",
-  });
+  const live = sessionFixture(
+    {
+      sessionId: sessionId(2),
+      resources: { cores: 4, memoryMb: 8192, wallMinutes: 120 },
+    },
+    { processId: processId(2), startedAt: T },
+  );
 
-  const panelWith = (runs: ISession[], sessions: ISession[]) =>
-    new PanelStateFake(uiState({ runs, sessions })) as never;
+  const panelWith = (sessions: ISession[]) =>
+    new PanelStateFake(uiState({ sessions })) as never;
 
   it("lists finished runs with their report, reading the opened one's detail", async () => {
-    const panel = new PanelStateFake(uiState({ runs: [finished] }));
-    const history = new RunHistory(panel as never, finished.id);
-    expect(panel.logWatchers).toContainEqual(new Set([finished.id]));
+    const run = finished.runs[0].processId;
+    const panel = new PanelStateFake(uiState({ sessions: [finished] }));
+    const history = new RunHistory(panel as never, run);
+    expect(panel.logWatchers).toContainEqual(new Set([run]));
     expect(history.node.textContent).toContain("hpc-a");
     expect(history.node.textContent).toContain("1h 0m");
     expect(history.node.querySelector("details")?.open).toBe(true);
@@ -159,7 +178,7 @@ describe("run history view", () => {
   });
 
   it("shows a session still going in its live state, not as stopped", async () => {
-    const history = new RunHistory(panelWith([finished], [live]));
+    const history = new RunHistory(panelWith([finished, live]));
     const pills = [...history.node.querySelectorAll(".csSessionState")].map(
       (node) => node.textContent,
     );
@@ -168,10 +187,25 @@ describe("run history view", () => {
     history.dispose();
   });
 
-  it("does not list a terminal session as if it were still going", async () => {
-    const stopped = { ...live, state: "CANCELLED" } as ISession;
-    const history = new RunHistory(panelWith([], [stopped]));
-    expect(history.node.textContent).toContain("No runs yet.");
+  it("lists live runs first, then every session's ended runs newest first", () => {
+    const [A1, A2, B1] = [processId(11), processId(12), processId(21)];
+    const a = sessionFixture(
+      { sessionId: sessionId(1), state: "RUNNING" },
+      { processId: A2, state: "RUNNING" },
+    );
+    a.runs.push(
+      runFixture({ processId: A1, state: "COMPLETED", endedAt: 100 }),
+    );
+    const b = sessionFixture(
+      { sessionId: sessionId(2), state: "FAILED", live: false },
+      { processId: B1, state: "FAILED", endedAt: 200 },
+    );
+    const history = new RunHistory(panelWith([a, b]));
+    expect(
+      [...history.node.querySelectorAll<HTMLElement>("summary")].map(
+        (s) => s.dataset.sessionAction,
+      ),
+    ).toEqual([A2, B1, A1]);
     history.dispose();
   });
 });

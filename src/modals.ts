@@ -93,7 +93,7 @@ export class SessionModals {
   }
 
   private async _createInDialog(
-    request: Schemas["BatchProcessRequest"],
+    request: Schemas["SessionRequest"],
     form: CreateSessionForm,
     body: Panel,
     show: (widget: Widget) => void,
@@ -105,7 +105,7 @@ export class SessionModals {
       if (body.isDisposed || form.isDisposed) {
         return;
       }
-      const detail = new SessionDetail(this._panel, session.id);
+      const detail = new SessionDetail(this._panel, session.sessionId);
       body.addWidget(detail);
       show(detail);
     } catch (error) {

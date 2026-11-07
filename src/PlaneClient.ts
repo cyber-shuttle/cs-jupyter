@@ -1,7 +1,8 @@
-// The typed client for the CyberShuttle API. A session is one BATCH_JOB process
-// and its id is the process id; ended processes are runs. accessUnavailable
-// marks the 409 an access read answers before the job's link is up, which the
-// next poll retries and no caller surfaces.
+// The typed client for the CyberShuttle API. A session is the API's
+// SessionResponse as returned; its current run is runs[0], whose process routes
+// carry stop, access, usage and statuses. accessUnavailable marks the 409 an
+// access read answers before the job's link is up, which the next poll retries
+// and no caller surfaces.
 import { PageConfig } from "@jupyterlab/coreutils";
 import { ServerConnection } from "@jupyterlab/services";
 import { Token } from "@lumino/coreutils";
@@ -15,7 +16,6 @@ import {
   ISession,
   ISlurmInfo,
   PlaneError,
-  isEnded,
   isPlainObject,
   jsonResponse,
   planeApi,
@@ -27,16 +27,14 @@ import {
   type Schemas,
 } from "./Common";
 
-export type ISessionLogTail = { sessionId: string; lines: ILogLine[] };
+export type ISessionLogTail = { processId: string; lines: ILogLine[] };
 
 export type ISessionAccess = Schemas["AccessResponse"];
 
-export interface ISessionList {
-  sessions: ISession[];
-  runs: ISession[];
-}
-
 const by = (processId: string) => ({ params: { path: { processId } } });
+const bySession = (sessionId: string) => ({
+  params: { path: { sessionId } },
+});
 
 export const accessUnavailable = (error: unknown): boolean =>
   error instanceof PlaneError && error.status === 409;
@@ -217,67 +215,55 @@ export class PlaneClient {
     };
   }
 
-  async listSessions(): Promise<ISessionList> {
-    const all = (await unwrap(this._api.GET("/api/v1/processes/me")))
-      .filter((process) => process.batchProcess)
-      .map(session);
-    return {
-      sessions: all.filter((each) => !isEnded(each.state)),
-      runs: all
-        .filter((each) => isEnded(each.state))
-        .sort(
-          (a, b) =>
-            Date.parse(b.updatedAt ?? "") - Date.parse(a.updatedAt ?? ""),
-        ),
-    };
+  listSessions(): Promise<ISession[]> {
+    return unwrap(this._api.GET("/api/v1/sessions/me"));
   }
 
-  async getSession(processId: string): Promise<ISession> {
-    const process = await unwrap(
-      this._api.GET("/api/v1/processes/{processId}", by(processId)),
+  getSession(sessionId: string): Promise<ISession> {
+    return unwrap(
+      this._api.GET("/api/v1/sessions/{sessionId}", bySession(sessionId)),
     );
-    if (!process.batchProcess) {
-      throw new Error("Session is no longer available.");
-    }
-    return session(process);
   }
 
-  async createSession(
-    batchProcess: Schemas["BatchProcessRequest"],
-  ): Promise<ISession> {
-    return session(
-      await unwrap(
-        this._api.POST("/api/v1/processes", {
-          body: { processType: "BATCH_JOB", batchProcess },
-        }),
+  createSession(request: Schemas["SessionRequest"]): Promise<ISession> {
+    return unwrap(this._api.POST("/api/v1/sessions", { body: request }));
+  }
+
+  startSession(sessionId: string): Promise<ISession> {
+    return unwrap(
+      this._api.POST(
+        "/api/v1/sessions/{sessionId}/start",
+        bySession(sessionId),
       ),
     );
   }
 
-  async startSession(processId: string): Promise<ISession> {
-    return session(
-      await unwrap(
-        this._api.POST("/api/v1/processes/{processId}/launch", by(processId)),
-      ),
+  async deleteSession(sessionId: string): Promise<void> {
+    await unwrap(
+      this._api.DELETE("/api/v1/sessions/{sessionId}", bySession(sessionId)),
     );
   }
 
-  async stopSession(processId: string): Promise<ISession> {
-    return session(
-      await unwrap(
-        this._api.POST("/api/v1/processes/{processId}/stop", by(processId)),
+  async stopSession({ sessionId, runs }: ISession): Promise<ISession> {
+    await unwrap(
+      this._api.POST(
+        "/api/v1/processes/{processId}/stop",
+        by(runs[0].processId),
       ),
     );
+    return this.getSession(sessionId);
   }
 
-  async getSessionUsage({
-    id,
-    controlPort,
-  }: Pick<ISession, "id" | "controlPort">): Promise<IUsageReport> {
+  async getSessionUsage(session: ISession): Promise<IUsageReport> {
+    const { processId, controlPort } = session.runs[0];
     const response = await this._fetch(
       new Request(
-        `${this._base}/processes/${id}/proxy/${controlPort}/api/v1/usage`,
-        { headers: { Authorization: `token ${this._tokens.get(id)}` } },
+        `${this._base}/processes/${processId}/proxy/${controlPort}/api/v1/usage`,
+        {
+          headers: {
+            Authorization: `token ${this._tokens.get(processId)}`,
+          },
+        },
       ),
       { cache: "no-store", credentials: "omit" },
     );
@@ -293,7 +279,7 @@ export class PlaneClient {
       text: status.log ?? status.status ?? "",
       at: iso(status.timestamp) ?? "",
     }));
-    return { sessionId: processId, lines };
+    return { processId, lines };
   }
 
   async getSessionAccess(processId: string): Promise<ISessionAccess> {
@@ -378,50 +364,5 @@ function parseGres(gres: string | null | undefined): IGres[] {
     });
 }
 
-const MEMORY_MB: Record<string, number> = {
-  K: 1 / 1024,
-  M: 1,
-  G: 1024,
-  T: 1024 ** 2,
-};
-
-function memoryMb(mem: string | null | undefined): number | undefined {
-  const [, amount, unit = "M"] = /^(\d+)([KMGT])?B?$/i.exec(mem ?? "") ?? [];
-  return amount ? Number(amount) * MEMORY_MB[unit.toUpperCase()] : undefined;
-}
-
 const iso = (at: number | null | undefined): string | undefined =>
   at ? new Date(at).toISOString() : undefined;
-
-function session({
-  processId,
-  lastStatus,
-  batchProcess,
-}: Schemas["ProcessResponse"]): ISession {
-  const job = batchProcess!.batchJobConfig!;
-  const state = lastStatus?.status ?? "CREATED";
-  return {
-    id: processId,
-    controlPort: batchProcess!.controlPort,
-    configId: batchProcess!.slurmClusterConfigId,
-    deploymentId: batchProcess!.deploymentId ?? undefined,
-    state,
-    account: job.allocation,
-    partition: job.partition ?? undefined,
-    resources: {
-      wallMinutes: job.wallTimeMinutes,
-      cores: job.cpus ?? undefined,
-      memoryMb: memoryMb(job.mem),
-      gpuCount:
-        job.gpus ??
-        parseGres(job.gres).find((each) => each.name.startsWith("gpu"))?.count,
-    },
-    startedAt: iso(
-      batchProcess!.batchJobStatuses
-        .filter((each) => each.status === "BEGIN")
-        .at(-1)?.updatedAt,
-    ),
-    updatedAt: iso(lastStatus?.timestamp),
-    error: (state === "FAILED" && lastStatus?.log) || undefined,
-  };
-}

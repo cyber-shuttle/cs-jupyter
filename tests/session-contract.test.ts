@@ -3,53 +3,23 @@
 import {
   clientFor,
   CLUSTER_ID,
-  processFixture,
   processId,
-  runFixture,
   sessionFixture,
+  sessionId,
 } from "./fakes";
 import { describe, expect, it } from "vitest";
 
-const providerFixture = sessionFixture({
-  startedAt: "2030-01-01T00:00:30.000Z",
-});
-const process = processFixture(providerFixture);
-const withConfig = (config: object) => ({
-  ...process,
-  batchProcess: {
-    ...process.batchProcess!,
-    batchJobConfig: { ...process.batchProcess!.batchJobConfig!, ...config },
-  },
-});
-
 describe("the CyberShuttle API session JSON contract", () => {
-  it("splits live sessions from ended runs across every deployment", async () => {
-    const ended = runFixture({ id: processId(1) });
-    const other = sessionFixture({
-      id: processId(2),
-      deploymentId: processId(3),
-    });
-    const list = await clientFor([
-      process,
-      processFixture(ended),
-      processFixture(other),
-      { ...process, processId: processId(4), batchProcess: null },
-    ]).listSessions();
-    expect(list.sessions).toEqual([providerFixture, other]);
-    expect(list.runs).toEqual([ended]);
-  });
-
-  it("reads GPUs and memory from the job's own figures, and a failed job's last log as its error", async () => {
-    const failed = sessionFixture({ state: "FAILED", error: "sbatch refused" });
-    const list = await clientFor([
-      withConfig({ gpus: null, gres: "gpu:a100:2", mem: "8G" }),
-      processFixture(failed),
-    ]).listSessions();
-    expect(list.sessions[0].resources).toMatchObject({
-      memoryMb: 8192,
-      gpuCount: 2,
-    });
-    expect(list.runs[0].error).toBe("sbatch refused");
+  it("lists every session as the CyberShuttle API returns it", async () => {
+    const live = sessionFixture();
+    const ended = sessionFixture(
+      { sessionId: sessionId(1), state: "CANCELLED", live: false },
+      { processId: processId(1), state: "CANCELLED" },
+    );
+    expect(await clientFor([live, ended]).listSessions()).toEqual([
+      live,
+      ended,
+    ]);
   });
 });
 

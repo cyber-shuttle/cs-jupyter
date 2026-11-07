@@ -1,9 +1,9 @@
-// Every run of this account's sessions, running ones first, then finished ones.
-// A live session is itself an entry with no outcome yet. RunReport renders one
-// finished entry's summary and frozen log.
+// Every run of this account's sessions, keyed by the run's processId: each live
+// session's current run first, in list order, then every other run by when it
+// ended, newest first. A live session's current run renders in flight, with no
+// outcome yet; RunReport renders any other run's summary and frozen log.
 import { PanelBoundWidget } from "./RebuildingWidget";
-import type { ILogLine, ISession, SessionState } from "./Common";
-import { isTerminal } from "./Common";
+import type { ILogLine, IRun, ISession } from "./Common";
 import type { CyberShuttlePanel } from "./CyberShuttlePanel";
 import { sessionTitle } from "./session";
 import {
@@ -20,11 +20,9 @@ import {
 import { runSummary, sessionSummary, usagePlots, when } from "./usage";
 
 interface IHistoryEntry {
-  key: string;
-  title: string;
-  state: SessionState;
-  run?: ISession;
-  session?: ISession;
+  session: ISession;
+  run: IRun;
+  inFlight: boolean;
 }
 
 export class RunHistory extends PanelBoundWidget {
@@ -39,22 +37,19 @@ export class RunHistory extends PanelBoundWidget {
   }
 
   private _entries(): IHistoryEntry[] {
-    const title = (run: ISession) => sessionTitle(this._state, run);
-    const running = this._state.sessions
-      .filter((session) => !isTerminal(session.state))
-      .map((session) => ({
-        key: session.id,
-        title: title(session),
-        state: session.state,
+    const entries = this._state.sessions.flatMap((session) =>
+      session.runs.map((run, index) => ({
         session,
-      }));
-    const finished = this._state.runs.map((run) => ({
-      key: run.id,
-      title: title(run),
-      state: run.state,
-      run,
-    }));
-    return [...running, ...finished];
+        run,
+        inFlight: session.live && index === 0,
+      })),
+    );
+    return [
+      ...entries.filter((each) => each.inFlight),
+      ...entries
+        .filter((each) => !each.inFlight)
+        .sort((a, b) => (b.run.endedAt ?? 0) - (a.run.endedAt ?? 0)),
+    ];
   }
 
   protected _rebuild(): void {
@@ -76,38 +71,36 @@ export class RunHistory extends PanelBoundWidget {
 
   protected _counting(): boolean {
     return this._entries().some(
-      (entry) => entry.session && countsDown(entry.session),
+      (entry) => entry.inFlight && countsDown(entry.session),
     );
   }
 
-  private _entry(entry: IHistoryEntry): HTMLElement {
-    const { entry: element_, body } = disclosure(entry.key, this._open, [
-      element("span", entry.title, "csCardTitle"),
-      element("span", this._when(entry), "csMeta csSshHostTarget"),
-      statePill(entry.state),
+  private _entry({ session, run, inFlight }: IHistoryEntry): HTMLElement {
+    const { entry: element_, body } = disclosure(run.processId, this._open, [
+      element("span", sessionTitle(this._state, session), "csCardTitle"),
+      element("span", this._when(run, inFlight), "csMeta csSshHostTarget"),
+      statePill(run.state),
     ]);
-    element_.querySelector("summary")!.dataset.sessionAction = entry.key;
-    const run = entry.run;
+    element_.querySelector("summary")!.dataset.sessionAction = run.processId;
     const load = (): void => {
-      if (run && element_.open) this._logIds.add(run.id);
+      if (!inFlight && element_.open) this._logIds.add(run.processId);
     };
     element_.addEventListener("toggle", load);
     load();
     body.appendChild(
-      run
-        ? RunReport(run, this._state.logs.get(run.id)?.lines)
-        : this._inFlight(entry.session!),
+      inFlight
+        ? this._inFlight(session)
+        : RunReport(run, this._state.logs.get(run.processId)?.lines),
     );
     return element_;
   }
 
-  private _when(entry: IHistoryEntry): string {
-    if (entry.run) {
-      return when(entry.run.updatedAt);
+  private _when(run: IRun, inFlight: boolean): string {
+    if (!inFlight) {
+      return when(run.endedAt);
     }
-    const started = entry.session?.startedAt;
-    return started
-      ? `started ${new Date(started).toLocaleString()}`
+    return run.startedAt
+      ? `started ${new Date(run.startedAt).toLocaleString()}`
       : "not started yet";
   }
 
@@ -117,7 +110,7 @@ export class RunHistory extends PanelBoundWidget {
       ["State", session.state],
       ...sessionSummary(session),
     ];
-    const samples = this._state.samples.get(session.id) ?? [];
+    const samples = this._state.samples.get(session.sessionId) ?? [];
     section.appendChild(
       detailColumns(
         detailGridWithRemaining(rows, session),
@@ -128,7 +121,7 @@ export class RunHistory extends PanelBoundWidget {
   }
 }
 
-export function RunReport(run: ISession, logs: ILogLine[] = []): HTMLElement {
+export function RunReport(run: IRun, logs: ILogLine[] = []): HTMLElement {
   const section = element("section", "", "csRunReport");
   section.appendChild(element("h4", "Run report", "csSessionLogTitle"));
   section.appendChild(detailGrid(runSummary(run)));

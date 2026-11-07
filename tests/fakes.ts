@@ -5,12 +5,14 @@ import { vi } from "vitest";
 import { Signal } from "@lumino/signaling";
 import type { Widget } from "@lumino/widgets";
 import type { ReadonlyPartialJSONObject } from "@lumino/coreutils";
-import type { IDeployment, IPlaneAuth, ISession, Schemas } from "../src/Common";
 import type {
-  ISessionAccess,
-  ISessionList,
-  ISessionLogTail,
-} from "../src/PlaneClient";
+  IDeployment,
+  IPlaneAuth,
+  IRun,
+  ISession,
+  Schemas,
+} from "../src/Common";
+import type { ISessionAccess, ISessionLogTail } from "../src/PlaneClient";
 import { PlaneClient } from "../src/PlaneClient";
 import { CyberShuttlePanel } from "../src/CyberShuttlePanel";
 import { jsonResponse } from "../src/Common";
@@ -100,61 +102,38 @@ export const deploymentFixture = (): IDeployment => ({
   name: "JupyterLab",
 });
 
-export function sessionFixture(overrides: Partial<ISession> = {}): ISession {
+export const sessionId = (n: number): string =>
+  `2c4e6a8b-1d3f-4a5c-8e7b-${String(n).padStart(12, "0")}`;
+export const SESSION_ID = sessionId(0);
+
+export const runFixture = (overrides: Partial<IRun> = {}): IRun => ({
+  processId: PROCESS_ID,
+  controlPort: 24000,
+  state: "READY",
+  startedAt: null,
+  deadline: null,
+  endedAt: null,
+  error: null,
+  ...overrides,
+});
+
+export function sessionFixture(
+  overrides: Partial<ISession> = {},
+  run: Partial<IRun> = {},
+): ISession {
   return {
-    id: PROCESS_ID,
-    controlPort: 24000,
-    configId: CLUSTER_ID,
+    sessionId: SESSION_ID,
+    createdAt: Date.parse("2026-01-01T00:00:00.000Z"),
+    slurmClusterConfigId: CLUSTER_ID,
     deploymentId: DEPLOYMENT_ID,
-    state: "READY",
     account: "project-a",
     partition: "debug",
     resources: { cores: 2, memoryMb: 4096, wallMinutes: 30 },
-    updatedAt: "2026-01-01T00:00:01.000Z",
+    state: "READY",
+    live: true,
+    runs: [runFixture({ state: overrides.state ?? "READY", ...run })],
     ...overrides,
   };
-}
-
-export function runFixture(overrides: Partial<ISession> = {}): ISession {
-  return sessionFixture({
-    partition: "cpu",
-    resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 },
-    state: "CANCELLED",
-    startedAt: "2030-01-01T00:00:00.000Z",
-    updatedAt: "2030-01-01T01:00:00.000Z",
-    ...overrides,
-  });
-}
-
-export function processFixture(
-  session: ISession = sessionFixture(),
-): Schemas["ProcessResponse"] {
-  const { cores, memoryMb, wallMinutes, gpuCount } = session.resources;
-  return {
-    processId: session.id,
-    processType: "BATCH_JOB",
-    lastStatus: {
-      status: session.state,
-      log: session.error ?? null,
-      timestamp: session.updatedAt ? Date.parse(session.updatedAt) : null,
-    },
-    batchProcess: {
-      deploymentId: session.deploymentId ?? null,
-      slurmClusterConfigId: session.configId,
-      batchJobConfig: {
-        wallTimeMinutes: wallMinutes,
-        allocation: session.account,
-        partition: session.partition ?? null,
-        cpus: cores ?? null,
-        mem: memoryMb ? `${memoryMb}M` : null,
-        gpus: gpuCount ?? null,
-      },
-      batchJobStatuses: session.startedAt
-        ? [{ status: "BEGIN", updatedAt: Date.parse(session.startedAt) }]
-        : [],
-      controlPort: session.controlPort,
-    },
-  } as Schemas["ProcessResponse"];
 }
 
 export function uiState(
@@ -187,7 +166,7 @@ export function planeFake<T extends object>(overrides = {} as T) {
     signIn: vi.fn(async () => undefined),
     signOut: vi.fn(),
     resumeSignIn: vi.fn(async () => undefined),
-    listSessions: vi.fn(async () => sessionListFixture()),
+    listSessions: vi.fn(async (): Promise<ISession[]> => []),
     listConfigs: vi.fn(async () => [clusterFixture()]),
     listDeployments: vi.fn(async () => [deploymentFixture()]),
     listSlurmClusters: vi.fn(async () => [slurmClusterFixture()]),
@@ -226,17 +205,10 @@ export class PanelStateFake {
   }
 }
 
-export function sessionListFixture(
-  sessions: ISession[] = [],
-  runs: ISession[] = [],
-): ISessionList {
-  return { sessions, runs };
-}
-
 export const logTail = (
   processId: string,
   lines: ISessionLogTail["lines"] = [],
-): ISessionLogTail => ({ sessionId: processId, lines });
+): ISessionLogTail => ({ processId, lines });
 
 export function fakeAuth(idToken = "delegated-token") {
   return {

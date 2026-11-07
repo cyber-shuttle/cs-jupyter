@@ -22,8 +22,8 @@ import {
   fakeCommandApp,
   planeFake,
   PROCESS_ID,
-  processFixture,
   processId,
+  SESSION_ID,
   sessionFixture,
   SLURM_CLUSTER_ID,
   slurmClusterFixture,
@@ -76,7 +76,7 @@ describe("shared CyberShuttle API client", () => {
       [`/slurm-cluster-configs/${CLUSTER_ID}/discover-allocations`]: {},
       "/slurm-clusters": [slurmClusterFixture()],
       "/ssh-credentials": [credentialFixture()],
-      "/processes/me": [processFixture(session)],
+      "/sessions/me": [session],
       [`/processes/${PROCESS_ID}/access`]: access,
       [`/processes/${PROCESS_ID}/proxy/24000/api/v1/usage`]: { memBytes: 1024 },
     };
@@ -87,7 +87,7 @@ describe("shared CyberShuttle API client", () => {
       );
       return request.method === "DELETE"
         ? new Response(null, { status: 204 })
-        : jsonResponse(replies[path] ?? processFixture(session));
+        : jsonResponse(replies[path] ?? session);
     });
     const client = makeClient(fetch as any);
     await client.resumeSignIn();
@@ -117,20 +117,17 @@ describe("shared CyberShuttle API client", () => {
     const request = {
       slurmClusterConfigId: CLUSTER_ID,
       deploymentId: DEPLOYMENT_ID,
-      batchJobConfig: {
-        allocation: "project-a",
-        partition: "debug",
-        cpus: 2,
-        mem: "4096M",
-        wallTimeMinutes: 30,
-      },
+      account: "project-a",
+      partition: "debug",
+      resources: { cores: 2, memoryMb: 4096, wallMinutes: 30 },
     };
     await client.createSession(request);
-    await client.startSession(PROCESS_ID);
-    expect((await client.getSession(session.id)).id).toBe(PROCESS_ID);
+    await client.startSession(SESSION_ID);
+    expect(await client.getSession(SESSION_ID)).toEqual(session);
     expect(await client.getSessionAccess(PROCESS_ID)).toEqual(access);
     expect(await client.getSessionUsage(session)).toEqual({ memBytes: 1024 });
-    await client.stopSession(PROCESS_ID);
+    expect(await client.stopSession(session)).toEqual(session);
+    await client.deleteSession(SESSION_ID);
     const requests = fetch.mock.calls.map(([input]) => input as Request);
     const api = "http://localhost:3000/gateway/api/v1";
     expect(requests.map((item) => `${item.method} ${item.url}`)).toEqual([
@@ -145,23 +142,23 @@ describe("shared CyberShuttle API client", () => {
       `DELETE ${api}/slurm-cluster-configs/${CLUSTER_ID}`,
       `POST ${api}/ssh-credentials`,
       `DELETE ${api}/ssh-credentials/${CREDENTIAL_ID}`,
-      `GET ${api}/processes/me`,
-      `POST ${api}/processes`,
-      `POST ${api}/processes/${PROCESS_ID}/launch`,
-      `GET ${api}/processes/${PROCESS_ID}`,
+      `GET ${api}/sessions/me`,
+      `POST ${api}/sessions`,
+      `POST ${api}/sessions/${SESSION_ID}/start`,
+      `GET ${api}/sessions/${SESSION_ID}`,
       `GET ${api}/processes/${PROCESS_ID}/access`,
       `GET ${api}/processes/${PROCESS_ID}/proxy/24000/api/v1/usage`,
       `POST ${api}/processes/${PROCESS_ID}/stop`,
+      `GET ${api}/sessions/${SESSION_ID}`,
+      `DELETE ${api}/sessions/${SESSION_ID}`,
     ]);
     expect(await requests[7].clone().json()).toEqual(host);
     expect(await requests[9].clone().json()).toEqual(credential);
     expect(requests[16].headers.get("Authorization")).toBe(
       `token ${access.app.token}`,
     );
-    expect(await requests[12].clone().json()).toEqual({
-      processType: "BATCH_JOB",
-      batchProcess: request,
-    });
+    expect(await requests[12].clone().json()).toEqual(request);
+    expect(requests[13].body).toBeNull();
   });
 
   it("surfaces the server's message on a failed call", async () => {
@@ -286,7 +283,7 @@ describe("kernel spec logos", () => {
 });
 
 describe("native Lite session routing", () => {
-  const id = sessionFixture().id;
+  const id = SESSION_ID;
 
   it("selects only a matching session and workspace", () => {
     expect(selectedSession(`?session=${id}&workspace=${id}`)).toEqual({

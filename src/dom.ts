@@ -1,8 +1,8 @@
 // Small DOM builders shared across the widgets: elements, detail grids, log
 // sections and disclosure lists, plus the walltime countdown math they and
 // the status bar share. `disclosure` restores open state after a rebuild by
-// caller-supplied identifier. Slurm measures --time from when a job starts
-// running, so the full limit shows until then, and the formatted figure
+// caller-supplied identifier. The deadline comes from the CyberShuttle API,
+// so the full limit shows until it has one, and the formatted figure
 // switches from hours and minutes to minutes and seconds at the one-hour
 // mark.
 import { MessageLoop } from "@lumino/messaging";
@@ -12,9 +12,10 @@ import { isRunning, type ILogLine, type ISession } from "./Common";
 export const LOW_TIME_MS = 10 * 60_000;
 
 export function remainingMs(session: ISession, now: number): number {
-  const limit = session.resources.wallMinutes * 60_000;
-  const started = session.startedAt ? Date.parse(session.startedAt) : NaN;
-  return Math.max(0, Number.isFinite(started) ? started + limit - now : limit);
+  const { deadline } = session.runs[0];
+  return deadline === null
+    ? session.resources.wallMinutes * 60_000
+    : Math.max(0, deadline - now);
 }
 
 export function formatRemaining(ms: number): string {

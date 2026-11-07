@@ -125,9 +125,10 @@ const remoteServerSettingsPlugin: ServiceManagerPlugin<
       if (!selected) {
         throw new Error("No session selected.");
       }
-      const access = await api.getSessionAccess(selected.sessionId);
+      const session = await api.getSession(selected.sessionId);
+      const access = await api.getSessionAccess(session.runs[0].processId);
       PageConfig.setOption("terminalsAvailable", "true");
-      setActiveSession(access.processId);
+      setActiveSession(session.sessionId);
       return createSessionServerSettings(access);
     } catch {
       PageConfig.setOption("terminalsAvailable", "false");
@@ -217,7 +218,7 @@ const remoteTerminalUiPlugin: JupyterFrontEndPlugin<void> = {
 
 const workspaceManagerPlugin: ServiceManagerPlugin<Workspace.IManager> = {
   id: "@cybershuttle/jupyter:workspace-manager",
-  description: "Keep each session's layout in the session's own home.",
+  description: "Keep each session's layout in its run's Jupyter root.",
   autoStart: true,
   provides: IWorkspaceManager,
   requires: [IRemoteServerSettings],

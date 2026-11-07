@@ -2,7 +2,7 @@
 // (USAGE_SLOTS wide) and the status-bar walltime countdown for the session
 // this page is attached to, drawn from the panel's state and hidden for a
 // queued or finished session.
-import type { IUsageSample, ISession } from "./Common";
+import type { IRun, IUsageSample, ISession } from "./Common";
 import type { CyberShuttlePanel } from "./CyberShuttlePanel";
 import {
   CLOCK_GLYPH,
@@ -113,22 +113,20 @@ export function sessionSummary(session: ISession): Array<[string, string]> {
   return rows.filter((row): row is [string, string] => !!row[1]);
 }
 
-export const when = (at: string | undefined): string =>
+export const when = (at: number | null): string =>
   at ? new Date(at).toLocaleString() : "—";
 
-export function runSummary(run: ISession): Array<[string, string]> {
+export function runSummary(run: IRun): Array<[string, string]> {
   return [
-    ["Ended", when(run.updatedAt)],
+    ["Ended", when(run.endedAt)],
     ["Outcome", run.state],
     ["Ran for", elapsedLabel(run)],
   ];
 }
 
-function elapsedLabel(run: ISession): string {
-  return run.startedAt && run.updatedAt
-    ? formatRemaining(
-        Math.max(0, Date.parse(run.updatedAt) - Date.parse(run.startedAt)),
-      )
+function elapsedLabel({ startedAt, endedAt }: IRun): string {
+  return startedAt && endedAt
+    ? formatRemaining(Math.max(0, endedAt - startedAt))
     : "—";
 }
 
@@ -179,7 +177,7 @@ export class WalltimeStatus extends PanelBoundWidget {
 
   private _session(): ISession | undefined {
     const session = this._state.sessions.find(
-      (each) => each.id === getActiveSessionId(),
+      (each) => each.sessionId === getActiveSessionId(),
     );
     return session && countsDown(session) ? session : undefined;
   }

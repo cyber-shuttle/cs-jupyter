@@ -1,14 +1,7 @@
 // A session's URL and on-screen state. The URL carries the session id or
-// nothing. The active session is the one this page attached to. displayState
-// is the one place that overlays a session being launched with SUBMITTED.
-import type {
-  IDeployment,
-  IUsageSample,
-  ISession,
-  SessionState,
-  Schemas,
-} from "./Common";
-import { UUID, clusterLabel, isTerminal } from "./Common";
+// nothing. The active session is the one this page attached to.
+import type { IDeployment, IUsageSample, ISession, Schemas } from "./Common";
+import { UUID, clusterLabel } from "./Common";
 import type { ISessionLogTail } from "./PlaneClient";
 
 export function selectedSession(
@@ -54,20 +47,17 @@ export function getActiveSessionId(): string | undefined {
   return activeSessionId;
 }
 
-type IBusySessionIds = ReadonlyMap<string, "start" | "action">;
-
 export interface ISessionUiState {
   readonly sessions: readonly ISession[];
   readonly logs: ReadonlyMap<string, ISessionLogTail>;
   readonly samples: ReadonlyMap<string, readonly IUsageSample[]>;
-  readonly runs: readonly ISession[];
   readonly clusters: readonly Schemas["SlurmClusterConfigResponse"][];
   readonly deployments: readonly IDeployment[];
   readonly loading: boolean;
   readonly updatesStatus: string;
   readonly error: string;
   readonly createBlocked: string;
-  readonly busySessionIds: IBusySessionIds;
+  readonly busySessionIds: ReadonlySet<string>;
   readonly connectingSessionId: string | undefined;
   readonly jupyterReady: ReadonlySet<string>;
   readonly signedIn: boolean;
@@ -79,14 +69,13 @@ export const emptyState = (): ISessionUiState => ({
   sessions: [],
   logs: new Map(),
   samples: new Map(),
-  runs: [],
   clusters: [],
   deployments: [],
   loading: false,
   updatesStatus: "",
   error: "",
   createBlocked: "",
-  busySessionIds: new Map(),
+  busySessionIds: new Set(),
   connectingSessionId: undefined,
   jupyterReady: new Set(),
   signedIn: false,
@@ -94,23 +83,14 @@ export const emptyState = (): ISessionUiState => ({
   identity: undefined,
 });
 
-export function displayState(
-  session: ISession,
-  busy: IBusySessionIds,
-): SessionState {
-  return busy.get(session.id) === "start" && isTerminal(session.state)
-    ? "SUBMITTED"
-    : session.state;
-}
-
 export const RUN_REPORT_KEY = "cybershuttle.run-report.v1";
 
 export const sessionTitle = (
   state: Pick<ISessionUiState, "clusters" | "deployments">,
-  session: Pick<ISession, "configId" | "deploymentId">,
+  session: Pick<ISession, "slurmClusterConfigId" | "deploymentId">,
 ): string =>
   [
-    clusterLabel(state.clusters, session.configId),
+    clusterLabel(state.clusters, session.slurmClusterConfigId),
     state.deployments.find((each) => each.deploymentId === session.deploymentId)
       ?.name,
   ]

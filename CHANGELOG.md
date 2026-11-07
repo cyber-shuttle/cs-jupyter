@@ -4,16 +4,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Start**, **Stop**, **Connect** and **✕** on each session card; an ended session starts again.
+
 ### Changed
 
-- The client talks to the CyberShuttle API instead of cs-plane; a session is a `BATCH_JOB` process.
+- The client talks to the CyberShuttle API instead of cs-plane.
 - **SSH Hosts** are **Compute Hosts**; **SSH Keys** are **Credentials**: a keypair, a password, or nothing stored.
 - A dialog asks for whatever a login needs beyond its credential, replacing the SSH authentication console.
 - `src/api/airavata.ts` is generated on install, not tracked.
+- Sessions come from the CyberShuttle API's `/sessions`; a session keeps its runs.
 
 ### Removed
 
-- **Delete**, **Start** of an ended session, **Dev Tunnels**, the review step, run accounting and the platform filter.
+- **Dev Tunnels**, the review step, run accounting and the platform filter.
+- The client-side `SUBMITTED` overlay.
 
 ## [0.1.1] - 2026-09-30
 

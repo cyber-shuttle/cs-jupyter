@@ -12,7 +12,18 @@ import { WalltimeStatus } from "../src/usage";
 import { setActiveSession } from "../src/session";
 import { RunHistory } from "../src/RunHistory";
 import { SessionDetail } from "../src/SessionDetail";
-import { PanelStateFake, sessionFixture as session, uiState } from "./fakes";
+import {
+  PanelStateFake,
+  SESSION_ID,
+  sessionFixture as session,
+  uiState,
+} from "./fakes";
+
+const NOW = Date.parse("2030-01-01T00:30:00Z");
+const hourJob = {
+  startedAt: Date.parse("2030-01-01T00:00:00Z"),
+  deadline: Date.parse("2030-01-01T01:00:00Z"),
+};
 
 function remainingText(node: HTMLElement): string {
   const label = [...node.querySelectorAll(".csSessionDetailLabel")].find(
@@ -22,26 +33,16 @@ function remainingText(node: HTMLElement): string {
 }
 
 describe("walltime countdown", () => {
-  it("counts from when Slurm started the job, not from when it was created", () => {
-    const started = session({
-      startedAt: "2030-01-01T00:00:00Z",
-      resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 },
-    });
-    expect(remainingMs(started, Date.parse("2030-01-01T00:45:00Z"))).toBe(
-      15 * 60_000,
-    );
-  });
+  it("counts down to the run's deadline", () =>
+    expect(remainingMs(session({}, { deadline: NOW + 90_000 }), NOW)).toBe(
+      90_000,
+    ));
 
-  it("shows the whole limit while the session has not started", () => {
-    const full = session({
-      resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 },
-    });
-    expect(remainingMs(full, Date.now())).toBe(60 * 60_000);
-  });
+  it("shows the whole limit while the run has no deadline", () =>
+    expect(remainingMs(session(), NOW)).toBe(30 * 60_000));
 
   it("never counts past zero", () => {
-    const started = session({ startedAt: "2030-01-01T00:00:00Z" });
-    expect(remainingMs(started, Date.parse("2030-01-01T09:00:00Z"))).toBe(0);
+    expect(remainingMs(session({}, { deadline: NOW }), NOW + 60_000)).toBe(0);
     expect(formatRemaining(-5000)).toBe("0m 0s");
   });
 
@@ -65,14 +66,14 @@ describe("walltime countdown", () => {
   });
 
   it("shows the same Remaining text in the session detail and run history", () => {
-    vi.setSystemTime(Date.parse("2030-01-01T00:30:00Z"));
-    const started = session({
-      startedAt: "2030-01-01T00:00:00Z",
-      resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 },
-    });
+    vi.setSystemTime(NOW);
+    const started = session(
+      { resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 } },
+      hourJob,
+    );
     const detail = new SessionDetail(
       new PanelStateFake(uiState({ sessions: [started] })) as never,
-      started.id,
+      started.sessionId,
     );
     const history = new RunHistory(
       new PanelStateFake(uiState({ sessions: [started] })) as never,
@@ -88,19 +89,21 @@ describe("walltime status bar item", () => {
   afterEach(() => setActiveSession(undefined));
 
   const hourJobItem = (overrides: Partial<ISession> = {}) => {
-    setActiveSession(session().id);
-    const attached = session({
-      startedAt: "2030-01-01T00:00:00Z",
-      resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 },
-      ...overrides,
-    });
+    setActiveSession(SESSION_ID);
+    const attached = session(
+      {
+        resources: { cores: 2, memoryMb: 4096, wallMinutes: 60 },
+        ...overrides,
+      },
+      hourJob,
+    );
     return new WalltimeStatus(
       new PanelStateFake(uiState({ sessions: [attached] })) as never,
     );
   };
 
   it("shows the remaining time for the session this page is attached to", () => {
-    vi.setSystemTime(Date.parse("2030-01-01T00:30:00Z"));
+    vi.setSystemTime(NOW);
     const item = hourJobItem();
     expect(item.node.textContent).toContain("30m 0s");
     expect(item.isHidden).toBe(false);

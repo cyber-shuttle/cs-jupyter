@@ -1,8 +1,17 @@
 // Vitest global setup: configures JupyterLab's PageConfig and patches jsdom APIs
 // the test environment lacks: Vitest's jsdom leaves window.localStorage and
 // sessionStorage undefined, and jsdom 26 declares HTMLDialogElement but
-// implements neither showModal nor close.
+// implements neither showModal nor close. jsdom cannot navigate, so its report
+// of a leaving page's location.replace is dropped.
 import { PageConfig } from "@jupyterlab/coreutils";
+
+const { virtualConsole } = (window as any).jsdom;
+const [report] = virtualConsole.listeners("jsdomError");
+virtualConsole.off("jsdomError", report);
+virtualConsole.on("jsdomError", (error: Error & { type?: string }) => {
+  if (!(error.type === "not implemented" && /navigation/.test(error.message)))
+    report(error);
+});
 
 PageConfig.setOption("cybershuttlePlaneApiUrl", "http://localhost:8045/api/v1");
 class TestStorage implements Storage {

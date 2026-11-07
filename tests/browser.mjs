@@ -17,9 +17,10 @@ const clusterId = "9c2c0d01-f156-4f3a-9e4f-a2aebffa8ded";
 const slurmClusterId = "c1d2e3f4-5678-4abc-9def-0123456789ab";
 const deploymentId = "3f6a2c1e-8b7d-4e5f-9a0b-1c2d3e4f5a6b";
 const templateId = "b6f1c2de-3a4b-4c5d-8e6f-7a8b9c0d1e2f";
-const sessionId = processIdOf(1);
-const startId = processIdOf(2);
-const createdId = processIdOf(3);
+const sessionId = sessionIdOf(1);
+const startSessionId = sessionIdOf(2);
+const deleteSessionId = sessionIdOf(3);
+const createdSessionId = sessionIdOf(4);
 const account = "user@example.edu";
 const jupyterToken = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const issuerOrigin = "https://issuer.example.test";
@@ -32,7 +33,12 @@ let popupCount = 0;
 const planeRequests = [];
 const directRequests = [];
 const directWebSockets = [];
-const processes = [processRecord(1), processRecord(2, "CREATED")];
+const sessions = [
+  sessionRecord(1),
+  sessionRecord(2, "CANCELLED", false),
+  sessionRecord(3, "COMPLETED", false),
+];
+let restarted = 100;
 
 const staticServer = createServer((request, response) => {
   const url = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -144,7 +150,7 @@ const planeServer = createServer((request, response) => {
     "/api/v1/application-templates": [
       { templateId, templateName: "JupyterLab" },
     ],
-    "/api/v1/processes/me": processes,
+    "/api/v1/sessions/me": sessions,
     "/api/v1/ssh-interactive-auths": [],
   };
   if (request.method === "GET" && lists[url.pathname])
@@ -160,30 +166,48 @@ const planeServer = createServer((request, response) => {
         { name: "debug", cpuPerNode: 16, maxMemory: 32768, gres: null },
       ],
     });
-  if (url.pathname === "/api/v1/processes" && request.method === "POST") {
+  if (url.pathname === "/api/v1/sessions" && request.method === "POST") {
     return readRequestJSON(request).then((body) => {
-      assert.equal(body.processType, "BATCH_JOB");
-      assert.equal(body.batchProcess.deploymentId, deploymentId);
-      assert.equal(body.batchProcess.slurmClusterConfigId, clusterId);
-      const item = processRecord(processes.length + 1, "CREATED");
-      Object.assign(
-        item.batchProcess.batchJobConfig,
-        body.batchProcess.batchJobConfig,
-      );
-      processes.push(item);
+      assert.equal(body.slurmClusterConfigId, clusterId);
+      assert.equal(body.deploymentId, deploymentId);
+      assert.equal(body.account, "project-a");
+      assert.equal(typeof body.resources.wallMinutes, "number");
+      const item = sessionRecord(4, "SUBMITTED");
+      Object.assign(item, {
+        partition: body.partition,
+        resources: body.resources,
+      });
+      sessions.push(item);
+      setTimeout(() => setState(item, "READY"), 25);
       json(response, item, 201);
     });
   }
-  const [, processId, action = ""] =
-    /^\/api\/v1\/processes\/([0-9a-f-]{36})(?:\/([a-z]+))?$/.exec(
-      url.pathname,
-    ) ?? [];
-  const item = processes.find((each) => each.processId === processId);
-  if (!item) return json(response, { message: "Route not found." }, 404);
-  if (!action) return json(response, item);
+  const [, id, verb] =
+    /^\/api\/v1\/sessions\/([0-9a-f-]{36})(?:\/(start))?$/.exec(url.pathname) ??
+    [];
+  const session = sessions.find((each) => each.sessionId === id);
+  if (session && !verb && request.method === "GET")
+    return json(response, session);
+  if (session && !verb && request.method === "DELETE") {
+    sessions.splice(sessions.indexOf(session), 1);
+    response.writeHead(204);
+    return response.end();
+  }
+  if (session && verb === "start" && request.method === "POST") {
+    session.runs.unshift(runRecord(processIdOf(++restarted), "SUBMITTED"));
+    setState(session, "SUBMITTED");
+    return json(response, session);
+  }
+  const [, processId, action] =
+    /^\/api\/v1\/processes\/([0-9a-f-]{36})\/([a-z]+)$/.exec(url.pathname) ??
+    [];
+  const run = sessions
+    .flatMap((each) => each.runs)
+    .find((each) => each.processId === processId);
+  if (!run) return json(response, { message: "Route not found." }, 404);
   if (action === "statuses") return json(response, []);
   if (action === "access") {
-    if (item.lastStatus.status !== "READY")
+    if (run.state !== "READY")
       return json(response, { message: "The job has no link" }, 409);
     return json(response, {
       processId,
@@ -192,14 +216,6 @@ const planeServer = createServer((request, response) => {
         token: jupyterToken,
       },
     });
-  }
-  if (action === "launch" && request.method === "POST") {
-    item.lastStatus.status = "SUBMITTED";
-    if (processId === createdId)
-      setTimeout(() => {
-        item.lastStatus.status = "READY";
-      }, 25);
-    return json(response, item, 202);
   }
   return json(response, { message: "Route not found." }, 404);
 });
@@ -370,7 +386,7 @@ try {
     ["cybershuttle.connection.v1", "cybershuttle.oauth.v1"],
     "session storage holds only the credentials and this tab's connection id",
   );
-  assert.ok(planeRequests.includes("GET /api/v1/processes/me"));
+  assert.ok(planeRequests.includes("GET /api/v1/sessions/me"));
 
   assert.equal(
     await page
@@ -387,7 +403,7 @@ try {
       .evaluateAll((cards) =>
         cards.map((card) => card.getAttribute("data-category")),
       ),
-    ["CyberShuttle Sessions", "CyberShuttle Sessions"],
+    ["CyberShuttle Sessions", "CyberShuttle Sessions", "CyberShuttle Sessions"],
   );
 
   const sessionSection = panel.locator(".csSessionSection");
@@ -438,7 +454,7 @@ try {
   );
   await page.setViewportSize({ width: 1280, height: 720 });
 
-  await page.locator(`[data-session-action="${startId}"]`).click();
+  await page.locator(`[data-session-action="${startSessionId}"]`).click();
   const sessionDialog = page.locator(
     ".jp-Dialog-content:has(.csSessionDetail)",
   );
@@ -466,11 +482,27 @@ try {
   await sessionDialog.getByRole("button", { name: "Start" }).click();
   await sessionDialog.getByText("SUBMITTED", { exact: true }).waitFor();
   assert.deepEqual(
-    planeRequests.filter((entry) => entry.startsWith("POST /api/v1/processes")),
-    [`POST /api/v1/processes/${startId}/launch`],
+    planeRequests.filter((entry) => entry.startsWith("POST /api/v1/sessions")),
+    [`POST /api/v1/sessions/${startSessionId}/start`],
     "Start must launch the session that was never launched",
   );
   await sessionDialog.locator(".jp-Dialog-close-button").click();
+
+  await page
+    .locator(`[data-session-action="delete:${deleteSessionId}"]`)
+    .click();
+  await page
+    .locator(".jp-Dialog")
+    .filter({ hasText: "Delete session" })
+    .getByRole("button", { name: "Delete", exact: true })
+    .click();
+  await page
+    .locator(`[data-session-action="${deleteSessionId}"]`)
+    .waitFor({ state: "detached" });
+  assert.ok(
+    planeRequests.includes(`DELETE /api/v1/sessions/${deleteSessionId}`),
+    "✕ must delete the ended session",
+  );
 
   await page.getByRole("button", { name: "Add Session" }).click();
   const styledControlDifferences = await page
@@ -533,15 +565,15 @@ try {
   await createdDetail.getByText("READY", { exact: true }).waitFor({
     timeout: 20_000,
   });
-  const createdProcess = processes.at(-1).processId;
+  const createdRun = sessions.at(-1).runs[0].processId;
   const connect = createdDetail.getByRole("button", { name: "Connect" });
   await connect.waitFor();
   const planeBeforeCachedRestore = planeRequests.length;
   await connect.click();
   await page.waitForURL(
     (url) =>
-      url.searchParams.get("session") === createdId &&
-      url.searchParams.get("workspace") === createdId,
+      url.searchParams.get("session") === createdSessionId &&
+      url.searchParams.get("workspace") === createdSessionId,
     { timeout: 20_000 },
   );
   await page.waitForFunction(() => {
@@ -562,18 +594,18 @@ try {
     "direct-session restore must retain one combined Launcher",
   );
   const afterConnect = planeRequests.slice(planeBeforeCachedRestore);
-  assert.ok(
-    afterConnect.includes("GET /api/v1/processes/me"),
-    "the restored page must read the session it is attached to",
-  );
   assert.deepEqual(
     afterConnect.filter(
       (entry) =>
-        entry.includes(`${createdProcess}/access`) ||
+        entry === `GET /api/v1/sessions/${createdSessionId}` ||
+        entry.includes(`${createdRun}/access`) ||
         entry.startsWith("POST /api/v1/auth/"),
     ),
-    [`GET /api/v1/processes/${createdProcess}/access`],
-    "a session landing must reauthorize access without repeating OAuth",
+    [
+      `GET /api/v1/sessions/${createdSessionId}`,
+      `GET /api/v1/processes/${createdRun}/access`,
+    ],
+    "a session landing must read its session, then reauthorize access without repeating OAuth",
   );
   const launcher = page.locator(".jp-Launcher");
   const contentsStart = directRequests.length;
@@ -639,7 +671,7 @@ try {
     "direct manager requests omitted the Jupyter token or sent cookies",
   );
   assert.deepEqual(directWebSockets, [
-    `${planeOrigin.replace(/^http/, "ws")}/api/v1/processes/${createdProcess}/proxy/24001/terminals/websocket/1?token=${jupyterToken}`,
+    `${planeOrigin.replace(/^http/, "ws")}/api/v1/processes/${createdRun}/proxy/24001/terminals/websocket/1?token=${jupyterToken}`,
   ]);
 
   const planeBeforeReload = planeRequests.length;
@@ -658,7 +690,7 @@ try {
   assert.equal(
     planeRequests
       .slice(planeBeforeReload)
-      .filter((entry) => entry.endsWith(`${createdProcess}/access`)).length,
+      .filter((entry) => entry.endsWith(`${createdRun}/access`)).length,
     1,
     "a session reload must reauthorize access",
   );
@@ -803,26 +835,37 @@ async function waitForCondition(condition, timeout = 10_000) {
 function processIdOf(n) {
   return `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 }
-function processRecord(n, state = "READY") {
-  const at = Date.UTC(2026, 0, 1, 0, 0, n);
+function sessionIdOf(n) {
+  return `11111111-0000-4000-8000-${String(n).padStart(12, "0")}`;
+}
+function runRecord(processId, state) {
   return {
-    processId: processIdOf(n),
-    processType: "BATCH_JOB",
-    lastStatus: { status: state, log: null, timestamp: at },
-    batchProcess: {
-      deploymentId,
-      slurmClusterConfigId: clusterId,
-      batchJobConfig: {
-        wallTimeMinutes: 30,
-        allocation: "project-a",
-        partition: "debug",
-        cpus: 4,
-        mem: "4096M",
-      },
-      batchJobStatuses: [],
-      controlPort: 24000,
-    },
+    processId,
+    controlPort: 24000,
+    state,
+    startedAt: null,
+    deadline: null,
+    endedAt: null,
+    error: null,
   };
+}
+function sessionRecord(n, state = "READY", live = true) {
+  return {
+    sessionId: sessionIdOf(n),
+    createdAt: Date.UTC(2026, 0, 1, 0, 0, n),
+    slurmClusterConfigId: clusterId,
+    deploymentId,
+    account: "project-a",
+    partition: "debug",
+    resources: { cores: 4, memoryMb: 4096, wallMinutes: 30 },
+    state,
+    live,
+    runs: [runRecord(processIdOf(n), state)],
+  };
+}
+function setState(session, state) {
+  session.state = session.runs[0].state = state;
+  session.live = !["COMPLETED", "FAILED", "CANCELLED"].includes(state);
 }
 async function readRequestJSON(request) {
   const chunks = [];

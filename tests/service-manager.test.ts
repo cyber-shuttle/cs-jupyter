@@ -31,9 +31,9 @@ import plugins, { remoteServicePlugins } from "../src/index";
 import { PlaneClient, IPlaneClient } from "../src/PlaneClient";
 import { jsonResponse } from "../src/Common";
 import { getActiveSessionId } from "../src/session";
-import { accessFixture, PROCESS_ID, sessionFixture } from "./fakes";
+import { accessFixture, PROCESS_ID, SESSION_ID, sessionFixture } from "./fakes";
 
-const id = sessionFixture().id;
+const id = SESSION_ID;
 
 const supportManagers = {
   events: { dispose: vi.fn() },
@@ -167,7 +167,9 @@ describe("remote service manager registry", () => {
         typeof input === "string" || input instanceof URL ? input : input.url,
       );
       let body: unknown = [];
-      if (url.pathname.endsWith(`/processes/${PROCESS_ID}/access`)) {
+      if (url.pathname.endsWith(`/sessions/${SESSION_ID}`)) {
+        body = sessionFixture();
+      } else if (url.pathname.endsWith(`/processes/${PROCESS_ID}/access`)) {
         body = accessFixture(PROCESS_ID);
       } else if (url.pathname.endsWith("/api/kernelspecs")) {
         body = {
@@ -206,6 +208,7 @@ describe("remote service manager registry", () => {
     const sessions = await registry.resolveRequiredService(ISessionManager);
     const terminals = await registry.resolveRequiredService(ITerminalManager);
 
+    expect(getActiveSessionId()).toBe(SESSION_ID);
     expect(manager.contents).toBe(contents);
     expect(manager.kernels).toBe(kernels);
     expect(manager.kernelspecs).toBe(kernelspecs);
@@ -243,6 +246,7 @@ describe("remote service manager registry", () => {
     );
     expect(paths).toEqual(
       expect.arrayContaining([
+        `/api/v1/sessions/${SESSION_ID}`,
         `/api/v1/processes/${PROCESS_ID}/access`,
         "/lab/api/settings",
         `/api/v1/processes/${PROCESS_ID}/proxy/24001/api/kernels`,

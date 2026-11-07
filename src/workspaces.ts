@@ -1,7 +1,8 @@
-// Stores each session's JupyterLab layout as a file in the session's own home
-// through its contents API, so the layout follows the session across devices
-// and runs instead of living in one browser slot. Without a selected
-// session there is nothing to keep, and every call is a no-op.
+// Stores each session's JupyterLab layout as a file in the run's Jupyter root
+// through its contents API, so the layout follows the run across devices instead
+// of living in one browser slot. Each run has its own folder, so a restarted
+// session starts with a fresh layout. Without a selected session there is
+// nothing to keep, and every call is a no-op.
 import type { ServerConnection, Workspace } from "@jupyterlab/services";
 import { Drive } from "@jupyterlab/services";
 

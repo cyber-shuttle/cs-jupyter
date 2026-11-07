@@ -1,7 +1,7 @@
 // Types, URL validation and the CyberShuttle API's error envelope. Wire shapes
 // are the server's own, generated into src/api by `bun run types`, and the
 // typed `data` openapi-fetch returns is trusted as is; the view types here are
-// only those the UI derives (a session, a usage sample, a log line).
+// only those the UI derives (a usage sample, a log line).
 import createClient from "openapi-fetch";
 import type { components, paths } from "./api/airavata";
 
@@ -35,34 +35,12 @@ export interface IPlaneAuth {
 
 export type SessionState = Schemas["ProcessStatusType"];
 
-export const isEnded = (state: SessionState): boolean =>
-  state === "COMPLETED" || state === "FAILED" || state === "CANCELLED";
-
-export const isTerminal = (state: SessionState): boolean =>
-  state === "CREATED" || isEnded(state);
-
 // The job has begun; RUNNING can follow READY, since Slurm reports the begin late.
 export const isRunning = (state: SessionState): boolean =>
   state === "READY" || state === "RUNNING";
 
-export interface ISession {
-  id: string;
-  controlPort: number;
-  configId: string;
-  deploymentId?: string;
-  state: SessionState;
-  account: string;
-  partition?: string;
-  resources: {
-    cores?: number;
-    memoryMb?: number;
-    wallMinutes: number;
-    gpuCount?: number;
-  };
-  startedAt?: string;
-  updatedAt?: string;
-  error?: string;
-}
+export type ISession = Schemas["SessionResponse"];
+export type IRun = Schemas["SessionRun"];
 export interface IUsageReport {
   memBytes?: number;
   cpuUsageUsec?: number;

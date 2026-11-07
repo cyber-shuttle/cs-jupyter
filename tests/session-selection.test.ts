@@ -22,13 +22,15 @@ import {
   pollPanel,
   processId,
   sessionFixture,
-  sessionListFixture,
+  sessionId,
   uiState,
 } from "./fakes";
 
-const first = sessionFixture({ id: processId(1) });
-const second = sessionFixture({ id: processId(2) });
-const active = sessionFixture({ id: processId(3) });
+const numbered = (n: number) =>
+  sessionFixture({ sessionId: sessionId(n) }, { processId: processId(n) });
+const first = numbered(1);
+const second = numbered(2);
+const active = numbered(3);
 
 function boundList(state: ISessionUiState = uiState()): {
   fake: PanelStateFake;
@@ -42,7 +44,7 @@ function setSessions(fake: PanelStateFake, sessions: ISession[]): void {
   fake.setState(
     uiState({
       sessions,
-      jupyterReady: new Set(sessions.map((session) => session.id)),
+      jupyterReady: new Set(sessions.map((session) => session.sessionId)),
       signedIn: true,
     }),
   );
@@ -52,9 +54,7 @@ async function emitSessions(
   panel: CyberShuttlePanel,
   sessions: ISession[],
 ): Promise<void> {
-  (panel as any)._api.listSessions.mockResolvedValue(
-    sessionListFixture(sessions),
-  );
+  (panel as any)._api.listSessions.mockResolvedValue(sessions);
   await pollPanel(panel);
 }
 
@@ -67,7 +67,7 @@ function harness(
   const navigate = vi.fn();
   const { execute, app } = fakeCommandApp();
   const api = planeFake({
-    listSessions: vi.fn(async () => sessionListFixture(sessions)),
+    listSessions: vi.fn(async () => sessions),
     getSession: vi.fn(getSession),
     stopSession: vi.fn(async () => first),
   });
@@ -83,7 +83,7 @@ function harness(
 
 async function ready(panel: CyberShuttlePanel): Promise<void> {
   await vi.waitFor(() =>
-    expect(panel.node.querySelectorAll(".csSessionCard")).toHaveLength(2),
+    expect(panel.node.querySelectorAll(".csSessionCard")).not.toHaveLength(0),
   );
 }
 
@@ -102,8 +102,8 @@ async function connectingToFirst() {
   api.getSessionAccess.mockReturnValue(pending.promise);
   await ready(panel);
 
-  void panel.actions.connect(first.id);
-  expect(panel.state.connectingSessionId).toBe(first.id);
+  void panel.actions.connect(first.sessionId);
+  expect(panel.state.connectingSessionId).toBe(first.sessionId);
   expect(panel.state.busySessionIds.size).toBeGreaterThan(0);
   return { panel, navigate, pending };
 }
@@ -111,18 +111,22 @@ async function connectingToFirst() {
 describe("serialized session selection", () => {
   it("renders native sessions and opens their live detail modal", async () => {
     const { panel } = harness(
-      [first, { ...second, state: "FAILED" }],
-      async (id) => (id === first.id ? first : second),
+      [first, { ...second, state: "FAILED", live: false }],
+      async (id) => (id === first.sessionId ? first : second),
     );
     const openSession = vi
       .spyOn(panel.modals, "openSession")
       .mockResolvedValue(undefined);
     await ready(panel);
-    const cards =
-      panel.node.querySelectorAll<HTMLButtonElement>(".jp-LauncherCard");
+    const cards = panel.node.querySelectorAll<HTMLElement>(".jp-LauncherCard");
     expect([
       cards.length,
-      [...cards].slice(0, 2).every((card) => card.tagName === "BUTTON"),
+      [...cards]
+        .slice(0, 2)
+        .every(
+          (card) =>
+            card.querySelector(".csSessionCardOpen")?.tagName === "BUTTON",
+        ),
       cards[0].ariaLabel?.includes("hpc-a · JupyterLab, READY"),
       cards[1].ariaLabel?.includes("FAILED"),
       cards[2].classList.contains("csSessionAddCard"),
@@ -143,8 +147,8 @@ describe("serialized session selection", () => {
         ".jp-Launcher-section.csSessionSection > .jp-Launcher-cardContainer",
       ),
     ).not.toBeNull();
-    cards[0].click();
-    expect(openSession).toHaveBeenCalledWith(first.id);
+    cards[0].querySelector<HTMLButtonElement>(".csSessionCardOpen")!.click();
+    expect(openSession).toHaveBeenCalledWith(first.sessionId);
     panel.dispose();
   });
 
@@ -158,13 +162,13 @@ describe("serialized session selection", () => {
     list.sshHostsRequested.connect(sshHostsRequested);
     setSessions(fake, [first]);
     document.body.appendChild(list.node);
-    list.node.querySelector<HTMLButtonElement>(".csSessionCard")!.focus();
+    list.node.querySelector<HTMLButtonElement>(".csSessionCardOpen")!.focus();
     setSessions(fake, [{ ...first }]);
     expect(document.activeElement?.getAttribute("aria-label")).toContain(
       "hpc-a",
     );
 
-    list.node.querySelector<HTMLButtonElement>(".csSessionCard")!.click();
+    list.node.querySelector<HTMLButtonElement>(".csSessionCardOpen")!.click();
     list.node.querySelector<HTMLButtonElement>(".csSessionAddCard")!.click();
     [...list.node.querySelectorAll<HTMLButtonElement>("button")]
       .find((button) => button.textContent === "Compute Hosts")!
@@ -174,7 +178,7 @@ describe("serialized session selection", () => {
       sessionRequested.mock.calls,
       createRequested.mock.calls.length,
       sshHostsRequested.mock.calls.length,
-    ]).toEqual([[[first.id]], 1, 1]);
+    ]).toEqual([[[first.sessionId]], 1, 1]);
     list.dispose();
   });
 
@@ -182,7 +186,7 @@ describe("serialized session selection", () => {
     const { panel, navigate, pending } = await connectingToFirst();
 
     panel.dispose();
-    pending.resolve(accessFixture(first.id));
+    pending.resolve(accessFixture(first.runs[0].processId));
     await pending.promise;
     await Promise.resolve();
     expect(navigate).not.toHaveBeenCalled();
@@ -195,7 +199,7 @@ describe("serialized session selection", () => {
     expect(panel.state.connectingSessionId).toBeUndefined();
     expect(panel.state.busySessionIds.size).toBe(0);
 
-    pending.resolve(accessFixture(first.id));
+    pending.resolve(accessFixture(first.runs[0].processId));
     await pending.promise;
     await Promise.resolve();
     expect(navigate).not.toHaveBeenCalled();
@@ -205,15 +209,19 @@ describe("serialized session selection", () => {
   it.each(["target access", "target select", "save-all"] as const)(
     "retains the active session when %s fails",
     async (failure) => {
-      window.history.replaceState({}, "", `/lite/lab/?session=${active.id}`);
+      window.history.replaceState(
+        {},
+        "",
+        `/lite/lab/?session=${active.sessionId}`,
+      );
       const { panel, api, navigate, execute } = harness(
-        [first, second],
-        async (id) => (id === first.id ? first : second),
-        active.id,
+        [active, first, second],
+        async (id) => (id === first.sessionId ? first : second),
+        active.sessionId,
       );
       await ready(panel);
       if (failure === "target access") {
-        panel.actions.releaseJupyter(first.id);
+        panel.actions.releaseJupyter(first.sessionId);
         api.getSessionAccess.mockRejectedValueOnce(
           new Error("target access failed"),
         );
@@ -223,7 +231,7 @@ describe("serialized session selection", () => {
         execute.mockRejectedValueOnce(new Error("save failed"));
       }
 
-      await panel.actions.connect(first.id);
+      await panel.actions.connect(first.sessionId);
 
       expect(navigate).not.toHaveBeenCalled();
       panel.dispose();
@@ -233,7 +241,7 @@ describe("serialized session selection", () => {
   it("keeps quiet when access is refused because the session is leaving READY", async () => {
     const { panel, api } = harness([first, second], async () => first);
     await ready(panel);
-    panel.actions.releaseJupyter(first.id);
+    panel.actions.releaseJupyter(first.sessionId);
     api.getSessionAccess.mockRejectedValueOnce(
       new PlaneError(
         "Session access is unavailable: the session is stopping",
@@ -241,7 +249,7 @@ describe("serialized session selection", () => {
       ),
     );
 
-    await panel.actions.refreshJupyter(first.id);
+    await panel.actions.refreshJupyter(first.sessionId);
 
     expect(panel.state.error).toBe("");
     panel.dispose();
@@ -249,14 +257,14 @@ describe("serialized session selection", () => {
 
   it("names the access failure instead of a generic one when the target leaves READY mid-read", async () => {
     const { panel, api, navigate } = harness([first, second], async (id) =>
-      id === first.id ? first : second,
+      id === first.sessionId ? first : second,
     );
     await ready(panel);
-    panel.actions.releaseJupyter(first.id);
+    panel.actions.releaseJupyter(first.sessionId);
     const pendingAccess = Promise.withResolvers<never>();
     api.getSessionAccess.mockReturnValueOnce(pendingAccess.promise as never);
 
-    const connecting = panel.actions.connect(first.id);
+    const connecting = panel.actions.connect(first.sessionId);
     await vi.waitFor(() => expect(api.getSessionAccess).toHaveBeenCalled());
     await emitSessions(panel, [{ ...first, state: "SUBMITTED" }, second]);
     pendingAccess.reject(new Error("Jupyter is not reachable yet"));
@@ -270,27 +278,34 @@ describe("serialized session selection", () => {
   it.each(["terminal state", "session gone", "session stop"] as const)(
     "cancels deferred save-all selection at the %s boundary",
     async (boundary) => {
-      window.history.replaceState({}, "", `/lite/lab/?session=${active.id}`);
+      window.history.replaceState(
+        {},
+        "",
+        `/lite/lab/?session=${active.sessionId}`,
+      );
       const save = Promise.withResolvers<void>();
       const { panel, navigate, execute } = harness(
         [active, first],
         async () => first,
-        active.id,
+        active.sessionId,
       );
       execute.mockImplementationOnce(() => save.promise);
       await ready(panel);
-      await panel.actions.refreshJupyter(active.id);
+      await panel.actions.refreshJupyter(active.sessionId);
 
-      const selecting = panel.actions.connect(first.id);
+      const selecting = panel.actions.connect(first.sessionId);
       await vi.waitFor(() =>
         expect(execute).toHaveBeenCalledWith("docmanager:save-all"),
       );
       if (boundary === "terminal state") {
-        await emitSessions(panel, [active, { ...first, state: "CANCELLED" }]);
+        await emitSessions(panel, [
+          active,
+          { ...first, state: "CANCELLED", live: false },
+        ]);
       } else if (boundary === "session gone") {
         await emitSessions(panel, [active]);
       } else {
-        const stopping = panel.actions.stop(first.id);
+        const stopping = panel.actions.stop(first.sessionId);
         await acceptDialog();
         await stopping;
       }
@@ -302,48 +317,82 @@ describe("serialized session selection", () => {
   );
 
   it("rechecks the live session after deferred save before navigating", async () => {
-    window.history.replaceState({}, "", `/lite/lab/?session=${active.id}`);
+    window.history.replaceState(
+      {},
+      "",
+      `/lite/lab/?session=${active.sessionId}`,
+    );
     const live = Promise.withResolvers<ISession>();
     const { panel, api, navigate } = harness(
       [active, first],
       () => live.promise,
-      active.id,
+      active.sessionId,
     );
     await ready(panel);
 
-    const selecting = panel.actions.connect(first.id);
+    const selecting = panel.actions.connect(first.sessionId);
     await vi.waitFor(() => expect(api.getSession).toHaveBeenCalledOnce());
-    live.resolve({ ...first, state: "CANCELLED" });
+    live.resolve({ ...first, state: "CANCELLED", live: false });
     await selecting;
 
     expectDeferredSaveWon(navigate, panel);
   });
 
   it("allows only the newest rapid selection to save and navigate", async () => {
-    window.history.replaceState({}, "", `/lite/lab/?session=${active.id}`);
+    window.history.replaceState(
+      {},
+      "",
+      `/lite/lab/?session=${active.sessionId}`,
+    );
     const { panel, api, navigate, execute } = harness(
-      [first, second],
-      async (id) => (id === first.id ? first : second),
-      active.id,
+      [active, first, second],
+      async (id) => (id === first.sessionId ? first : second),
+      active.sessionId,
     );
     await ready(panel);
 
-    void panel.actions.connect(first.id);
-    await panel.actions.connect(second.id);
+    void panel.actions.connect(first.sessionId);
+    await panel.actions.connect(second.sessionId);
     await vi.waitFor(() => expect(navigate).toHaveBeenCalledOnce());
     expect(execute).toHaveBeenCalledOnce();
-    expect(api.getSession).not.toHaveBeenCalledWith(first.id);
-    expect(navigate).toHaveBeenCalledWith(`/selected/${second.id}`);
+    expect(api.getSession).not.toHaveBeenCalledWith(first.sessionId);
+    expect(navigate).toHaveBeenCalledWith(`/selected/${second.sessionId}`);
     expect(panel.state.connectingSessionId).toBeUndefined();
     panel.dispose();
   });
 });
 
+describe("session card actions", () => {
+  it("offers Start and ✕ on an ended card, Stop on a live one, Connect once Jupyter is ready", () => {
+    const ready = numbered(4);
+    const { list } = boundList(
+      uiState({
+        sessions: [
+          { ...first, state: "CANCELLED", live: false },
+          { ...second, state: "SUBMITTED" },
+          ready,
+        ],
+        jupyterReady: new Set([ready.sessionId]),
+        signedIn: true,
+      }),
+    );
+    const cards = [...list.node.querySelectorAll(".csSessionCard")];
+    expect(
+      cards.map((card) =>
+        [...card.querySelectorAll(".csSessionCardActions button")].map(
+          (button) => button.textContent,
+        ),
+      ),
+    ).toEqual([["Start", "✕"], ["Stop"], ["Stop", "Connect"]]);
+    list.dispose();
+  });
+});
+
 describe("current session pill", () => {
   it("marks only the session this page is attached to", () => {
-    setActiveSession(first.id);
+    setActiveSession(first.sessionId);
     const { fake, list } = boundList();
-    const other = sessionFixture({ id: processId(9) });
+    const other = numbered(9);
     setSessions(fake, [first, other]);
     const cards = [
       ...list.node.querySelectorAll<HTMLElement>(".csSessionCard"),
