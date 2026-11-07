@@ -41,6 +41,12 @@ const by = (processId: string) => ({ params: { path: { processId } } });
 export const accessUnavailable = (error: unknown): boolean =>
   error instanceof PlaneError && error.status === 409;
 
+// This tab's connection, kept across reloads: SSH logins it starts prompt only here.
+const connection = (): string =>
+  (sessionStorage.csConnection ??= crypto
+    .getRandomValues(new Uint32Array(4))
+    .join("."));
+
 export function safePlaneFetch(
   planeApiUrl: string,
   auth: Pick<IPlaneAuth, "acquireToken" | "invalidateToken">,
@@ -56,6 +62,7 @@ export function safePlaneFetch(
       init.headers ?? (input instanceof Request ? input.headers : undefined),
     );
     headers.set("Authorization", `Bearer ${await auth.acquireToken()}`);
+    headers.set("X-Connection-Id", connection());
     const response = await fetch(input, {
       ...init,
       headers,
