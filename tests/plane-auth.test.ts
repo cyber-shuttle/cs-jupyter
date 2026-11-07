@@ -33,7 +33,7 @@ describe("OAuth cross-origin CyberShuttle API client", () => {
     const headers = new Headers(init.headers);
     expect([...headers]).toEqual([
       ["authorization", "Bearer delegated-token"],
-      ["x-connection-id", sessionStorage.csConnection],
+      ["x-connection-id", sessionStorage.getItem("cybershuttle.connection.v1")],
     ]);
     expect(init.cache).toBe("no-store");
     expect(init.credentials).toBe("omit");

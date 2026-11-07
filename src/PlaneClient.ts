@@ -42,10 +42,14 @@ export const accessUnavailable = (error: unknown): boolean =>
   error instanceof PlaneError && error.status === 409;
 
 // This tab's connection, kept across reloads: SSH logins it starts prompt only here.
-const connection = (): string =>
-  (sessionStorage.csConnection ??= crypto
-    .getRandomValues(new Uint32Array(4))
-    .join("."));
+const CONNECTION_KEY = "cybershuttle.connection.v1";
+const connection = (): string => {
+  const id =
+    sessionStorage.getItem(CONNECTION_KEY) ??
+    crypto.getRandomValues(new Uint32Array(4)).join(".");
+  sessionStorage.setItem(CONNECTION_KEY, id);
+  return id;
+};
 
 export function safePlaneFetch(
   planeApiUrl: string,
@@ -115,6 +119,7 @@ export class PlaneClient {
 
   signOut(): void {
     this._auth.invalidateToken();
+    sessionStorage.removeItem(CONNECTION_KEY);
   }
 
   async listConfigs(): Promise<Schemas["SlurmClusterConfigResponse"][]> {
