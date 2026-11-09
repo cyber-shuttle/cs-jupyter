@@ -1,4 +1,4 @@
-// The service manager registry is fail-closed until a READY session is
+// The service manager registry is fail-closed until a running session is
 // selected, keeping compute calls off the wrong session. It shares one
 // ServerConnection.ISettings across contents, kernels, sessions and terminals.
 // This site ships no local kernel and runs against a remote session's
@@ -121,7 +121,7 @@ describe("remote service manager registry", () => {
       content: [],
     });
     await expect(manager.contents.get("example.ipynb")).rejects.toThrow(
-      "Select a READY CyberShuttle session",
+      "Select a running CyberShuttle session",
     );
     await expect(
       manager.contents.save("example.txt", {
@@ -129,7 +129,7 @@ describe("remote service manager registry", () => {
         format: "text",
         content: "blocked",
       }),
-    ).rejects.toThrow("Select a READY CyberShuttle session");
+    ).rejects.toThrow("Select a running CyberShuttle session");
     expect(manager.events).toBe(supportManagers.events);
     expect(manager.nbconvert).toBe(supportManagers.nbconvert);
     expect(manager.settings).toBe(supportManagers.settings);
@@ -167,7 +167,7 @@ describe("remote service manager registry", () => {
         typeof input === "string" || input instanceof URL ? input : input.url,
       );
       let body: unknown = [];
-      if (url.pathname.endsWith(`/processes/${PROCESS_ID}/access`)) {
+      if (url.pathname.endsWith(`/processes/${PROCESS_ID}/jupyter-server`)) {
         body = accessFixture(PROCESS_ID);
       } else if (url.pathname.endsWith("/api/kernelspecs")) {
         body = {
@@ -188,10 +188,7 @@ describe("remote service manager registry", () => {
       return jsonResponse(body);
     });
     vi.stubGlobal("fetch", browserFetch);
-    sessionStorage.setItem(
-      "cybershuttle.oauth.v1",
-      JSON.stringify({ idToken: "test", expiresAt: Date.now() + 60_000 }),
-    );
+    sessionStorage.setItem("cybershuttle.token.v1", "test");
     const registry = registryFor(
       `/lite/lab/index.html?session=${id}&workspace=${id}`,
     );
@@ -215,7 +212,7 @@ describe("remote service manager registry", () => {
     expect(kernels).toBeInstanceOf(KernelManager);
     expect(kernelspecs).toBeInstanceOf(KernelSpecManager);
     expect(sessions).toBeInstanceOf(SessionManager);
-    const remoteBase = `http://localhost:3000/api/v1/processes/${PROCESS_ID}/proxy/24001/`;
+    const remoteBase = `http://localhost:3000/api/v1/processes/${PROCESS_ID}/jupyter/`;
     expect(shellServerSettings.baseUrl).toBe(PageConfig.getBaseUrl());
     expect(manager.serverSettings).toBe(shellServerSettings);
     expect(contents.serverSettings.baseUrl).toBe(remoteBase);
@@ -243,12 +240,12 @@ describe("remote service manager registry", () => {
     );
     expect(paths).toEqual(
       expect.arrayContaining([
-        `/api/v1/processes/${PROCESS_ID}/access`,
+        `/api/v1/processes/${PROCESS_ID}/jupyter-server`,
         "/lab/api/settings",
-        `/api/v1/processes/${PROCESS_ID}/proxy/24001/api/kernels`,
-        `/api/v1/processes/${PROCESS_ID}/proxy/24001/api/kernelspecs`,
-        `/api/v1/processes/${PROCESS_ID}/proxy/24001/api/sessions`,
-        `/api/v1/processes/${PROCESS_ID}/proxy/24001/api/terminals`,
+        `/api/v1/processes/${PROCESS_ID}/jupyter/api/kernels`,
+        `/api/v1/processes/${PROCESS_ID}/jupyter/api/kernelspecs`,
+        `/api/v1/processes/${PROCESS_ID}/jupyter/api/sessions`,
+        `/api/v1/processes/${PROCESS_ID}/jupyter/api/terminals`,
       ]),
     );
 

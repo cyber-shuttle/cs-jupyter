@@ -58,7 +58,7 @@ Each `src/` file opens with a doc comment stating its role. Entry points:
 | `src/index.ts`                   | Extension plugins; fail-closed server settings                   |
 | `src/PlaneClient.ts`             | CyberShuttle API client                                          |
 | `src/Common.ts`                  | Shared types, typed client, URL rules                            |
-| `src/AuthClient.ts`              | CILogon sign-in with PKCE through the CyberShuttle API           |
+| `src/AuthClient.ts`              | Token sign-in, checked against the CyberShuttle API              |
 | `src/CyberShuttlePanel.ts`       | Panel in the Launcher: poll, sign-in state, dialogs              |
 | `tests/session-contract.test.ts` | Pins the HTTP API wire contract; change it with `PlaneClient.ts` |
 | `jupyter-lite.json`              | PageConfig of the built site                                     |

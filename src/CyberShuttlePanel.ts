@@ -9,7 +9,6 @@ import {
   IDeployment,
   IUsageSample,
   ISession,
-  isRunning,
   isTerminal,
   type Schemas,
 } from "./Common";
@@ -63,7 +62,7 @@ export class CyberShuttleHeader extends PanelBoundWidget {
 
   private _identityControl(): HTMLElement {
     const holder = element("div", "", "csIdentity");
-    const { signedIn, signingIn, identity } = this._state;
+    const { signedIn, signingIn } = this._state;
     const trigger = button(
       "",
       `csTextButton csIdentityButton ${signedIn ? "csAccountButton" : "csSignInButton"}`,
@@ -72,11 +71,7 @@ export class CyberShuttleHeader extends PanelBoundWidget {
     trigger.appendChild(
       element(
         "span",
-        signedIn
-          ? (identity ?? "Account")
-          : signingIn
-            ? "Signing in…"
-            : "Sign in",
+        signedIn ? "Account" : signingIn ? "Signing in…" : "Sign in",
       ),
     );
     trigger.dataset.sessionAction = signedIn ? "account" : "sign-in";
@@ -210,7 +205,6 @@ export class CyberShuttlePanel extends StackedPanel {
       jupyterReady: new Set(this._actions.jupyterReady),
       signedIn: this._signedIn,
       signingIn: this._signInPromise !== undefined,
-      identity: this._signedIn ? this._api.identity : undefined,
     };
   }
 
@@ -230,8 +224,6 @@ export class CyberShuttlePanel extends StackedPanel {
         this._logs = new Map(
           [...this._logs].filter(([id]) => id !== previous.id),
         );
-      } else if (!isRunning(session.state)) {
-        this._actions.releaseJupyter(previous.id);
       }
     }
     this._sessions = sessions;
@@ -297,7 +289,7 @@ export class CyberShuttlePanel extends StackedPanel {
       }
       for (const session of this._sessions) {
         if (
-          isRunning(session.state) &&
+          !isTerminal(session.state) &&
           !this._actions.jupyterReady.has(session.id) &&
           !this._actions.hasJupyterOperation(session.id)
         ) {
@@ -387,6 +379,7 @@ export class CyberShuttlePanel extends StackedPanel {
       this._error = "";
       this._signInPromise = this._api
         .signIn()
+        .then(() => this._resume())
         .catch((error) => {
           this._error = errorMessage(error);
         })
@@ -426,11 +419,7 @@ export class CyberShuttlePanel extends StackedPanel {
   private async _resume(): Promise<void> {
     try {
       await this._api.resumeSignIn();
-    } catch (error) {
-      if (!(error instanceof AuthInteractionRequiredError)) {
-        this._error = errorMessage(error);
-        this._emitState();
-      }
+    } catch {
       return;
     }
     if (this.isDisposed) return;

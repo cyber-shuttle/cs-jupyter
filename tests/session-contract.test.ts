@@ -2,11 +2,13 @@
 // and Slurm discovery.
 import {
   clientFor,
+  clusterFixture,
   CLUSTER_ID,
   processFixture,
   processId,
   runFixture,
   sessionFixture,
+  slurmClusterFixture,
 } from "./fakes";
 import { describe, expect, it } from "vitest";
 
@@ -56,20 +58,31 @@ describe("the CyberShuttle API session JSON contract", () => {
 describe("the CyberShuttle API Slurm discovery JSON contract", () => {
   const discovery = {
     allocations: [{ account: "project-a", partitions: [], qos: [] }],
-    partitions: [
-      {
-        name: "gpuA100",
-        cpuPerNode: 64,
-        maxMemory: 243200,
-        gres: "gpu:a100:4,gpu:2",
-      },
-      { name: "small", cpuPerNode: null, maxMemory: null, gres: null },
-    ],
   };
+  const partitions = [
+    {
+      partitionId: "p1",
+      name: "gpuA100",
+      cpuPerNode: 64,
+      maxMemory: 243200,
+      gres: "gpu:a100:4,gpu:2",
+    },
+    {
+      partitionId: "p2",
+      name: "small",
+      cpuPerNode: null,
+      maxMemory: null,
+      gres: null,
+    },
+  ];
 
   it("reads a config's partitions and accounts", async () => {
     await expect(
-      clientFor(discovery).discoverSlurm(CLUSTER_ID),
+      clientFor(discovery).discoverSlurm(
+        clusterFixture({
+          slurmCluster: { ...slurmClusterFixture(), partitions },
+        }),
+      ),
     ).resolves.toEqual({
       configId: CLUSTER_ID,
       accounts: ["project-a"],

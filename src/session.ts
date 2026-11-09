@@ -72,7 +72,6 @@ export interface ISessionUiState {
   readonly jupyterReady: ReadonlySet<string>;
   readonly signedIn: boolean;
   readonly signingIn: boolean;
-  readonly identity: string | undefined;
 }
 
 export const emptyState = (): ISessionUiState => ({
@@ -91,7 +90,6 @@ export const emptyState = (): ISessionUiState => ({
   jupyterReady: new Set(),
   signedIn: false,
   signingIn: false,
-  identity: undefined,
 });
 
 export function displayState(

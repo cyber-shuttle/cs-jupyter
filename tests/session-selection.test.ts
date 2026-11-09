@@ -123,7 +123,7 @@ describe("serialized session selection", () => {
     expect([
       cards.length,
       [...cards].slice(0, 2).every((card) => card.tagName === "BUTTON"),
-      cards[0].ariaLabel?.includes("hpc-a · JupyterLab, READY"),
+      cards[0].ariaLabel?.includes("hpc-a · JupyterLab, RUNNING"),
       cards[1].ariaLabel?.includes("FAILED"),
       cards[2].classList.contains("csSessionAddCard"),
       cards[2].textContent?.includes("Add Session"),
@@ -230,14 +230,14 @@ describe("serialized session selection", () => {
     },
   );
 
-  it("keeps quiet when access is refused because the session is leaving READY", async () => {
+  it("keeps quiet when access is refused because the session is leaving RUNNING", async () => {
     const { panel, api } = harness([first, second], async () => first);
     await ready(panel);
     panel.actions.releaseJupyter(first.id);
     api.getSessionAccess.mockRejectedValueOnce(
       new PlaneError(
         "Session access is unavailable: the session is stopping",
-        409,
+        502,
       ),
     );
 
@@ -247,7 +247,7 @@ describe("serialized session selection", () => {
     panel.dispose();
   });
 
-  it("names the access failure instead of a generic one when the target leaves READY mid-read", async () => {
+  it("names the access failure instead of a generic one when the target leaves RUNNING mid-read", async () => {
     const { panel, api, navigate } = harness([first, second], async (id) =>
       id === first.id ? first : second,
     );
@@ -400,7 +400,7 @@ describe("session list contract", () => {
     ).toEqual(["hpc-a · JupyterLab", gpu.account]);
     expect(card.querySelector(".csSessionCardIcon svg")).not.toBeNull();
     expect(card.querySelector(".csSessionCardIconGpu")).not.toBeNull();
-    expect(card.querySelector(".csSessionCardIcon-ready")).not.toBeNull();
+    expect(card.querySelector(".csSessionCardIcon-running")).not.toBeNull();
     const { list: cpuList } = boundList({
       ...uiState({
         sessions: [{ ...gpu, resources: { ...gpu.resources, gpuCount: 0 } }],
@@ -444,14 +444,13 @@ describe("identity control", () => {
       new PanelStateFake({
         ...uiState({ sessions: [first] }),
         signedIn: true,
-        identity: "someone@example.edu",
       }) as never,
     );
     const signOut = vi.fn();
     header.signOutRequested.connect(signOut);
     const trigger =
       header.node.querySelector<HTMLButtonElement>(".csAccountButton")!;
-    expect(trigger.textContent).toBe("someone@example.edu");
+    expect(trigger.textContent).toBe("Account");
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
     expect(header.node.querySelector(".csAccountMenuItem")).toBeNull();
 

@@ -21,7 +21,7 @@ import {
 } from "./fakes";
 
 const base = sessionFixture({ id: processId(1), state: "CREATED" });
-const readyBase: ISession = { ...base, state: "READY" };
+const readyBase: ISession = { ...base, state: "RUNNING" };
 
 function card(panel: CyberShuttlePanel): HTMLElement {
   return panel.node.querySelector<HTMLElement>(".csSessionCard")!;
@@ -147,7 +147,7 @@ describe("session stop action", () => {
   });
 
   it("keeps a connect's busy entry when a concurrent stop rejects afterward", async () => {
-    const ready = sessionFixture({ id: processId(3), state: "READY" });
+    const ready = sessionFixture({ id: processId(3), state: "RUNNING" });
     const stopping = Promise.withResolvers<ISession>();
     const access = Promise.withResolvers<ReturnType<typeof accessFixture>>();
     const api = planeFake({
@@ -183,8 +183,8 @@ afterEach(() => {
 });
 
 describe("confirmations opened while the create wizard is open", () => {
-  const base = sessionFixture({ id: processId(3), state: "READY" });
-  const other = sessionFixture({ id: processId(4), state: "READY" });
+  const base = sessionFixture({ id: processId(3), state: "RUNNING" });
+  const other = sessionFixture({ id: processId(4), state: "RUNNING" });
 
   it("lets stop show its confirmation without the wizard being closed first", async () => {
     const api = planeFake({

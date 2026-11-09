@@ -7,6 +7,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - The client talks to the CyberShuttle API instead of cs-plane; a session is a `BATCH_JOB` process.
+- **Sign in** takes a pasted CyberShuttle API token instead of a CILogon redirect.
 - **SSH Hosts** are **Compute Hosts**; **SSH Keys** are **Credentials**: a keypair, a password, or nothing stored.
 - A dialog asks for whatever a login needs beyond its credential, replacing the SSH authentication console.
 - `src/api/airavata.ts` is generated on install, not tracked.

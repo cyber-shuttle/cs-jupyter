@@ -2,7 +2,7 @@
 // usage figures and status log. The status log stays visible, not behind a
 // disclosure, since it shows when a session last said anything.
 import { PanelBoundWidget } from "./RebuildingWidget";
-import { isRunning, isTerminal, type ISession } from "./Common";
+import { isTerminal, type ISession } from "./Common";
 import type { CyberShuttlePanel } from "./CyberShuttlePanel";
 import type { ISessionLogTail } from "./PlaneClient";
 import {
@@ -122,7 +122,7 @@ export class SessionDetail extends PanelBoundWidget {
         ),
       );
     }
-    if (isRunning(session.state) && this._state.jupyterReady.has(session.id)) {
+    if (this._state.jupyterReady.has(session.id)) {
       if (session.id === getActiveSessionId()) {
         actions.appendChild(element("span", "Connected", "csPill"));
       } else {

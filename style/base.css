@@ -359,7 +359,6 @@
   font-size: var(--jp-ui-font-size0);
   font-weight: 700;
 }
-.csSessionState-ready,
 .csSessionState-running {
   background: var(--jp-success-color3);
 }
@@ -396,9 +395,7 @@
 .csSessionCardIcon {
   color: var(--jp-ui-font-color3);
 }
-.csSessionState-ready,
 .csSessionState-running,
-.csSessionCardIcon-ready,
 .csSessionCardIcon-running {
   color: var(--jp-success-color1);
 }

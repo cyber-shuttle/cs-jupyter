@@ -7,7 +7,7 @@ import {
   clusterLabel,
   errorMessage,
   ISession,
-  isRunning,
+  isTerminal,
   type Schemas,
 } from "./Common";
 import { accessUnavailable, PlaneClient } from "./PlaneClient";
@@ -131,7 +131,7 @@ export class SessionActions {
       this._jupyterOperations.get(operation.sessionId) === operation &&
       operation.selection === this._selection &&
       session !== undefined &&
-      isRunning(session.state)
+      !isTerminal(session.state)
     );
   }
 
@@ -168,7 +168,7 @@ export class SessionActions {
 
   async refreshJupyter(sessionId: string): Promise<void> {
     const session = this._session(sessionId);
-    if (!session || !isRunning(session.state)) {
+    if (!session || isTerminal(session.state)) {
       this._accessBackoff.delete(sessionId);
       return;
     }
@@ -236,7 +236,7 @@ export class SessionActions {
       }
       if (current()) {
         if (!this._jupyterReady.has(session.id)) {
-          throw new Error("Session must be READY.");
+          throw new Error("Session must be running.");
         }
         await this._controller.select(session, current);
       }

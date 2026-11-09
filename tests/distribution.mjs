@@ -59,11 +59,11 @@ for (const plugin of [
 }
 assert.ok(
   !config.disabledExtensions.includes("@jupyterlab/terminal-extension:plugin"),
-  "remote terminal extension must remain available to a READY session",
+  "remote terminal extension must remain available to a running session",
 );
 assert.ok(
   config.deferredExtensions.includes("@jupyterlab/terminal-extension:plugin"),
-  "terminal UI must wait for the READY-gated remote service manager",
+  "terminal UI must wait for the session-gated remote service manager",
 );
 
 const forbidden = ["pyodide", "xeus", "javascript-kernel"];

@@ -53,7 +53,7 @@ status log.
 Requirements:
 
 - The address of a CyberShuttle Jupyter deployment.
-- A [CILogon](https://www.cilogon.org/) sign-in. Most universities and research institutions provide one.
+- A CyberShuttle API token, issued by the deployment.
 - An account on a Slurm cluster that the deployment lists.
 - A current browser.
 
@@ -65,7 +65,7 @@ Steps:
 1. Open the deployment and choose **Sign in**.
 2. Open **Compute Hosts** and add your login on a cluster.
 3. Choose **Add Session**, pick the compute host, and choose **Create**.
-4. Wait for the session to read `READY`, then choose **Connect**.
+4. Wait for the **Jupyter** line to read `ready`, then choose **Connect**.
 5. Choose **Stop** when you finish.
 
 [docs/USING.md](docs/USING.md) shows a recording of each step.

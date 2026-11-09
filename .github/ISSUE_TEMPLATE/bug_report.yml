@@ -26,7 +26,7 @@ body:
         - SUBMITTING
         - QUEUED
         - STARTING
-        - READY
+        - RUNNING
         - STOPPING
         - STOPPED
         - FAILED

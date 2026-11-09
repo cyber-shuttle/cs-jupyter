@@ -103,10 +103,9 @@ export const deploymentFixture = (): IDeployment => ({
 export function sessionFixture(overrides: Partial<ISession> = {}): ISession {
   return {
     id: PROCESS_ID,
-    controlPort: 24000,
     configId: CLUSTER_ID,
     deploymentId: DEPLOYMENT_ID,
-    state: "READY",
+    state: "RUNNING",
     account: "project-a",
     partition: "debug",
     resources: { cores: 2, memoryMb: 4096, wallMinutes: 30 },
@@ -152,7 +151,6 @@ export function processFixture(
       batchJobStatuses: session.startedAt
         ? [{ status: "BEGIN", updatedAt: Date.parse(session.startedAt) }]
         : [],
-      controlPort: session.controlPort,
     },
   } as Schemas["ProcessResponse"];
 }
@@ -174,10 +172,9 @@ export function accessFixture(
 ): ISessionAccess {
   return {
     processId,
-    app: {
-      uri: `http://localhost:3000/api/v1/processes/${processId}/proxy/24001/`,
-      token: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-    },
+    linked: true,
+    baseUrl: `http://localhost:3000/api/v1/processes/${processId}/jupyter/`,
+    token: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     ...overrides,
   };
 }

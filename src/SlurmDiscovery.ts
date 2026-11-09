@@ -42,10 +42,14 @@ export class SlurmDiscovery {
     this._deployments = deployments;
   }
 
-  get deployments(): IDeployment[] {
-    const cluster = this._clusters.find(
+  private get _cluster(): Schemas["SlurmClusterConfigResponse"] | undefined {
+    return this._clusters.find(
       (each) => each.slurmClusterConfigId === this.clusterId,
     );
+  }
+
+  get deployments(): IDeployment[] {
+    const cluster = this._cluster;
     return this._deployments.filter(
       (each) => cluster && each.slurmClusterId === cluster.slurmClusterId,
     );
@@ -164,7 +168,10 @@ export class SlurmDiscovery {
         this.clusterId === clusterId &&
         !hooks.isDisposed();
       try {
-        const value = await this._api.discoverSlurm(clusterId, abort.signal);
+        const value = await this._api.discoverSlurm(
+          this._cluster!,
+          abort.signal,
+        );
         if (current()) {
           applyDiscovery(value);
         }

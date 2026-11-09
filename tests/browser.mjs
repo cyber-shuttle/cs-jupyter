@@ -1,9 +1,8 @@
 // Playwright end-to-end run against dist, driving real Chromium against a
-// fake CyberShuttle API, a fake OAuth issuer, and a fake Jupyter server that
-// answers on the CyberShuttle API's proxy path. It exercises PKCE sign-in and
-// the session lifecycle through the real built extension.
+// fake CyberShuttle API and a fake Jupyter server that answers on the
+// CyberShuttle API's proxy path. It exercises token sign-in and the session
+// lifecycle through the real built extension.
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { extname, join, normalize, resolve } from "node:path";
@@ -20,15 +19,10 @@ const templateId = "b6f1c2de-3a4b-4c5d-8e6f-7a8b9c0d1e2f";
 const sessionId = processIdOf(1);
 const startId = processIdOf(2);
 const createdId = processIdOf(3);
-const account = "user@example.edu";
+const apiToken = "airavata_sa_browser-test";
 const jupyterToken = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-const issuerOrigin = "https://issuer.example.test";
-let idToken = "";
-let verifierUsed = "";
-let capturedAuthorize;
 let staticOrigin = "";
 let planeOrigin = "";
-let popupCount = 0;
 const planeRequests = [];
 const directRequests = [];
 const directWebSockets = [];
@@ -80,51 +74,11 @@ const planeServer = createServer((request, response) => {
   }
   planeRequests.push(`${request.method} ${url.pathname}`);
   cors(response);
-  if (url.pathname === "/api/v1/auth/config" && request.method === "GET") {
-    assert.equal(request.headers.origin, staticOrigin);
-    assert.equal(request.headers.authorization, undefined);
-    assert.equal(request.headers.cookie, undefined);
-    return json(response, {
-      issuer: issuerOrigin,
-      authorization_endpoint: `${issuerOrigin}/authorize`,
-      client_id: "cybershuttle-jupyter",
-      scope: "openid email profile",
-    });
-  }
-  if (url.pathname === "/api/v1/auth/token" && request.method === "POST") {
-    assert.equal(request.headers.origin, staticOrigin);
-    assert.equal(request.headers.authorization, undefined);
-    assert.equal(request.headers.cookie, undefined);
-    return readRequestJSON(request).then((body) => {
-      assert.equal(body.code, "browser-code");
-      assert.equal(typeof body.code_verifier, "string");
-      assert.equal(
-        createHash("sha256").update(body.code_verifier).digest("base64url"),
-        capturedAuthorize?.codeChallenge,
-        "the code verifier must hash to the challenge the authorize request carried",
-      );
-      assert.ok(
-        body.redirect_uri.startsWith(staticOrigin),
-        "the redirect URI must stay on the extension's own origin",
-      );
-      verifierUsed = body.code_verifier;
-      const now = Math.floor(Date.now() / 1000);
-      idToken = jwt({
-        iss: issuerOrigin,
-        aud: "cybershuttle-jupyter",
-        sub: "owner",
-        email: account,
-        iat: now,
-        exp: now + 3600,
-      });
-      return json(response, { id_token: idToken, expires_in: 900 });
-    });
-  }
-  if (url.pathname.endsWith("/proxy/24000/api/v1/usage")) {
+  if (url.pathname.endsWith("/linkspan/api/v1/usage")) {
     assert.equal(request.headers.authorization, `token ${jupyterToken}`);
     return json(response, {});
   }
-  if (request.headers.authorization !== `Bearer ${idToken}`)
+  if (request.headers.authorization !== `Bearer ${apiToken}`)
     return json(response, { message: "unauthorized" }, 401, {
       "www-authenticate": "Bearer",
     });
@@ -133,6 +87,12 @@ const planeServer = createServer((request, response) => {
       {
         slurmClusterConfigId: clusterId,
         slurmClusterId,
+        slurmCluster: {
+          slurmClusterId,
+          partitions: [
+            { name: "debug", cpuPerNode: 16, maxMemory: 32768, gres: null },
+          ],
+        },
         name: "hpc-a",
         loginUser: "me",
         workRoot: "/home/me",
@@ -156,9 +116,6 @@ const planeServer = createServer((request, response) => {
   )
     return json(response, {
       allocations: [{ account: "project-a", partitions: [], qos: [] }],
-      partitions: [
-        { name: "debug", cpuPerNode: 16, maxMemory: 32768, gres: null },
-      ],
     });
   if (url.pathname === "/api/v1/processes" && request.method === "POST") {
     return readRequestJSON(request).then((body) => {
@@ -175,29 +132,25 @@ const planeServer = createServer((request, response) => {
     });
   }
   const [, processId, action = ""] =
-    /^\/api\/v1\/processes\/([0-9a-f-]{36})(?:\/([a-z]+))?$/.exec(
+    /^\/api\/v1\/processes\/([0-9a-f-]{36})(?:\/([a-z-]+))?$/.exec(
       url.pathname,
     ) ?? [];
   const item = processes.find((each) => each.processId === processId);
   if (!item) return json(response, { message: "Route not found." }, 404);
   if (!action) return json(response, item);
   if (action === "statuses") return json(response, []);
-  if (action === "access") {
-    if (item.lastStatus.status !== "READY")
-      return json(response, { message: "The job has no link" }, 409);
+  if (action === "jupyter-server")
     return json(response, {
       processId,
-      app: {
-        uri: `${planeOrigin}/api/v1/processes/${processId}/proxy/24001/`,
-        token: jupyterToken,
-      },
+      linked: item.lastStatus.status === "RUNNING",
+      baseUrl: `/api/v1/processes/${processId}/jupyter/`,
+      token: jupyterToken,
     });
-  }
   if (action === "launch" && request.method === "POST") {
     item.lastStatus.status = "SUBMITTED";
     if (processId === createdId)
       setTimeout(() => {
-        item.lastStatus.status = "READY";
+        item.lastStatus.status = "RUNNING";
       }, 25);
     return json(response, item, 202);
   }
@@ -212,12 +165,7 @@ planeOrigin = serverOrigin(planeServer);
 const browser = await chromium.launch({ headless: true, channel: "chrome" });
 try {
   const context = await browser.newContext({ serviceWorkers: "block" });
-  let page;
-  context.on("page", (popup) => {
-    if (page && popup !== page) popupCount++;
-  });
-  await installIssuerRoute(context);
-  page = await context.newPage();
+  const page = await context.newPage();
   const browserErrors = [];
   const browserMessages = [];
   page.on("pageerror", (error) => browserErrors.push(error.message));
@@ -227,11 +175,11 @@ try {
   });
 
   await context.route(
-    `${planeOrigin}/api/v1/processes/*/proxy/24001/**`,
+    `${planeOrigin}/api/v1/processes/*/jupyter/**`,
     async (route) => {
       const request = route.request();
       const url = new URL(request.url());
-      const relative = url.pathname.split("/proxy/24001/")[1];
+      const relative = url.pathname.split("/jupyter/")[1];
       directRequests.push({
         method: request.method(),
         path: `/${relative}`,
@@ -314,7 +262,6 @@ try {
   assert.equal(page.url(), `${staticOrigin}/lite/lab/index.html`);
   assert.equal(await signInPrompt.locator(".csSignInLogo").count(), 1);
   assert.ok((await signInPrompt.textContent()).includes("remote HPC sessions"));
-  assert.equal(popupCount, 0, "fresh load must not open an OAuth page");
   assert.deepEqual(
     planeRequests,
     [],
@@ -322,28 +269,21 @@ try {
   );
 
   await signInPrompt.getByRole("button", { name: "Sign in" }).click();
+  const tokenPrompt = page
+    .locator(".jp-Dialog")
+    .filter({ hasText: "Sign in to CyberShuttle" });
+  await tokenPrompt.locator("input[type=password]").fill(apiToken);
+  await tokenPrompt.getByRole("button", { name: "Sign in" }).click();
   await page
-    .getByRole("button", { name: account })
+    .getByRole("button", { name: "Account" })
     .waitFor({ timeout: 20_000 });
-  assert.equal(
-    popupCount,
-    0,
-    "sign-in navigates the top window to the issuer and back; it must not open a popup",
-  );
-  const afterSignInUrl = new URL(page.url());
-  assert.equal(
-    afterSignInUrl.searchParams.has("code"),
-    false,
-    "the callback query must be gone once the exchange completes",
-  );
-  assert.equal(afterSignInUrl.searchParams.has("state"), false);
 
   await page.locator(`[data-session-action="${sessionId}"]`).waitFor();
   assert.equal(
     await page
       .locator(`[data-session-action="${sessionId}"]`)
       .getAttribute("aria-label"),
-    "hpc-a · JupyterLab, READY",
+    "hpc-a · JupyterLab, RUNNING",
   );
   const browserState = await page.evaluate(() => ({
     href: window.location.href,
@@ -356,19 +296,14 @@ try {
     browserMessages,
   });
   assert.equal(
-    leakSurface.includes(idToken),
+    leakSurface.includes(apiToken),
     false,
-    "the ID token must not enter the URL, localStorage, or logs",
-  );
-  assert.equal(
-    leakSurface.includes(verifierUsed),
-    false,
-    "the PKCE code verifier must not enter the URL, localStorage, or logs",
+    "the API token must not enter the URL, localStorage, or logs",
   );
   assert.deepEqual(
-    Object.keys(browserState.sessionStorage).sort(),
-    ["cybershuttle.connection.v1", "cybershuttle.oauth.v1"],
-    "session storage holds only the credentials and this tab's connection id",
+    Object.keys(browserState.sessionStorage),
+    ["cybershuttle.token.v1"],
+    "session storage holds only the credentials",
   );
   assert.ok(planeRequests.includes("GET /api/v1/processes/me"));
 
@@ -530,7 +465,7 @@ try {
   const createdDetail = page.locator(
     ".jp-Dialog-content:has(.csSessionDetail)",
   );
-  await createdDetail.getByText("READY", { exact: true }).waitFor({
+  await createdDetail.getByText("RUNNING", { exact: true }).waitFor({
     timeout: 20_000,
   });
   const createdProcess = processes.at(-1).processId;
@@ -567,13 +502,11 @@ try {
     "the restored page must read the session it is attached to",
   );
   assert.deepEqual(
-    afterConnect.filter(
-      (entry) =>
-        entry.includes(`${createdProcess}/access`) ||
-        entry.startsWith("POST /api/v1/auth/"),
+    afterConnect.filter((entry) =>
+      entry.includes(`${createdProcess}/jupyter-server`),
     ),
-    [`GET /api/v1/processes/${createdProcess}/access`],
-    "a session landing must reauthorize access without repeating OAuth",
+    [`GET /api/v1/processes/${createdProcess}/jupyter-server`],
+    "a session landing must reauthorize access once",
   );
   const launcher = page.locator(".jp-Launcher");
   const contentsStart = directRequests.length;
@@ -596,7 +529,7 @@ try {
   assert.deepEqual(
     [
       await page.locator("#cybershuttle-session-panel").count(),
-      await page.getByRole("button", { name: account, exact: true }).count(),
+      await page.getByRole("button", { name: "Account", exact: true }).count(),
     ],
     [1, 1],
     "the section and its header must move to the Launcher, not multiply or die with the old one",
@@ -639,7 +572,7 @@ try {
     "direct manager requests omitted the Jupyter token or sent cookies",
   );
   assert.deepEqual(directWebSockets, [
-    `${planeOrigin.replace(/^http/, "ws")}/api/v1/processes/${createdProcess}/proxy/24001/terminals/websocket/1?token=${jupyterToken}`,
+    `${planeOrigin.replace(/^http/, "ws")}/api/v1/processes/${createdProcess}/jupyter/terminals/websocket/1?token=${jupyterToken}`,
   ]);
 
   const planeBeforeReload = planeRequests.length;
@@ -658,7 +591,8 @@ try {
   assert.equal(
     planeRequests
       .slice(planeBeforeReload)
-      .filter((entry) => entry.endsWith(`${createdProcess}/access`)).length,
+      .filter((entry) => entry.endsWith(`${createdProcess}/jupyter-server`))
+      .length,
     1,
     "a session reload must reauthorize access",
   );
@@ -678,7 +612,7 @@ try {
   );
 
   const signedOut = page.waitForNavigation({ waitUntil: "domcontentloaded" });
-  await page.getByRole("button", { name: account, exact: true }).click();
+  await page.getByRole("button", { name: "Account", exact: true }).click();
   await page.locator('[data-session-action="sign-out"]').click();
   await signedOut;
   await signInPrompt.waitFor();
@@ -704,7 +638,7 @@ try {
     [],
   );
   assert.ok(
-    planeRequests.some((entry) => entry.endsWith("/proxy/24000/api/v1/usage")),
+    planeRequests.some((entry) => entry.endsWith("/linkspan/api/v1/usage")),
     "a linked session's usage must be read through its proxy",
   );
   console.log(
@@ -745,28 +679,6 @@ async function launcherSectionLayout(section) {
   });
 }
 
-async function installIssuerRoute(context) {
-  await context.route(`${issuerOrigin}/authorize**`, async (route) => {
-    const request = route.request();
-    assert.equal(request.method(), "GET");
-    const url = new URL(request.url());
-    assert.equal(url.searchParams.get("response_type"), "code");
-    assert.equal(url.searchParams.get("code_challenge_method"), "S256");
-    capturedAuthorize = {
-      state: url.searchParams.get("state"),
-      codeChallenge: url.searchParams.get("code_challenge"),
-      redirectUri: url.searchParams.get("redirect_uri"),
-    };
-    const location = new URL(capturedAuthorize.redirectUri);
-    location.searchParams.set("code", "browser-code");
-    location.searchParams.set("state", capturedAuthorize.state);
-    return route.fulfill({
-      status: 302,
-      headers: { location: location.toString() },
-    });
-  });
-}
-
 function directoryModel() {
   return {
     name: "",
@@ -803,7 +715,7 @@ async function waitForCondition(condition, timeout = 10_000) {
 function processIdOf(n) {
   return `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 }
-function processRecord(n, state = "READY") {
+function processRecord(n, state = "RUNNING") {
   const at = Date.UTC(2026, 0, 1, 0, 0, n);
   return {
     processId: processIdOf(n),
@@ -820,7 +732,6 @@ function processRecord(n, state = "READY") {
         mem: "4096M",
       },
       batchJobStatuses: [],
-      controlPort: 24000,
     },
   };
 }
@@ -858,12 +769,6 @@ function serverOrigin(server) {
   const address = server.address();
   assert.ok(address && typeof address === "object");
   return `http://127.0.0.1:${address.port}`;
-}
-function base64url(value) {
-  return Buffer.from(value).toString("base64url");
-}
-function jwt(payload) {
-  return `${base64url(JSON.stringify({ alg: "none", typ: "JWT" }))}.${base64url(JSON.stringify(payload))}.signature`;
 }
 function contentType(path) {
   return (

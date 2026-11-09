@@ -18,7 +18,7 @@ import {
 } from "./fakes";
 
 const session = sessionFixture({ state: "SUBMITTED" });
-const ready = { ...session, state: "READY" as const };
+const ready = { ...session, state: "RUNNING" as const };
 
 async function resumingWhileInFlight() {
   const inFlight =
@@ -37,13 +37,14 @@ beforeEach(() => {
 });
 
 describe("session polling", () => {
-  it("waits for an explicit sign-in, which leaves the page, before reading anything", async () => {
+  it("waits for an explicit sign-in before reading anything", async () => {
     const signIn = Promise.withResolvers<void>();
     const api = planeFake({
       signIn: vi.fn(() => signIn.promise),
-      resumeSignIn: vi.fn(async () => {
-        throw new AuthInteractionRequiredError();
-      }),
+      resumeSignIn: vi
+        .fn()
+        .mockRejectedValueOnce(new AuthInteractionRequiredError())
+        .mockResolvedValue(undefined),
     });
     const panel = panelFake(api);
     await panel.restored;
@@ -55,10 +56,11 @@ describe("session polling", () => {
     const second = panel.signIn();
     expect(api.signIn).toHaveBeenCalledOnce();
     expect(panel.state.signingIn).toBe(true);
+    expect(api.listSessions).not.toHaveBeenCalled();
     signIn.resolve();
     await second;
-    expect(api.listSessions).not.toHaveBeenCalled();
-    expect(api.listConfigs).not.toHaveBeenCalled();
+    expect(api.listSessions).toHaveBeenCalled();
+    expect(panel.state.signedIn).toBe(true);
     panel.dispose();
   });
 
@@ -165,7 +167,7 @@ describe("session polling", () => {
     sessionStorage.removeItem("cybershuttle.run-report.v1");
     const running = {
       ...session,
-      state: "READY" as const,
+      state: "RUNNING" as const,
       startedAt: new Date().toISOString(),
       resources: { ...session.resources, wallMinutes: 1 },
     };
@@ -275,7 +277,7 @@ describe("sign-out during an in-flight poll", () => {
 });
 
 describe("polling access", () => {
-  const ready = sessionFixture();
+  const ready = sessionFixture({ state: "SUBMITTED" });
   const access = accessFixture(ready.id);
 
   it("retries an access read that failed on an earlier poll", async () => {
@@ -370,18 +372,6 @@ describe("session resume", () => {
     expect(api.listSessions).toHaveBeenCalled();
     expect(open).toHaveBeenCalledWith(session.id);
     expect(sessionStorage.getItem("cybershuttle.run-report.v1")).toBeNull();
-    panel.dispose();
-  });
-
-  it("reports a failed sign-in callback", async () => {
-    const api = planeFake({
-      resumeSignIn: vi.fn(async () => {
-        throw new Error("Sign-in state did not match; try signing in again.");
-      }),
-    });
-    const panel = panelFake(api);
-    await panel.restored;
-    expect(panel.state.error).toContain("Sign-in state did not match");
     panel.dispose();
   });
 });

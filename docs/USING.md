@@ -29,9 +29,9 @@ The recordings use a cluster named `hpc-a` and a user named `researcher`. Your d
 
 1. Open the address of your deployment. A welcome dialog appears.
 2. Choose **Sign in**.
-3. Pick your institution on the CILogon page and log in. The recording skips this page.
+3. Paste the CyberShuttle API token your deployment issued, and choose **Sign in**.
 
-The browser returns to CyberShuttle Jupyter. Your account name shows on the **CyberShuttle** row.
+**Account** shows on the **CyberShuttle** row.
 
 The sign-in is stored per tab. A new tab asks you to sign in again.
 
@@ -41,7 +41,7 @@ Without one, a dialog asks for your password at each login.
 
 <img src="media/guide-credential.webp" alt="Recording: adding a keypair under Credentials" width="800">
 
-1. Choose your account name on the **CyberShuttle** row.
+1. Choose **Account** on the **CyberShuttle** row.
 2. Choose **Credentials**.
 3. Choose **Add credential**.
 4. Pick a **Kind** and fill in its fields.
@@ -92,7 +92,7 @@ A form describes the job.
 <img src="media/guide-add-session.webp" alt="Recording: adding a session, answering a login question and submitting the job" width="800">
 
 1. Choose the **Add Session** card under **Sessions**.
-2. Pick a **Compute host**. The CyberShuttle API logs in to the cluster and reads your Slurm accounts and partitions.
+2. Pick a **Compute host**. The CyberShuttle API logs in to the cluster and reads your Slurm accounts. The partitions are the cluster's registered ones.
 3. If a dialog asks for a password or a one-time code, enter it and choose **Log in**.
 4. Fill in the rest of the form.
 5. Choose **Create**.
@@ -115,17 +115,16 @@ You can close the dialog. The session stays on the Launcher as a card. Choose th
 | State                              | Meaning                         | Actions                 |
 | ---------------------------------- | ------------------------------- | ----------------------- |
 | `CREATED`                          | Saved, not submitted            | **Start** submits it    |
-| `SUBMITTED`                        | Waiting in the Slurm queue      | **Stop** cancels it     |
-| `READY`, `RUNNING`                 | Running on a compute node       | **Connect** or **Stop** |
+| `SUBMITTED`                        | Submitted to Slurm              | **Connect** or **Stop** |
+| `RUNNING`                          | Running on a compute node       | **Connect** or **Stop** |
 | `COMPLETED`, `FAILED`, `CANCELLED` | Ended. The session is now a run | Open it in Run History  |
 
 ## 5. Connect
 
 <img src="media/guide-connect.webp" alt="Recording: a session becoming ready, then connecting to it" width="800">
 
-1. Wait for the state to read `READY`. The **Status** log adds a line at each state change.
-2. Wait for the **Jupyter** line to read `ready`. The **Connect** button appears.
-3. Choose **Connect**.
+1. Wait for the **Jupyter** line to read `ready`. The **Connect** button appears.
+2. Choose **Connect**.
 
 The dialog also shows the time remaining and plots of CPU and memory use. A GPU session adds a GPU plot.
 
@@ -165,7 +164,7 @@ An ended session cannot be started again. Add a new session.
 
 ## Signing out
 
-1. Choose your account name on the **CyberShuttle** row.
+1. Choose **Account** on the **CyberShuttle** row.
 2. Choose **Sign out**.
 
 Signing out or closing the tab does not stop a session. The job runs until you stop it or its walltime ends.
@@ -175,9 +174,9 @@ Signing out or closing the tab does not stop a session. The job runs until you s
 | Message or symptom                                     | Cause                                                  | Action                                                  |
 | ------------------------------------------------------ | ------------------------------------------------------ | ------------------------------------------------------- |
 | `Add a compute host before creating a session.`        | You have no compute host                               | Follow [step 3](#3-add-a-compute-host)                  |
-| `No CPU or GPU Slurm partitions were discovered for …` | The cluster reported no partition for your login       | Ask the cluster's support which partitions you may use  |
-| A session stays `SUBMITTED`                            | The job is waiting in the Slurm queue                  | Wait, or stop it and request fewer resources            |
-| The session is `READY` but **Jupyter** stays `pending` | The Jupyter server has not answered yet                | Wait. The first session on a cluster takes longer       |
+| `No CPU or GPU Slurm partitions were discovered for …` | The cluster has no registered partition                | Ask the deployment to register the cluster's partitions |
+| `SUBMITTED`, and **Jupyter** stays `pending`           | The job is waiting in the Slurm queue                  | Wait, or stop it and request fewer resources            |
+| `RUNNING`, but **Jupyter** stays `pending`             | The Jupyter server has not answered yet                | Wait. The first session on a cluster takes longer       |
 | The status log says the job `runs without a link`      | The job runs, but the CyberShuttle API cannot reach it | Stop the session. Report the log line to the deployment |
 | `Session updates unavailable.`                         | The browser cannot reach the CyberShuttle API          | Check your network. The page retries                    |
 | `Sign in again to resume session updates.`             | Your sign-in has expired                               | Choose **Sign in**                                      |

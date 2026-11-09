@@ -32,10 +32,8 @@ import {
 const auth = fakeAuth("test-delegated-token");
 
 const access = accessFixture(PROCESS_ID, {
-  app: {
-    uri: `http://localhost:3000/gateway/api/v1/processes/${PROCESS_ID}/proxy/24001/`,
-    token: "A".repeat(43),
-  },
+  baseUrl: `http://localhost:3000/gateway/api/v1/processes/${PROCESS_ID}/jupyter/`,
+  token: "A".repeat(43),
 });
 
 const session = sessionFixture({
@@ -77,8 +75,8 @@ describe("shared CyberShuttle API client", () => {
       "/slurm-clusters": [slurmClusterFixture()],
       "/ssh-credentials": [credentialFixture()],
       "/processes/me": [processFixture(session)],
-      [`/processes/${PROCESS_ID}/access`]: access,
-      [`/processes/${PROCESS_ID}/proxy/24000/api/v1/usage`]: { memBytes: 1024 },
+      [`/processes/${PROCESS_ID}/jupyter-server`]: access,
+      [`/processes/${PROCESS_ID}/linkspan/api/v1/usage`]: { memBytes: 1024 },
     };
     const fetch = vi.fn(async (input: RequestInfo | URL) => {
       const request = input as Request;
@@ -95,7 +93,7 @@ describe("shared CyberShuttle API client", () => {
     expect(await client.listDeployments()).toEqual([
       { ...deploymentFixture(), templateId: processId(9) },
     ]);
-    await client.discoverSlurm(CLUSTER_ID);
+    await client.discoverSlurm(clusterFixture());
     expect(await client.listSlurmClusters()).toEqual([slurmClusterFixture()]);
     expect(await client.listCredentials()).toEqual([credentialFixture()]);
     const host = {
@@ -149,14 +147,14 @@ describe("shared CyberShuttle API client", () => {
       `POST ${api}/processes`,
       `POST ${api}/processes/${PROCESS_ID}/launch`,
       `GET ${api}/processes/${PROCESS_ID}`,
-      `GET ${api}/processes/${PROCESS_ID}/access`,
-      `GET ${api}/processes/${PROCESS_ID}/proxy/24000/api/v1/usage`,
+      `GET ${api}/processes/${PROCESS_ID}/jupyter-server`,
+      `GET ${api}/processes/${PROCESS_ID}/linkspan/api/v1/usage`,
       `POST ${api}/processes/${PROCESS_ID}/stop`,
     ]);
     expect(await requests[7].clone().json()).toEqual(host);
     expect(await requests[9].clone().json()).toEqual(credential);
     expect(requests[16].headers.get("Authorization")).toBe(
-      `token ${access.app.token}`,
+      `token ${access.token}`,
     );
     expect(await requests[12].clone().json()).toEqual({
       processType: "BATCH_JOB",
@@ -173,32 +171,21 @@ describe("shared CyberShuttle API client", () => {
         ),
       ) as any,
     );
-    await expect(client.discoverSlurm(CLUSTER_ID)).rejects.toMatchObject({
+    await expect(client.discoverSlurm(clusterFixture())).rejects.toMatchObject({
       message: "Partition discovery failed",
       status: 502,
     });
   });
 
-  it("refuses access before the job's link is up, or under a foreign proxy", async () => {
+  it("refuses access before the job's link is up", async () => {
     const client = makeClient(
       vi.fn(async () =>
-        jsonResponse({ message: "The job has no link" }, { status: 409 }),
+        jsonResponse({ ...accessFixture(PROCESS_ID), linked: false }),
       ) as any,
     );
     await expect(client.getSessionAccess(PROCESS_ID)).rejects.toMatchObject({
-      status: 409,
+      status: 502,
     });
-    const foreign = makeClient(
-      vi.fn(async () =>
-        jsonResponse({
-          ...access,
-          app: { ...access.app, uri: "https://other.example/proxy/" },
-        }),
-      ) as any,
-    );
-    await expect(foreign.getSessionAccess(PROCESS_ID)).rejects.toThrow(
-      "outside its own API",
-    );
   });
 
   it("accepts plain http on every loopback hostname a URL reports, and nowhere else", () => {
@@ -216,9 +203,9 @@ describe("shared CyberShuttle API client", () => {
 
   it("constructs token-authorized Jupyter HTTP and WebSocket settings", async () => {
     const settings = createSessionServerSettings(access);
-    expect(settings.baseUrl).toBe(access.app.uri);
-    expect(settings.wsUrl).toBe(access.app.uri.replace(/^http/, "ws"));
-    expect(settings.token).toBe(access.app.token);
+    expect(settings.baseUrl).toBe(access.baseUrl);
+    expect(settings.wsUrl).toBe(access.baseUrl.replace(/^http/, "ws"));
+    expect(settings.token).toBe(access.token);
     expect(settings.appendToken).toBe(true);
   });
 
@@ -278,7 +265,7 @@ describe("kernel spec logos", () => {
     const settings = createSessionServerSettings(access, {
       fetch: (async () => jsonResponse(body)) as unknown as typeof fetch,
     });
-    const response = await settings.fetch(`${access.app.uri}api/kernelspecs`);
+    const response = await settings.fetch(`${access.baseUrl}api/kernelspecs`);
     const parsed = await response.json();
     expect(parsed.kernelspecs.python3.resources).toEqual({});
     expect(parsed.kernelspecs.python3.name).toBe("python3");
@@ -398,7 +385,9 @@ describe("compute host and credential dialogs", () => {
     await vi.waitFor(() =>
       expect(api.addCredential).toHaveBeenLastCalledWith({
         sshCredentialName: "campus",
+        publicKey: "",
         password: "pw",
+        fullInteractive: true,
       }),
     );
   });
@@ -435,6 +424,7 @@ describe("compute host and credential dialogs", () => {
     }
     expect(api.addCredential).toHaveBeenCalledWith({
       sshCredentialName: "Ask at each login",
+      publicKey: "",
       fullInteractive: true,
     });
   });

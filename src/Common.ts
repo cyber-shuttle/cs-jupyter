@@ -30,7 +30,6 @@ export interface IPlaneAuth {
   acquireToken(): Promise<string>;
   invalidateToken(): void;
   signIn(): Promise<void>;
-  readonly identity?: string | undefined;
 }
 
 export type SessionState = Schemas["ProcessStatusType"];
@@ -41,13 +40,10 @@ export const isEnded = (state: SessionState): boolean =>
 export const isTerminal = (state: SessionState): boolean =>
   state === "CREATED" || isEnded(state);
 
-// The job has begun; RUNNING can follow READY, since Slurm reports the begin late.
-export const isRunning = (state: SessionState): boolean =>
-  state === "READY" || state === "RUNNING";
+export const isRunning = (state: SessionState): boolean => state === "RUNNING";
 
 export interface ISession {
   id: string;
-  controlPort: number;
   configId: string;
   deploymentId?: string;
   state: SessionState;
@@ -173,15 +169,6 @@ export function jsonResponse(
     statusText: init.statusText,
     headers: { "content-type": "application/json" },
   });
-}
-
-export function base64UrlEncode(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
 }
 
 export function errorMessage(error: unknown): string {

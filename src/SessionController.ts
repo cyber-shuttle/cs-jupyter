@@ -4,7 +4,7 @@
 // the CyberShuttle API, since the save can outlast the run the caller chose.
 import type { JupyterFrontEnd } from "@jupyterlab/application";
 import type { Widget } from "@lumino/widgets";
-import { isRunning, type ISession } from "./Common";
+import { isTerminal, type ISession } from "./Common";
 import { PlaneClient } from "./PlaneClient";
 import { getActiveSessionId } from "./session";
 
@@ -42,7 +42,7 @@ export class SessionController {
       if (!isCurrent()) return;
       const live = await this._api.getSession(session.id);
       if (!isCurrent()) return;
-      if (!isRunning(live.state)) {
+      if (isTerminal(live.state)) {
         throw new Error("Session changed before selection completed.");
       }
     }

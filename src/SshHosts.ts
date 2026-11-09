@@ -62,6 +62,7 @@ export class SshHosts extends RemoteListWidget {
     if (!held) {
       held = await this._api.addCredential({
         sshCredentialName: ASK_AT_LOGIN,
+        publicKey: "",
         fullInteractive: true,
       });
       this._credentials.push(held);

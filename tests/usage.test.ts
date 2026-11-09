@@ -163,7 +163,7 @@ describe("run history view", () => {
     const pills = [...history.node.querySelectorAll(".csSessionState")].map(
       (node) => node.textContent,
     );
-    expect(pills).toEqual(["READY", "CANCELLED"]);
+    expect(pills).toEqual(["RUNNING", "CANCELLED"]);
     expect(history.node.textContent).not.toContain("not started yet");
     history.dispose();
   });

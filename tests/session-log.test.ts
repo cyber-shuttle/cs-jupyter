@@ -54,7 +54,7 @@ function detailState(
   return uiState({
     sessions: [value],
     logs: new Map([[value.id, logTail(value.id, lines)]]),
-    jupyterReady: new Set(value.state === "READY" ? [value.id] : []),
+    jupyterReady: new Set(value.state === "RUNNING" ? [value.id] : []),
   });
 }
 
@@ -72,7 +72,7 @@ function sessionDetail(value: ISession): {
 describe("session detail modal body", () => {
   it("shows complete metadata, literal accessible logs, and state actions", () => {
     const value: ISession = {
-      ...sessionInState("READY"),
+      ...sessionInState("RUNNING"),
       error: "bounded warning",
       resources: {
         cores: 4,
@@ -111,8 +111,7 @@ describe("session detail modal body", () => {
   it.each([
     ["CREATED", ["Start"]],
     ["SUBMITTED", ["Stop"]],
-    ["RUNNING", ["Stop"]],
-    ["READY", ["Stop", "Connect"]],
+    ["RUNNING", ["Stop", "Connect"]],
     ["CANCELLED", []],
     ["FAILED", []],
   ] as const)("gates %s actions", (state, expected) => {
@@ -126,16 +125,18 @@ describe("session detail modal body", () => {
   });
 
   it("hides Connect until Linkspan Jupyter state is ready", () => {
-    const ready = sessionInState("READY");
-    const fake = new PanelStateFake(
+    const ready = sessionInState("SUBMITTED");
+    const state = (jupyterReady: string[]) =>
       uiState({
         sessions: [ready],
         logs: new Map(),
-        jupyterReady: new Set<string>(),
-      }),
-    );
+        jupyterReady: new Set(jupyterReady),
+      });
+    const fake = new PanelStateFake(state([]));
     const detail = new SessionDetail(fake as never, ready.id);
     expect(detail.node.textContent).not.toContain("Connect");
+    fake.setState(state([ready.id]));
+    expect(detail.node.textContent).toContain("Connect");
     detail.dispose();
   });
 
@@ -155,8 +156,8 @@ describe("session detail modal body", () => {
     expect(scroller.scrollTop).toBe(40);
 
     scroller.scrollTop = 150;
-    fake.setState(detailState({ ...session, state: "READY" }, ["ready"]));
-    expect(detail.node.textContent).toContain("READY");
+    fake.setState(detailState({ ...session, state: "SUBMITTED" }, ["ready"]));
+    expect(detail.node.textContent).toContain("SUBMITTED");
     expect(detail.node.querySelector(".csSessionLogTitle")?.textContent).toBe(
       "Status",
     );
@@ -181,7 +182,7 @@ describe("session detail modal body", () => {
 
 describe("what belongs to a session and what belongs to its run", () => {
   it("shows no log once the session is no longer running", () => {
-    const running = sessionDetail(sessionInState("READY"));
+    const running = sessionDetail(sessionInState("RUNNING"));
     expect(
       running.detail.node.querySelector(".csSessionLogScroll"),
     ).not.toBeNull();

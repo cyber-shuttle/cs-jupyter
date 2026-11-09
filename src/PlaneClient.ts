@@ -1,7 +1,7 @@
 // The typed client for the CyberShuttle API. A session is one BATCH_JOB process
 // and its id is the process id; ended processes are runs. accessUnavailable
-// marks the 409 an access read answers before the job's link is up, which the
-// next poll retries and no caller surfaces.
+// marks the 404 or 502 an access read raises before the job's link is up, which
+// the next poll retries and no caller surfaces.
 import { PageConfig } from "@jupyterlab/coreutils";
 import { ServerConnection } from "@jupyterlab/services";
 import { Token } from "@lumino/coreutils";
@@ -29,7 +29,12 @@ import {
 
 export type ISessionLogTail = { sessionId: string; lines: ILogLine[] };
 
-export type ISessionAccess = Schemas["AccessResponse"];
+export type ISessionAccess = {
+  processId: string;
+  linked: boolean;
+  baseUrl: string;
+  token: string;
+};
 
 export interface ISessionList {
   sessions: ISession[];
@@ -39,17 +44,7 @@ export interface ISessionList {
 const by = (processId: string) => ({ params: { path: { processId } } });
 
 export const accessUnavailable = (error: unknown): boolean =>
-  error instanceof PlaneError && error.status === 409;
-
-// This tab's connection, kept across reloads: SSH logins it starts prompt only here.
-const CONNECTION_KEY = "cybershuttle.connection.v1";
-const connection = (): string => {
-  const id =
-    sessionStorage.getItem(CONNECTION_KEY) ??
-    crypto.getRandomValues(new Uint32Array(4)).join(".");
-  sessionStorage.setItem(CONNECTION_KEY, id);
-  return id;
-};
+  error instanceof PlaneError && [404, 502].includes(error.status);
 
 export function safePlaneFetch(
   planeApiUrl: string,
@@ -66,7 +61,6 @@ export function safePlaneFetch(
       init.headers ?? (input instanceof Request ? input.headers : undefined),
     );
     headers.set("Authorization", `Bearer ${await auth.acquireToken()}`);
-    headers.set("X-Connection-Id", connection());
     const response = await fetch(input, {
       ...init,
       headers,
@@ -90,6 +84,7 @@ export class PlaneClient {
   private _base: string;
   private _api: PlaneApi;
   private _auth: IPlaneAuth;
+  private _planeFetch: typeof globalThis.fetch;
   private _tokens = new Map<string, string>();
 
   constructor(
@@ -99,10 +94,8 @@ export class PlaneClient {
   ) {
     this._base = validPlaneApiUrl(base);
     this._auth = auth ?? new AuthClient(this._base);
-    this._api = planeApi(
-      this._base,
-      safePlaneFetch(this._base, this._auth, _fetch),
-    );
+    this._planeFetch = safePlaneFetch(this._base, this._auth, _fetch);
+    this._api = planeApi(this._base, this._planeFetch);
   }
 
   async signIn(): Promise<void> {
@@ -113,13 +106,8 @@ export class PlaneClient {
     await this._auth.acquireToken();
   }
 
-  get identity(): string | undefined {
-    return this._auth.identity;
-  }
-
   signOut(): void {
     this._auth.invalidateToken();
-    sessionStorage.removeItem(CONNECTION_KEY);
   }
 
   async listConfigs(): Promise<Schemas["SlurmClusterConfigResponse"][]> {
@@ -198,13 +186,20 @@ export class PlaneClient {
     }));
   }
 
-  async discoverSlurm(id: string, signal?: AbortSignal): Promise<ISlurmInfo> {
-    const { allocations = [], partitions = [] } = await unwrap(
+  async discoverSlurm(
+    {
+      slurmClusterConfigId: id,
+      slurmCluster,
+    }: Schemas["SlurmClusterConfigResponse"],
+    signal?: AbortSignal,
+  ): Promise<ISlurmInfo> {
+    const { allocations = [] } = await unwrap(
       this._api.POST(
         "/api/v1/slurm-cluster-configs/{slurmClusterConfigId}/discover-allocations",
         { params: { path: { slurmClusterConfigId: id } }, signal },
       ),
     );
+    const partitions = slurmCluster?.partitions ?? [];
     return {
       configId: id,
       accounts: allocations.flatMap((each) => each.account ?? []),
@@ -270,15 +265,11 @@ export class PlaneClient {
     );
   }
 
-  async getSessionUsage({
-    id,
-    controlPort,
-  }: Pick<ISession, "id" | "controlPort">): Promise<IUsageReport> {
+  async getSessionUsage({ id }: Pick<ISession, "id">): Promise<IUsageReport> {
     const response = await this._fetch(
-      new Request(
-        `${this._base}/processes/${id}/proxy/${controlPort}/api/v1/usage`,
-        { headers: { Authorization: `token ${this._tokens.get(id)}` } },
-      ),
+      new Request(`${this._base}/processes/${id}/linkspan/api/v1/usage`, {
+        headers: { Authorization: `token ${this._tokens.get(id)}` },
+      }),
       { cache: "no-store", credentials: "omit" },
     );
     if (!response.ok) throw await planeError(response);
@@ -297,16 +288,19 @@ export class PlaneClient {
   }
 
   async getSessionAccess(processId: string): Promise<ISessionAccess> {
-    const access = await unwrap(
-      this._api.GET("/api/v1/processes/{processId}/access", by(processId)),
+    const response = await this._planeFetch(
+      new Request(`${this._base}/processes/${processId}/jupyter-server`),
     );
-    if (
-      !access.app.uri.startsWith(`${this._base}/processes/${processId}/proxy/`)
-    ) {
-      throw new Error("The server named a proxy outside its own API.");
+    if (!response.ok) throw await planeError(response);
+    const access: ISessionAccess = await response.json();
+    if (!access.linked) {
+      throw new PlaneError("The session's job is not linked yet.", 502);
     }
-    this._tokens.set(processId, access.app.token);
-    return access;
+    this._tokens.set(processId, access.token);
+    return {
+      ...access,
+      baseUrl: `${this._base}/processes/${processId}/jupyter/`,
+    };
   }
 }
 
@@ -336,7 +330,7 @@ export function createSessionServerSettings(
     reload = () => window.location.reload(),
   }: { fetch?: typeof globalThis.fetch; reload?: () => void } = {},
 ): ServerConnection.ISettings {
-  const baseUrl = access.app.uri;
+  const baseUrl = access.baseUrl;
   const reloadingFetch: typeof globalThis.fetch = async (input, init) => {
     const response = await browserFetch(input, init);
     if (response.status === 401 || response.status === 403) {
@@ -363,7 +357,7 @@ export function createSessionServerSettings(
     appendToken: true,
     baseUrl,
     fetch: reloadingFetch,
-    token: access.app.token,
+    token: access.token,
     wsUrl: baseUrl.replace(/^http/, "ws"),
   });
 }
@@ -402,7 +396,6 @@ function session({
   const state = lastStatus?.status ?? "CREATED";
   return {
     id: processId,
-    controlPort: batchProcess!.controlPort,
     configId: batchProcess!.slurmClusterConfigId,
     deploymentId: batchProcess!.deploymentId ?? undefined,
     state,

@@ -55,7 +55,6 @@ describe("walltime countdown", () => {
     for (const [state, want] of [
       ["CREATED", false],
       ["RUNNING", true],
-      ["READY", true],
       ["SUBMITTED", false],
       ["CANCELLED", false],
       ["FAILED", false],

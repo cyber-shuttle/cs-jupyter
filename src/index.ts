@@ -54,7 +54,7 @@ import { RemoteWorkspaces } from "./workspaces";
 
 const IRemoteServerSettings = new Token<ServerConnection.ISettings>(
   "@cybershuttle/jupyter:IRemoteServerSettings",
-  "Server settings for the selected READY CyberShuttle session.",
+  "Server settings for the selected running CyberShuttle session.",
 );
 
 const planeClientPlugin: JupyterFrontEndPlugin<PlaneClient> = {
@@ -97,7 +97,7 @@ function failClosedServerSettings(): ServerConnection.ISettings {
       }
     }
     return jsonResponse(
-      { message: "Select a READY CyberShuttle session first." },
+      { message: "Select a running CyberShuttle session first." },
       { status: 503 },
     );
   };
@@ -115,7 +115,7 @@ const remoteServerSettingsPlugin: ServiceManagerPlugin<
 > = {
   id: "@cybershuttle/jupyter:remote-server-settings",
   description:
-    "Provide a READY session or the fail-closed bootstrap to compute managers.",
+    "Provide a running session or the fail-closed bootstrap to compute managers.",
   autoStart: true,
   provides: IRemoteServerSettings,
   requires: [IPlaneClient],
@@ -193,7 +193,7 @@ const terminalManagerPlugin: ServiceManagerPlugin<
   ServiceManagerType.IManager["terminals"]
 > = {
   id: "@cybershuttle/jupyter:terminal-manager",
-  description: "Use terminals only on a selected READY remote session.",
+  description: "Use terminals only on a selected running remote session.",
   autoStart: true,
   provides: ITerminalManager,
   requires: [IRemoteServerSettings],
@@ -205,7 +205,8 @@ const terminalManagerPlugin: ServiceManagerPlugin<
 
 const remoteTerminalUiPlugin: JupyterFrontEndPlugin<void> = {
   id: "@cybershuttle/jupyter:remote-terminal-ui",
-  description: "Activate JupyterLab terminals only for a READY remote session.",
+  description:
+    "Activate JupyterLab terminals only for a running remote session.",
   autoStart: true,
   requires: [IServiceManager],
   activate: async (app, services) => {

@@ -72,7 +72,9 @@ export class SshKeys extends RemoteListWidget {
       "add-credential-toggle",
       this._form && this._addForm(this._form),
       () => {
-        this._form = this._form ? undefined : { sshCredentialName: "" };
+        this._form = this._form
+          ? undefined
+          : { sshCredentialName: "", publicKey: "" };
         this._formError = "";
         this._sync();
       },
@@ -90,7 +92,11 @@ export class SshKeys extends RemoteListWidget {
     kind.onchange = () => {
       this._form = {
         sshCredentialName: draft.sshCredentialName,
-        ...(kind.value === "password" && { password: "" }),
+        publicKey: "",
+        ...(kind.value === "password" && {
+          password: "",
+          fullInteractive: true,
+        }),
       };
       this._sync();
     };
