@@ -1,5 +1,9 @@
 # CyberShuttle Jupyter
 
+> [!WARNING]
+> CyberShuttle Jupyter is deprecated. Use the **Notebooks** page of the CyberShuttle API's dashboard instead:
+> [Notebooks on a cluster](https://github.com/apache/airavata/blob/jupyter-ui-poc/docs/notebooks.md).
+
 [![CI](https://github.com/cyber-shuttle/cs-jupyter/actions/workflows/ci.yml/badge.svg)](https://github.com/cyber-shuttle/cs-jupyter/actions/workflows/ci.yml)
 [![License](https://img.shields.io/github/license/cyber-shuttle/cs-jupyter?color=blue)](LICENSE)
 
